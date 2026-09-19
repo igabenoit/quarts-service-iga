@@ -1,0 +1,274 @@
+import crypto from "node:crypto";
+import express from "express";
+import pg from "pg";
+
+const { Pool } = pg;
+const app = express();
+const port = Number(process.env.PORT || 3000);
+const production = process.env.NODE_ENV === "production";
+
+for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
+  if (!process.env[key]) throw new Error(`Variable requise absente: ${key}`);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: production ? { rejectUnauthorized: false } : false,
+  max: 5,
+});
+const attempts = new Map();
+const sessionSecret = process.env.SESSION_SECRET;
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedule_weeks (
+    week_start DATE PRIMARY KEY,
+    cashier_budget_minutes INTEGER NOT NULL DEFAULT 26580 CHECK (cashier_budget_minutes >= 0),
+    packer_budget_minutes INTEGER NOT NULL DEFAULT 11820 CHECK (packer_budget_minutes >= 0),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS schedule_shifts (
+    id BIGSERIAL PRIMARY KEY,
+    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
+    area TEXT NOT NULL CHECK (area IN ('front', 'packer')),
+    role TEXT NOT NULL CHECK (role IN ('cashier', 'supervisor', 'support', 'packer')),
+    day_index INTEGER NOT NULL CHECK (day_index BETWEEN 0 AND 6),
+    start_minute INTEGER NOT NULL CHECK (start_minute BETWEEN 0 AND 1439),
+    end_minute INTEGER NOT NULL CHECK (end_minute BETWEEN 1 AND 1440),
+    break_minutes INTEGER NOT NULL DEFAULT 0 CHECK (break_minutes BETWEEN 0 AND 240),
+    source_department TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (end_minute > start_minute),
+    CHECK (end_minute - start_minute > break_minutes)
+  );
+
+  CREATE INDEX IF NOT EXISTS schedule_shifts_week_idx
+  ON schedule_shifts (week_start, area, day_index, start_minute);
+`);
+
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "250kb" }));
+app.use((_request, response, next) => {
+  response.set({
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  });
+  if (production) response.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+});
+
+function parseCookies(header = "") {
+  return Object.fromEntries(header.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
+    const index = part.indexOf("=");
+    return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+  }));
+}
+function sign(value) { return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url"); }
+function issueSession() {
+  const payload = Buffer.from(JSON.stringify({ role: "manager", expiresAt: Date.now() + 12 * 60 * 60 * 1000 })).toString("base64url");
+  return `${payload}.${sign(payload)}`;
+}
+function readSession(request) {
+  const token = parseCookies(request.headers.cookie).schedule_session;
+  if (!token) return null;
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = sign(payload);
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return session.role === "manager" && session.expiresAt >= Date.now() ? session : null;
+  } catch { return null; }
+}
+function secureEqual(left, right) {
+  const a = crypto.createHash("sha256").update(String(left)).digest();
+  const b = crypto.createHash("sha256").update(String(right)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+function requireManager(request, response, next) {
+  if (!readSession(request)) return response.status(401).json({ error: "Accès gestionnaire requis." });
+  next();
+}
+function sameOrigin(request, response, next) {
+  const origin = request.get("origin");
+  if (origin && new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Requête refusée." });
+  next();
+}
+function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")); }
+function isoDate(value) { return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10); }
+function addDays(value, days) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function parseMinutes(value, name, min, max) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${name} invalide.`);
+  return number;
+}
+function normalizeShift(body) {
+  const role = String(body.role || "");
+  if (!["cashier", "supervisor", "support", "packer"].includes(role)) throw new Error("Fonction invalide.");
+  const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
+  const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
+  const breakMinutes = parseMinutes(body.breakMinutes ?? 0, "Pause", 0, 240);
+  if (endMinute <= startMinute || endMinute - startMinute <= breakMinutes) throw new Error("Le quart et la pause sont incompatibles.");
+  return {
+    role,
+    area: role === "packer" ? "packer" : "front",
+    startMinute,
+    endMinute,
+    breakMinutes,
+    sourceDepartment: String(body.sourceDepartment || "").trim().slice(0, 80),
+    notes: String(body.notes || "").trim().slice(0, 300),
+  };
+}
+async function ensureWeek(weekStart, client = pool) {
+  await client.query(`INSERT INTO schedule_weeks (week_start) VALUES ($1) ON CONFLICT DO NOTHING`, [weekStart]);
+}
+function mapWeek(row) {
+  return {
+    weekStart: isoDate(row.week_start),
+    cashierBudgetMinutes: Number(row.cashier_budget_minutes),
+    packerBudgetMinutes: Number(row.packer_budget_minutes),
+    notes: row.notes,
+  };
+}
+function mapShift(row) {
+  return {
+    id: Number(row.id), weekStart: isoDate(row.week_start), area: row.area, role: row.role,
+    dayIndex: Number(row.day_index), startMinute: Number(row.start_minute), endMinute: Number(row.end_minute),
+    breakMinutes: Number(row.break_minutes), paidMinutes: Number(row.end_minute) - Number(row.start_minute) - Number(row.break_minutes),
+    sourceDepartment: row.source_department, notes: row.notes,
+  };
+}
+
+app.get("/health", (_request, response) => response.json({ ok: true }));
+app.post("/api/login", sameOrigin, (request, response) => {
+  const ip = request.ip || "unknown";
+  const now = Date.now();
+  const entry = attempts.get(ip) || { count: 0, since: now };
+  if (now - entry.since > 15 * 60 * 1000) { entry.count = 0; entry.since = now; }
+  if (entry.count >= 10) return response.status(429).json({ error: "Trop d’essais. Attendez 15 minutes." });
+  if (!secureEqual(String(request.body?.code || "").trim(), process.env.MANAGER_CODE)) {
+    entry.count += 1; attempts.set(ip, entry);
+    return response.status(401).json({ error: "Code incorrect." });
+  }
+  attempts.delete(ip);
+  response.setHeader("Set-Cookie", `schedule_session=${encodeURIComponent(issueSession())}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${production ? "; Secure" : ""}`);
+  response.json({ role: "manager" });
+});
+app.post("/api/logout", sameOrigin, (_request, response) => {
+  response.setHeader("Set-Cookie", `schedule_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${production ? "; Secure" : ""}`);
+  response.json({ ok: true });
+});
+app.get("/api/session", (request, response) => response.json({ role: readSession(request)?.role || null }));
+
+app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
+  try {
+    const { weekStart } = request.params;
+    if (!validDate(weekStart)) return response.status(400).json({ error: "Date invalide." });
+    await ensureWeek(weekStart);
+    const [weekResult, shiftsResult] = await Promise.all([
+      pool.query("SELECT * FROM schedule_weeks WHERE week_start=$1", [weekStart]),
+      pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY area, day_index, start_minute, id", [weekStart]),
+    ]);
+    response.json({ week: mapWeek(weekResult.rows[0]), shifts: shiftsResult.rows.map(mapShift) });
+  } catch (error) {
+    console.error("GET week", error);
+    response.status(500).json({ error: "Impossible de charger la semaine." });
+  }
+});
+
+app.put("/api/weeks/:weekStart", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const { weekStart } = request.params;
+    if (!validDate(weekStart)) return response.status(400).json({ error: "Date invalide." });
+    const cashierBudgetMinutes = parseMinutes(request.body?.cashierBudgetMinutes, "Budget caisse", 0, 100000);
+    const packerBudgetMinutes = parseMinutes(request.body?.packerBudgetMinutes, "Budget emballeurs", 0, 100000);
+    const notes = String(request.body?.notes || "").trim().slice(0, 1000);
+    await ensureWeek(weekStart);
+    const result = await pool.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart]);
+    response.json({ week: mapWeek(result.rows[0]) });
+  } catch (error) {
+    response.status(400).json({ error: error.message || "Paramètres invalides." });
+  }
+});
+
+app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
+  try {
+    const { weekStart } = request.params;
+    if (!validDate(weekStart)) throw new Error("Date invalide.");
+    const shift = normalizeShift(request.body || {});
+    const days = [...new Set(Array.isArray(request.body?.days) ? request.body.days.map(Number) : [])];
+    if (!days.length || days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error("Choisissez au moins une journée.");
+    await client.query("BEGIN");
+    await ensureWeek(weekStart, client);
+    const created = [];
+    for (const dayIndex of days) {
+      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes]);
+      created.push(mapShift(result.rows[0]));
+    }
+    await client.query("COMMIT");
+    response.status(201).json({ shifts: created });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    response.status(400).json({ error: error.message || "Quart invalide." });
+  } finally { client.release(); }
+});
+
+app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Quart invalide.");
+    const shift = normalizeShift(request.body || {});
+    const dayIndex = parseMinutes(request.body?.dayIndex, "Journée", 0, 6);
+    const result = await pool.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id]);
+    if (!result.rowCount) return response.status(404).json({ error: "Quart introuvable." });
+    response.json({ shift: mapShift(result.rows[0]) });
+  } catch (error) { response.status(400).json({ error: error.message || "Quart invalide." }); }
+});
+
+app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) return response.status(400).json({ error: "Quart invalide." });
+  await pool.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
+  response.json({ ok: true });
+});
+
+app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
+  try {
+    const { weekStart } = request.params;
+    if (!validDate(weekStart)) throw new Error("Date invalide.");
+    const previous = addDays(weekStart, -7);
+    await client.query("BEGIN");
+    await ensureWeek(weekStart, client);
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [weekStart]);
+    if (count.rows[0].count > 0) throw new Error("La semaine contient déjà des quarts.");
+    const previousWeek = await client.query("SELECT * FROM schedule_weeks WHERE week_start=$1", [previous]);
+    if (!previousWeek.rowCount) throw new Error("La semaine précédente est vide.");
+    const previousCount = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [previous]);
+    if (previousCount.rows[0].count === 0) throw new Error("La semaine précédente ne contient aucun quart.");
+    await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes='', updated_at=NOW() WHERE week_start=$3`, [previousWeek.rows[0].cashier_budget_minutes, previousWeek.rows[0].packer_budget_minutes, weekStart]);
+    await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, sort_order) SELECT $1, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, sort_order FROM schedule_shifts WHERE week_start=$2`, [weekStart, previous]);
+    await client.query("COMMIT");
+    response.json({ copiedFrom: previous });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    response.status(400).json({ error: error.message || "Copie impossible." });
+  } finally { client.release(); }
+});
+
+app.use(express.static("public", { extensions: ["html"] }));
+app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
+app.listen(port, () => console.log(`Quarts Service IGA sur le port ${port}`));
