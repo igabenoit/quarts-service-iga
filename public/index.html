@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Quarts Service IGA</title>
+  <meta name="description" content="Planification des quarts nécessaires au service.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d71920'/%3E%3Cpath d='M17 17h8v30h-8zm11 9h8v21h-8zm11-5h8v26h-8z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="print.css" media="print">
+</head>
+<body>
+  <section id="loginView" class="login-shell">
+    <form id="loginForm" class="login-card">
+      <p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p>
+      <h1>Quarts Service</h1>
+      <p>Planification des quarts nécessaires à la caisse et pour les emballeurs.</p>
+      <label>Code gestionnaire<input id="loginCode" type="password" inputmode="numeric" autocomplete="current-password" required></label>
+      <button>Ouvrir l’application</button>
+      <p id="loginError" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="appView" hidden>
+    <header class="app-header">
+      <div><p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p><h1>Quarts Service</h1><p>Construire les quarts nécessaires avant l’attribution des employés</p></div>
+      <div class="header-actions"><button id="printBtn" class="secondary">Imprimer</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
+    </header>
+    <main>
+      <section class="week-toolbar card">
+        <button id="prevWeek" class="square" aria-label="Semaine précédente">‹</button>
+        <div><span>Semaine du</span><strong id="weekLabel"></strong></div>
+        <button id="nextWeek" class="square" aria-label="Semaine suivante">›</button>
+        <input id="weekPicker" type="date" aria-label="Choisir la semaine">
+        <button id="copyPrevious" class="secondary">Copier la semaine précédente</button>
+        <span id="saveStatus" class="save-status">Tout est enregistré</span>
+      </section>
+
+      <section class="summary-grid">
+        <article class="metric card"><span>Budget caisse et supervision</span><label><input id="frontBudget" type="number" min="0" step="0.25"> h</label></article>
+        <article class="metric card"><span>Quarts planifiés</span><strong id="frontPlanned">0 h</strong><small id="frontVariance"></small></article>
+        <article class="metric card"><span>Budget emballeurs</span><label><input id="packerBudget" type="number" min="0" step="0.25"> h</label></article>
+        <article class="metric card"><span>Quarts planifiés</span><strong id="packerPlanned">0 h</strong><small id="packerVariance"></small></article>
+      </section>
+
+      <section class="card add-card">
+        <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
+        <form id="shiftForm">
+          <input id="shiftId" type="hidden">
+          <label>Fonction<select id="role" required><option value="cashier">Caissière</option><option value="supervisor">Superviseur</option><option value="support">Aide d’un autre département</option><option value="packer">Emballeur</option></select></label>
+          <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
+          <label>Début<input id="startTime" type="time" value="08:00" required></label>
+          <label>Fin<input id="endTime" type="time" value="16:00" required></label>
+          <label>Pause<select id="breakMinutes"><option value="0">Aucune</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label>
+          <label id="departmentWrap" hidden>Département<input id="sourceDepartment" maxlength="80" placeholder="Ex. Épicerie"></label>
+          <label class="notes-field">Précision<input id="shiftNotes" maxlength="300" placeholder="Optionnel"></label>
+          <div class="form-actions"><button id="submitShift">Ajouter le quart</button><button id="cancelEdit" type="button" class="ghost" hidden>Annuler</button><button id="deleteShift" type="button" class="danger" hidden>Supprimer</button></div>
+        </form>
+      </section>
+
+      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 1</p><h2>Caissières et superviseurs</h2></div><div id="frontWarnings" class="warnings"></div></div><div id="frontBoard" class="week-board"></div></section>
+      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 2</p><h2>Emballeurs</h2></div></div><div id="packerBoard" class="week-board"></div></section>
+      <section class="card notes-card"><label for="weekNotes">Notes de la semaine</label><textarea id="weekNotes" rows="3" placeholder="Événement, changement d’heures, précision pour la planification…"></textarea></section>
+    </main>
+    <div id="toast" role="status"></div>
+    <section id="printSheet" aria-hidden="true"></section>
+  </div>
+  <script src="app.js" defer></script>
+</body>
+</html>
