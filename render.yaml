@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: quarts-service-iga
+    name: besoins-quarts-service-iga
     runtime: node
     plan: free
     buildCommand: npm ci
