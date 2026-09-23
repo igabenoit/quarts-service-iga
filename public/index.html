@@ -43,6 +43,31 @@
         <article class="metric card"><span>Quarts planifiés</span><strong id="packerPlanned">0 h</strong><small id="packerVariance"></small></article>
       </section>
 
+      <section class="card add-card" id="schedulePanel">
+        <div class="section-title"><div><p class="eyebrow">HORAIRE</p><h2>Attribuer les quarts</h2></div><p>Les affectations existantes sont conservées. Les quarts impossibles à couvrir restent visibles.</p></div>
+        <div class="form-actions"><button id="generateSchedule" type="button">Créer l’horaire</button><label class="secondary import-label">Importer la liste initiale <input id="employeeImport" type="file" accept=".json,application/json" hidden></label></div>
+        <p id="scheduleStatus"></p>
+        <div id="scheduleBoard" class="schedule-grid"></div>
+        <div id="employeeTotals" class="employee-totals"></div>
+      </section>
+
+      <section class="card add-card">
+        <div class="section-title"><div><p class="eyebrow">ÉQUIPE</p><h2>Employés et disponibilités</h2></div><p>Une plage par jour, au format 08:00-17:00. Laisser vide si indisponible.</p></div>
+        <div id="employeeList" class="employee-list"></div>
+        <form id="employeeForm">
+          <input id="employeeId" type="hidden">
+          <label>Nom<input id="employeeName" required maxlength="100"></label>
+          <label>Fonction<select id="employeeRole"><option value="cashier">Caissière</option><option value="supervisor">Superviseur</option><option value="packer">Emballeur</option></select></label>
+          <label>Ancienneté<input id="employeeSeniority" type="date"></label>
+          <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
+          <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
+          <fieldset><legend>Disponibilités</legend><div id="availabilityFields" class="availability-grid"></div></fieldset>
+          <label class="notes-field">Précision<input id="employeeNotes" maxlength="300"></label>
+          <label><input id="employeeActive" type="checkbox" checked> Employé actif</label>
+          <div class="form-actions"><button id="saveEmployee">Ajouter l’employé</button><button id="clearEmployee" type="button" class="ghost">Annuler</button></div>
+        </form>
+      </section>
+
       <section class="card add-card">
         <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
         <form id="shiftForm">

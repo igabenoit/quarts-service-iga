@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import express from "express";
 import pg from "pg";
+import { canAssign, generateAssignments } from "./scheduler.js";
 
 const { Pool } = pg;
 const app = express();
@@ -49,6 +50,26 @@ await pool.query(`
 
   CREATE INDEX IF NOT EXISTS schedule_shifts_week_idx
   ON schedule_shifts (week_start, area, day_index, start_minute);
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedule_employees (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    area TEXT NOT NULL CHECK (area IN ('front','packer')),
+    role TEXT NOT NULL CHECK (role IN ('cashier','supervisor','packer')),
+    seniority TEXT NOT NULL DEFAULT '9999-12-31',
+    target_minutes INTEGER NOT NULL DEFAULT 0,
+    max_minutes INTEGER NOT NULL DEFAULT 2400,
+    availability JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notes TEXT NOT NULL DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE
+  );
+  CREATE TABLE IF NOT EXISTS schedule_assignments (
+    shift_id BIGINT PRIMARY KEY REFERENCES schedule_shifts(id) ON DELETE CASCADE,
+    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 `);
 
 app.disable("x-powered-by");
@@ -150,6 +171,130 @@ function mapShift(row) {
     sourceDepartment: row.source_department, notes: row.notes,
   };
 }
+
+function normalizeEmployee(body) {
+  const name = String(body.name || "").trim().slice(0, 100);
+  const role = String(body.role || "");
+  if (!name || !["cashier", "supervisor", "packer"].includes(role)) throw new Error("Nom ou fonction invalide.");
+  const availability = {};
+  for (let day = 0; day < 7; day++) {
+    const windows = body.availability?.[day] || [];
+    if (!Array.isArray(windows) || windows.length > 3) throw new Error("Disponibilités invalides.");
+    availability[day] = windows.map(window => {
+      if (!Array.isArray(window) || window.length !== 2) throw new Error("Disponibilités invalides.");
+      const start = parseMinutes(window[0], "Début", 0, 1439);
+      const end = parseMinutes(window[1], "Fin", 1, 1440);
+      if (start >= end) throw new Error("Disponibilités invalides.");
+      return [start, end];
+    });
+  }
+  const targetMinutes = parseMinutes(body.targetMinutes ?? 0, "Heures souhaitées", 0, 3000);
+  const maxMinutes = parseMinutes(body.maxMinutes ?? 2400, "Maximum", 0, 3600);
+  if (targetMinutes > maxMinutes) throw new Error("La cible dépasse le maximum.");
+  const seniority = validDate(body.seniority) ? body.seniority : "9999-12-31";
+  return { name, role, area: role === "packer" ? "packer" : "front", seniority,
+    targetMinutes, maxMinutes, availability, notes: String(body.notes || "").slice(0, 300),
+    active: body.active !== false };
+}
+function mapEmployee(row) {
+  return { id: Number(row.id), name: row.name, role: row.role, area: row.area,
+    seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
+    availability: row.availability, notes: row.notes, active: row.active };
+}
+
+app.get("/api/employees", requireManager, async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT * FROM schedule_employees ORDER BY area, seniority, name");
+    response.json({ employees: result.rows.map(mapEmployee) });
+  } catch { response.status(500).json({ error: "Impossible de charger les employés." }); }
+});
+app.post("/api/employees/import", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
+  try {
+    const people = request.body?.employees;
+    if (!Array.isArray(people) || people.length < 1 || people.length > 250) throw new Error("Liste invalide.");
+    const normalized = people.map(normalizeEmployee);
+    if (new Set(normalized.map(e => e.name.toLocaleLowerCase("fr-CA"))).size !== normalized.length) throw new Error("Noms en double.");
+    await client.query("BEGIN");
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees");
+    if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
+    for (const e of normalized) await client.query(
+      `INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
+    await client.query("COMMIT");
+    response.status(201).json({ count: normalized.length });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    response.status(400).json({ error: error.message || "Import impossible." });
+  } finally { client.release(); }
+});
+app.post("/api/employees", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const e = normalizeEmployee(request.body || {});
+    const result = await pool.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
+    response.status(201).json({ employee: mapEmployee(result.rows[0]) });
+  } catch (error) { response.status(400).json({ error: error.message }); }
+});
+app.put("/api/employees/:id", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const e = normalizeEmployee(request.body || {});
+    const result = await pool.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,seniority=$4,target_minutes=$5,max_minutes=$6,
+      availability=$7,notes=$8,active=$9 WHERE id=$10 RETURNING *`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,request.params.id]);
+    if (!result.rowCount) return response.status(404).json({ error: "Employé introuvable." });
+    response.json({ employee: mapEmployee(result.rows[0]) });
+  } catch (error) { response.status(400).json({ error: error.message }); }
+});
+app.get("/api/weeks/:weekStart/assignments", requireManager, async (request, response) => {
+  try {
+    const result = await pool.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+      WHERE s.week_start=$1`, [request.params.weekStart]);
+    response.json({ assignments: result.rows.map(r => ({ shiftId:Number(r.shift_id), employeeId:Number(r.employee_id) })) });
+  } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
+});
+app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const id = Number(request.params.id), employeeId = Number(request.body?.employeeId);
+    const shiftResult = await pool.query("SELECT * FROM schedule_shifts WHERE id=$1", [id]);
+    if (!shiftResult.rowCount) return response.status(404).json({ error: "Quart introuvable." });
+    if (request.body?.employeeId === null) {
+      await pool.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
+      return response.json({ ok:true });
+    }
+    const people = await pool.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
+    if (!people.rowCount) throw new Error("Employé introuvable.");
+    const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0]);
+    const current = await pool.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+      WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
+    const all = await pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
+    if (!canAssign(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}))))
+      throw new Error("Disponibilité, fonction, maximum d’heures ou autre quart incompatible.");
+    await pool.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
+      ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
+    response.json({ ok:true });
+  } catch (error) { response.status(400).json({ error:error.message }); }
+});
+app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
+  try {
+    if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
+    await client.query("BEGIN");
+    const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
+    const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
+    const current = (await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+      WHERE s.week_start=$1`, [request.params.weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
+    const result = generateAssignments(shifts, employees, current);
+    for (const a of result.assignments) await client.query("INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)", [a.shiftId,a.employeeId]);
+    await client.query("COMMIT");
+    response.json({ ...result, preserved:current.length });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    response.status(400).json({ error:error.message || "Génération impossible." });
+  } finally { client.release(); }
+});
 
 app.get("/health", (_request, response) => response.json({ ok: true }));
 app.post("/api/login", sameOrigin, (request, response) => {
