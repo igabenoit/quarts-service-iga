@@ -6,7 +6,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js"
+    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js"
   },
   "dependencies": {
     "express": "^5.1.0",
