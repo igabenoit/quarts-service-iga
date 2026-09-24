@@ -79,10 +79,14 @@ $("#role").onchange=e=>{$("#departmentWrap").hidden=e.target.value!=="support";}
 $("#shiftForm").onsubmit=async event=>{event.preventDefault();try{const id=Number($("#shiftId").value)||null;const days=[...document.querySelectorAll("#dayChoices input:checked")].map(x=>Number(x.value));const body={role:$("#role").value,startMinute:minutes($("#startTime").value),endMinute:minutes($("#endTime").value),breakMinutes:Number($("#breakMinutes").value),sourceDepartment:$("#sourceDepartment").value,notes:$("#shiftNotes").value};if(id){body.dayIndex=days[0];const result=await api(`/api/shifts/${id}`,{method:"PUT",body:JSON.stringify(body)});state.shifts=state.shifts.map(s=>s.id===id?result.shift:s);}else{const result=await api(`/api/weeks/${state.weekStart}/shifts`,{method:"POST",body:JSON.stringify({...body,days})});state.shifts.push(...result.shifts);}resetForm(days[0]||0);render();toast(id?"Quart modifié":"Quart ajouté");}catch(error){showError(error);}};
 $("#cancelEdit").onclick=()=>resetForm();$("#deleteShift").onclick=async()=>{const id=Number($("#shiftId").value);if(!id||!confirm("Supprimer ce quart?"))return;try{await api(`/api/shifts/${id}`,{method:"DELETE"});state.shifts=state.shifts.filter(s=>s.id!==id);resetForm();render();toast("Quart supprimé");}catch(error){showError(error);}};
 for(const id of ["frontBudget","packerBudget","weekNotes"])$("#"+id).oninput=queueSave;
-$("#printBtn").onclick=()=>{renderPrint();$("#printPreview").close();window.print();};
+$("#printBtn").onclick=()=>{document.body.classList.remove("printing-planogram");renderPrint();$("#printPreview").close();window.print();};
 $("#previewBtn").onclick=()=>{renderPrint();$("#previewPages").innerHTML=$("#printSheet").innerHTML;$("#printPreview").showModal();};
 $("#previewClose").onclick=()=>$("#printPreview").close();
-$("#previewPrint").onclick=()=>{$("#printPreview").close();window.print();};
+$("#previewPrint").onclick=()=>{document.body.classList.remove("printing-planogram");$("#printPreview").close();window.print();};
+$("#planoBtn").onclick=()=>{$("#planoPrintSheet").innerHTML=window.createPlanogram(state);$("#planoPreviewPages").innerHTML=$("#planoPrintSheet").innerHTML;$("#planoPreview").showModal();};
+$("#planoClose").onclick=()=>$("#planoPreview").close();
+$("#planoPrint").onclick=()=>{$("#planoPreview").close();document.body.classList.add("printing-planogram");window.print();};
+window.addEventListener("afterprint",()=>document.body.classList.remove("printing-planogram"));
 
 renderDayChoices();
 $("#availabilityFields").innerHTML=shortDays.map((name,d)=>`<label>${name}<input id="availability${d}" placeholder="08:00-17:00"></label>`).join("");
