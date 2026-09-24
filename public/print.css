@@ -3,11 +3,14 @@
 body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
 .app-header, main, #toast, #printPreview { display: none !important; }
 #printSheet { display: block !important; }
-.print-page { min-height: 13.2in; break-after: page; display: flex; flex-direction: column; }
-.print-page:last-child { break-after: auto; }
+.print-page { min-height: 12.6in; display: flex; flex-direction: column; break-inside: avoid; }
+.print-page + .print-page { break-before: page; }
 .print-title { display: flex; justify-content: space-between; align-items: flex-end; gap: 15px; border-bottom: 2.5pt solid #d71920; padding-bottom: 12px; margin-bottom: 14px; }
 .print-title p { margin: 0 0 4px; color: #b51c24; font-size: 8pt; font-weight: 800; letter-spacing: .12em; }
 .print-title h1 { margin: 0; color: #202a33; font: 700 21pt/1.1 "Trebuchet MS", "Segoe UI", sans-serif; }
+.print-section + .print-section { margin-top: 22px; padding-top: 12px; border-top: 2px solid #d71920; }
+.print-section h2 { margin: 0 0 8px; color: #202a33; font-size: 12pt; }
+.print-section-summary { margin-top: 8px; color: #34414c; font-size: 8pt; text-align: right; }
 .print-period { text-align: right; font-size: 8.5pt; line-height: 1.3; }
 .print-period span { display: block; color: #66717b; font-size: 7pt; font-weight: 800; letter-spacing: .1em; }
 .print-period b { display: block; color: #202a33; font-size: 9pt; }
@@ -34,7 +37,7 @@ body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "He
 .print-unfilled .print-shift { color: #653400; }
 .print-summary { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding: 13px 2px 5px; border-top: 1px solid #cbd3d9; color: #34414c; font-size: 8.5pt; }
 .print-summary b { color: #8b4800; }
-.print-footer { margin-top: 7px; text-align: right; color: #6b7680; font-size: 7pt; }
+.print-footer { margin-top: auto; padding-top: 7px; text-align: right; color: #6b7680; font-size: 7pt; }
 
 /* Feuille de route quotidienne, une journée par page légale. */
 #planoPrintSheet { display: none; }
