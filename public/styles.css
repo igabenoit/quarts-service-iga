@@ -62,3 +62,8 @@
 @media(max-width:650px){#employeeForm{grid-template-columns:1fr}#employeeForm>.notes-field{grid-column:1}}
 .preview-pages .print-start,.preview-pages .print-end{display:block;white-space:nowrap}
 .preview-pages .print-leave{color:#c5121b;font-size:10px;line-height:1.15}
+.schedule-item-unfilled{background:#fff0c2;border:2px solid #b45f00;border-left:7px solid #b45f00}
+.schedule-item-unfilled span{color:#653400;font-weight:800}
+.schedule-item-unfilled select{border:2px solid #b45f00;background:#fffaf0;color:#653400;font-weight:800}
+.preview-pages .print-unfilled th,.preview-pages .print-unfilled td{background:#ffe5a3;border-color:#a35100}
+.preview-pages .print-unfilled .print-shift{color:#653400}
