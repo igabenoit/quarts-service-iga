@@ -65,6 +65,13 @@
 .schedule-item-unfilled{background:#fff0c2;border:2px solid #b45f00;border-left:7px solid #b45f00}
 .schedule-item-unfilled span{color:#653400;font-weight:800}
 .schedule-item-unfilled select{border:2px solid #b45f00;background:#fffaf0;color:#653400;font-weight:800}
+.shift-availability{margin:-4px 0 10px;border:1px solid #e2ba68;border-radius:8px;background:#fffaf0;padding:7px;font-size:12px}
+.shift-availability summary{cursor:pointer;color:#653400;font-weight:800}
+.shift-availability ul{list-style:none;padding:0;margin:8px 0;max-height:260px;overflow:auto}
+.shift-availability li{padding:6px 0;border-top:1px solid #eadcc0}
+.shift-availability li b,.shift-availability li span,.shift-availability li small{display:block}
+.shift-availability li small{color:#895b20}
+.shift-availability button{width:100%;padding:7px;font-size:12px}
 .preview-pages .print-unfilled th,.preview-pages .print-unfilled td{background:#ffe5a3;border-color:#a35100}
 .preview-pages .print-unfilled .print-shift{color:#653400}
 #employeeForm>.employee-option{grid-column:span 2;display:flex;align-items:center;gap:8px;align-self:center}
