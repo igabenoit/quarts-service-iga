@@ -78,6 +78,22 @@ await pool.query(`
   ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
   ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
     CHECK (role IN ('cashier','supervisor','packer','orders'));
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS display_rank INTEGER;
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS assignment_rank INTEGER;
+`);
+await pool.query(`
+  WITH ranks AS (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY role ORDER BY seniority, id)
+      + COALESCE((SELECT MAX(display_rank) FROM schedule_employees existing WHERE existing.role = missing.role), 0) AS position
+    FROM schedule_employees missing WHERE display_rank IS NULL
+  )
+  UPDATE schedule_employees e SET display_rank = ranks.position FROM ranks WHERE e.id = ranks.id;
+  WITH ranks AS (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY role ORDER BY seniority, id)
+      + COALESCE((SELECT MAX(assignment_rank) FROM schedule_employees existing WHERE existing.role = missing.role), 0) AS position
+    FROM schedule_employees missing WHERE assignment_rank IS NULL
+  )
+  UPDATE schedule_employees e SET assignment_rank = ranks.position FROM ranks WHERE e.id = ranks.id;
 `);
 
 app.disable("x-powered-by");
@@ -204,15 +220,29 @@ function normalizeEmployee(body) {
     targetMinutes, maxMinutes, availability, notes: String(body.notes || "").slice(0, 300),
     active: body.active !== false };
 }
+function desiredRank(value, fallback) {
+  return value === undefined || value === null || value === ""
+    ? fallback : parseMinutes(value, "Rang", 1, 500);
+}
+async function reorderEmployees(client, role, column, movedId, requestedRank) {
+  const result = await client.query(`SELECT id FROM schedule_employees WHERE role=$1
+    ORDER BY ${column}, seniority, id FOR UPDATE`, [role]);
+  const ids = result.rows.map(row => Number(row.id)).filter(id => id !== movedId);
+  if (movedId !== null) ids.splice(Math.min(requestedRank - 1, ids.length), 0, movedId);
+  for (let i = 0; i < ids.length; i++) {
+    await client.query(`UPDATE schedule_employees SET ${column}=$1 WHERE id=$2`, [i + 1, ids[i]]);
+  }
+}
 function mapEmployee(row) {
   return { id: Number(row.id), name: row.name, role: row.role, area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
-    availability: row.availability, notes: row.notes, active: row.active };
+    availability: row.availability, notes: row.notes, active: row.active,
+    displayRank: row.display_rank, assignmentRank: row.assignment_rank };
 }
 
 app.get("/api/employees", requireManager, async (_request, response) => {
   try {
-    const result = await pool.query("SELECT * FROM schedule_employees ORDER BY area, seniority, name");
+    const result = await pool.query("SELECT * FROM schedule_employees ORDER BY role, display_rank, seniority, name");
     response.json({ employees: result.rows.map(mapEmployee) });
   } catch { response.status(500).json({ error: "Impossible de charger les employés." }); }
 });
@@ -230,6 +260,13 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
       `INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
+    for (const role of ["supervisor","cashier","packer","orders"]) {
+      await client.query(`WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
+        FROM schedule_employees WHERE role=$1
+      ) UPDATE schedule_employees e SET display_rank=ranked.position, assignment_rank=ranked.position
+        FROM ranked WHERE e.id=ranked.id`, [role]);
+    }
     await client.query("COMMIT");
     response.status(201).json({ count: normalized.length });
   } catch (error) {
@@ -238,23 +275,52 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
   } finally { client.release(); }
 });
 app.post("/api/employees", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
   try {
     const e = normalizeEmployee(request.body || {});
-    const result = await pool.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
+    await client.query("BEGIN");
+    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
-    response.status(201).json({ employee: mapEmployee(result.rows[0]) });
-  } catch (error) { response.status(400).json({ error: error.message }); }
+    const id = Number(result.rows[0].id);
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
+    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
+    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count));
+    const saved = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    response.status(201).json({ employee: mapEmployee(saved.rows[0]) });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    response.status(400).json({ error: error.message });
+  } finally { client.release(); }
 });
 app.put("/api/employees/:id", requireManager, sameOrigin, async (request, response) => {
+  const client = await pool.connect();
   try {
     const e = normalizeEmployee(request.body || {});
-    const result = await pool.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,seniority=$4,target_minutes=$5,max_minutes=$6,
+    await client.query("BEGIN");
+    const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
+    if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
+    await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,seniority=$4,target_minutes=$5,max_minutes=$6,
       availability=$7,notes=$8,active=$9 WHERE id=$10 RETURNING *`,
       [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,request.params.id]);
-    if (!result.rowCount) return response.status(404).json({ error: "Employé introuvable." });
-    response.json({ employee: mapEmployee(result.rows[0]) });
-  } catch (error) { response.status(400).json({ error: error.message }); }
+    const id = Number(request.params.id), old = before.rows[0];
+    if (old.role !== e.role) {
+      await reorderEmployees(client,old.role,"display_rank",null,1);
+      await reorderEmployees(client,old.role,"assignment_rank",null,1);
+    }
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
+    const fallbackDisplay = old.role===e.role ? old.display_rank : count.rows[0].count;
+    const fallbackAssignment = old.role===e.role ? old.assignment_rank : count.rows[0].count;
+    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,fallbackDisplay));
+    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment));
+    const saved = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    response.json({ employee: mapEmployee(saved.rows[0]) });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(()=>{});
+    response.status(400).json({ error: error.message });
+  } finally { client.release(); }
 });
 app.get("/api/weeks/:weekStart/assignments", requireManager, async (request, response) => {
   try {

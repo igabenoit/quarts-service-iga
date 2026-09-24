@@ -59,6 +59,8 @@
           <label>Nom<input id="employeeName" required maxlength="100"></label>
           <label>Fonction<select id="employeeRole"><option value="supervisor">Superviseur</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option></select></label>
           <label>Ancienneté<input id="employeeSeniority" type="date"></label>
+          <label>Rang d’affichage (1 en premier)<input id="employeeDisplayRank" type="number" min="1" max="500" step="1" placeholder="À la suite"></label>
+          <label>Priorité des quarts (1 en premier)<input id="employeeAssignmentRank" type="number" min="1" max="500" step="1" placeholder="À la suite"></label>
           <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
           <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
           <fieldset><legend>Disponibilités</legend><div id="availabilityFields" class="availability-grid"></div></fieldset>
