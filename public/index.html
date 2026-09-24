@@ -64,6 +64,7 @@
           <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
           <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
           <fieldset><legend>Disponibilités</legend><div id="availabilityFields" class="availability-grid"></div></fieldset>
+          <fieldset class="requested-leave"><legend>Congés demandés pour la semaine affichée</legend><p>Coche les journées à bloquer avant de générer l’horaire. Une affectation déjà faite pour ce jour sera retirée.</p><div id="timeOffFields" class="time-off-grid"></div></fieldset>
           <label class="notes-field">Précision<input id="employeeNotes" maxlength="300"></label>
           <label><input id="employeeActive" type="checkbox" checked> Employé actif</label>
           <div class="form-actions"><button id="saveEmployee">Ajouter l’employé</button><button id="clearEmployee" type="button" class="ghost">Annuler</button></div>

@@ -46,3 +46,9 @@
 
 .preview-pages .print-table th:first-child{width:24%;text-align:left}.preview-pages .print-table th:last-child{width:9%}.preview-pages .print-name{text-align:left;overflow-wrap:anywhere}.preview-pages .print-hours{font-weight:900;white-space:nowrap}.preview-pages .print-unfilled th,.preview-pages .print-unfilled td{background:#fff3cd}.preview-pages .print-shift{font-weight:800}.preview-pages .print-shift+.print-shift{margin-top:4px}
 .preview-pages .print-seniority{display:block;margin-top:2px;font-size:9px;font-weight:400;color:#4e5660}
+.time-off-grid{display:flex;gap:14px;flex-wrap:wrap}
+.time-off-grid label{display:flex;align-items:center;gap:5px}
+.requested-leave{grid-column:1/-1;border:1px solid #e7c9c9;border-radius:10px;padding:12px;background:#fffafa}
+.requested-leave p{margin:0 0 10px;color:#667085;font-size:13px}
+.preview-pages .print-start,.preview-pages .print-end{display:block;white-space:nowrap}
+.preview-pages .print-leave{color:#c5121b;font-size:10px;line-height:1.15}
