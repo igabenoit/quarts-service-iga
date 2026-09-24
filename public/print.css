@@ -28,6 +28,8 @@ body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "He
 .print-start, .print-end { display: block; white-space: nowrap; }
 .print-shift small { display: block; margin-top: 3px; color: #586571; font-size: 7pt; font-weight: 400; }
 .print-leave { display: block; color: #c5121b; font-size: 7.5pt; font-weight: 800; line-height: 1.15; }
+.print-table td.print-unavailable { background: #d9dde2; }
+.print-unavailable-label { color: #4f5963; font-size: 7pt; }
 .print-unfilled th, .print-unfilled td, .print-table tbody tr.print-unfilled { background: #ffe5a3; border-color: #d9a74a; }
 .print-unfilled .print-shift { color: #653400; }
 .print-summary { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding: 13px 2px 5px; border-top: 1px solid #cbd3d9; color: #34414c; font-size: 8.5pt; }
