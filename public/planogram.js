@@ -13,7 +13,8 @@
     const minutes = shift.endMinute - shift.startMinute;
     const pauses = minutes >= 360 ? 2 : minutes >= 180 ? 1 : 0;
     const meal = minutes >= 480;
-    return `<tr${employee ? "" : ' class="plano-unfilled"'}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name) : "&nbsp;"}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
+    const rowClass = employee ? (employee.role === "supervisor" || shift.role === "supervisor" ? ' class="plano-supervisor"' : "") : ' class="plano-unfilled"';
+    return `<tr${rowClass}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name) : "&nbsp;"}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
   };
 
   window.createPlanogram = ({ weekStart, shifts, assignments, employees }) => {
