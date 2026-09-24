@@ -82,6 +82,9 @@ await pool.query(`
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS assignment_rank INTEGER;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS is_minor BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS allow_extra_hours BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+  UPDATE schedule_employees SET roles=jsonb_build_array(role)
+    WHERE jsonb_typeof(roles) <> 'array' OR NOT roles ? role;
 `);
 await pool.query(`
   WITH ranks AS (
@@ -217,6 +220,10 @@ function normalizeEmployee(body) {
   const name = String(body.name || "").trim().slice(0, 100);
   const role = String(body.role || "");
   if (!name || !["cashier", "supervisor", "packer", "orders"].includes(role)) throw new Error("Nom ou fonction invalide.");
+  const allowedRoles = ["cashier", "supervisor", "packer", "orders"];
+  if (body.roles !== undefined && !Array.isArray(body.roles)) throw new Error("Fonctions invalides.");
+  if (body.roles?.some(value => !allowedRoles.includes(value))) throw new Error("Fonctions invalides.");
+  const roles = [...new Set([role, ...(body.roles || [])])];
   const availability = {};
   for (let day = 0; day < 7; day++) {
     const windows = body.availability?.[day] || [];
@@ -235,7 +242,7 @@ function normalizeEmployee(body) {
   const isMinor = body.isMinor === true;
   if (isMinor && targetMinutes > 1020) throw new Error("Un employé de 17 ans ou moins ne peut pas demander plus de 17 h par semaine.");
   const seniority = validDate(body.seniority) ? body.seniority : "9999-12-31";
-  return { name, role, area: role === "packer" ? "packer" : "front", seniority,
+  return { name, role, roles, area: role === "packer" ? "packer" : "front", seniority,
     targetMinutes, maxMinutes, availability, notes: String(body.notes || "").slice(0, 300),
     active: body.active !== false, isMinor, allowExtraHours: body.allowExtraHours === true };
 }
@@ -253,7 +260,8 @@ async function reorderEmployees(client, role, column, movedId, requestedRank) {
   }
 }
 function mapEmployee(row) {
-  return { id: Number(row.id), name: row.name, role: row.role, area: row.area,
+  return { id: Number(row.id), name: row.name, role: row.role,
+    roles: [...new Set([row.role, ...(Array.isArray(row.roles) ? row.roles : [])])], area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
     availability: row.availability, notes: row.notes, active: row.active,
     displayRank: row.display_rank, assignmentRank: row.assignment_rank,
@@ -277,9 +285,9 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees");
     if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
     for (const e of normalized) await client.query(
-      `INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
+      `INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
     for (const role of ["supervisor","cashier","packer","orders"]) {
       await client.query(`WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
@@ -299,9 +307,9 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
   try {
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
-    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
+    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
     const id = Number(result.rows[0].id);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
@@ -321,9 +329,9 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     await client.query("BEGIN");
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
-    await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,seniority=$4,target_minutes=$5,max_minutes=$6,
-      availability=$7,notes=$8,active=$9,is_minor=$10,allow_extra_hours=$11 WHERE id=$12 RETURNING *`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
+    await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,roles=$4,seniority=$5,target_minutes=$6,max_minutes=$7,
+      availability=$8,notes=$9,active=$10,is_minor=$11,allow_extra_hours=$12 WHERE id=$13 RETURNING *`,
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
     const id = Number(request.params.id), old = before.rows[0];
     if (old.role !== e.role) {
       await reorderEmployees(client,old.role,"display_rank",null,1);
