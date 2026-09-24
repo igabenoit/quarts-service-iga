@@ -91,6 +91,8 @@
 .preview-pages .print-shift+.print-shift{margin-top:8px;padding-top:7px;border-top:1px solid #dce2e7}
 .preview-pages .print-shift small{display:block;margin-top:3px;color:#586571;font-size:9px;font-weight:400}
 .preview-pages .print-leave{display:block;color:#c5121b;font-size:10px;font-weight:800;line-height:1.15}
+.preview-pages .print-table td.print-unavailable{background:#d9dde2}
+.preview-pages .print-unavailable-label{color:#4f5963;font-size:10px}
 .preview-pages .print-unfilled th,.preview-pages .print-unfilled td,.preview-pages .print-table tbody tr.print-unfilled{background:#ffe5a3;border-color:#d9a74a}
 .preview-pages .print-unfilled .print-shift{color:#653400}
 .preview-pages .print-summary{margin-top:auto;padding:13px 2px 5px;border:0;border-top:1px solid #cbd3d9;color:#34414c;font-size:11px}
