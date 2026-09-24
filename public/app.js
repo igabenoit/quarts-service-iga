@@ -62,13 +62,33 @@ function availableForShift(employee,shift){
   if(!employee.active||employee.role!==shift.role||state.timeOff.some(x=>x.employeeId===employee.id&&x.dayIndex===shift.dayIndex))return false;
   return (employee.availability?.[shift.dayIndex]||[]).some(([start,end])=>start<=shift.startMinute&&end>=shift.endMinute);
 }
+function shiftAvailabilityPanel(shift){
+  const people=state.employees.filter(e=>e.role===shift.role&&e.active).sort((a,b)=>(a.displayRank??9999)-(b.displayRank??9999));
+  const rows=people.map(e=>{
+    const leave=state.timeOff.some(x=>x.employeeId===e.id&&x.dayIndex===shift.dayIndex);
+    const assigned=state.assignments.filter(a=>a.employeeId===e.id).map(a=>state.shifts.find(s=>s.id===a.shiftId)).filter(Boolean);
+    const dayJob=assigned.find(s=>s.dayIndex===shift.dayIndex);
+    const windows=e.availability?.[shift.dayIndex]||[];
+    const constraints=[];
+    if(leave)constraints.push("Congé demandé");
+    if(dayJob)constraints.push(`Déjà assigné ${timeText(dayJob.startMinute)}–${timeText(dayJob.endMinute)}`);
+    if(!state.dayExceptions.includes(e.id)&&assigned.length>=5&&!dayJob)constraints.push("5 jours atteints");
+    const remaining=e.maxMinutes-assigned.reduce((sum,s)=>sum+s.paidMinutes,0);
+    if(remaining<shift.paidMinutes)constraints.push(`Maximum hebdomadaire : ${durationText(Math.max(0,remaining))} restantes`);
+    if(e.isMinor&&(assigned.reduce((sum,s)=>sum+s.paidMinutes,0)+shift.paidMinutes>1020||shift.dayIndex<5&&assigned.filter(s=>s.dayIndex<5).length>=2))constraints.push("Limite de 17 ans et moins");
+    const covers=windows.some(([start,end])=>start<=shift.startMinute&&end>=shift.endMinute);
+    return `<li><b>${escapeHtml(e.name)}</b><span>${leave?"Congé demandé":windows.length?escapeHtml(windowText(windows)):"Indisponible ce jour"}</span>${constraints.length?`<small>${escapeHtml(constraints.join(" · "))}</small>`:!covers&&windows.length?"<small>La plage ne couvre pas le quart actuel</small>":""}</li>`;
+  }).join("");
+  return `<details class="shift-availability"><summary>Voir les disponibilités ${shortDays[shift.dayIndex]}</summary><ul>${rows||"<li>Aucun employé actif dans cette fonction</li>"}</ul><button type="button" class="secondary edit-unfilled-shift" data-id="${shift.id}">Modifier ce quart</button></details>`;
+}
 function renderSchedule(){
   if(!state.week)return;
   const missing=state.shifts.filter(s=>!assignedName(s.id));
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
-  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day"><h4>${name}</h4>${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>e.role===s.role&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?"":" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
+  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day"><h4>${name}</h4>${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>e.role===s.role&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?"":" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
   $("#employeeTotals").innerHTML="<h3>Heures par employé</h3>"+scheduleGroups.map(group=>`<div class="total-group"><strong>${group.title}</strong>${state.employees.filter(e=>group.roles.includes(e.role)&&state.assignments.some(a=>a.employeeId===e.id)).map(e=>{const paid=state.assignments.filter(a=>a.employeeId===e.id).reduce((sum,a)=>sum+(state.shifts.find(s=>s.id===a.shiftId)?.paidMinutes||0),0);return `<span>${escapeHtml(e.name)} : ${durationText(paid)} / ${durationText(e.targetMinutes)} souhaitées</span>`;}).join("")||"<span>Aucun quart attribué</span>"}</div>`).join("");
   document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=async()=>{try{await api(`/api/shifts/${select.dataset.shift}/assignment`,{method:"PUT",body:JSON.stringify({employeeId:select.value?Number(select.value):null})});state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;render();toast("Horaire enregistré");}catch(error){showError(error);renderSchedule();}});
+  document.querySelectorAll(".edit-unfilled-shift").forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));
 }
 async function saveWeek(){clearTimeout(state.saving);$("#saveStatus").textContent="Enregistrement…";const result=await api(`/api/weeks/${state.weekStart}`,{method:"PUT",body:JSON.stringify({cashierBudgetMinutes:Math.round(Number($("#frontBudget").value||0)*60),packerBudgetMinutes:Math.round(Number($("#packerBudget").value||0)*60),notes:$("#weekNotes").value})});state.week=result.week;renderSummary();renderPrint();$("#saveStatus").textContent="Tout est enregistré";}
 function queueSave(){clearTimeout(state.saving);state.saving=setTimeout(()=>saveWeek().catch(showError),600);}
