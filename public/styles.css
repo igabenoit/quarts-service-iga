@@ -50,5 +50,15 @@
 .time-off-grid label{display:flex;align-items:center;gap:5px}
 .requested-leave{grid-column:1/-1;border:1px solid #e7c9c9;border-radius:10px;padding:12px;background:#fffafa}
 .requested-leave p{margin:0 0 10px;color:#667085;font-size:13px}
+#employeeForm{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;align-items:end}
+#employeeForm>label{display:grid;gap:6px;min-width:0;font-size:13px}
+#employeeForm>label input,#employeeForm>label select{width:100%}
+#employeeForm>fieldset,#employeeForm>.rank-help{grid-column:1/-1}
+#employeeForm>.notes-field{grid-column:span 4}
+#employeeForm>label:has(#employeeActive){display:flex;align-items:center;gap:8px}
+#employeeForm>label:has(#employeeActive) input{width:auto}
+#employeeForm .rank-help{margin:0;color:#667085;font-size:13px}
+@media(max-width:1050px){#employeeForm{grid-template-columns:repeat(2,minmax(0,1fr))}#employeeForm>.notes-field{grid-column:1/-1}}
+@media(max-width:650px){#employeeForm{grid-template-columns:1fr}#employeeForm>.notes-field{grid-column:1}}
 .preview-pages .print-start,.preview-pages .print-end{display:block;white-space:nowrap}
 .preview-pages .print-leave{color:#c5121b;font-size:10px;line-height:1.15}
