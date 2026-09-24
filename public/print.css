@@ -30,6 +30,12 @@ body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "He
 .print-shift + .print-shift { margin-top: 8px; padding-top: 7px; border-top: 1px solid #dce2e7; }
 .print-start, .print-end { display: block; white-space: nowrap; }
 .print-shift small { display: block; margin-top: 3px; color: #586571; font-size: 7pt; font-weight: 400; }
+.print-shift[class*="print-cross-"] { padding: 4px 2px; border-radius: 4px; }
+.print-shift.print-cross-cashier { background: #fce1ef; color: #8b1850; }
+.print-shift.print-cross-packer { background: #dcefff; color: #145783; }
+.print-shift.print-cross-orders { background: #ebe3ff; color: #573e83; }
+.print-shift.print-cross-supervisor { background: #ffe5df; color: #8c3226; }
+.print-shift .print-role-label { margin: 0 0 2px; color: inherit; font-size: 6.5pt; font-weight: 800; }
 .print-leave { display: block; color: #c5121b; font-size: 7.5pt; font-weight: 800; line-height: 1.15; }
 .print-table td.print-unavailable { background: #d9dde2; }
 .print-unavailable-label { color: #4f5963; font-size: 7pt; }
