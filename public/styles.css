@@ -70,3 +70,29 @@
 #employeeForm>.employee-option{grid-column:span 2;display:flex;align-items:center;gap:8px;align-self:center}
 #employeeForm>.employee-option input{width:auto}
 @media(max-width:1050px){#employeeForm>.employee-option{grid-column:1/-1}}
+
+/* Aperçu fidèle à la feuille légale, avec une typographie plus lisible. */
+.preview-pages .print-page{width:min(8.5in,calc(96vw - 50px));min-height:14in;padding:.4in;color:#24303b;font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif}
+.preview-pages .print-title{gap:15px;border-bottom:3px solid #d71920;padding-bottom:12px;margin-bottom:14px}
+.preview-pages .print-title p{margin:0 0 4px;color:#b51c24;font-size:11px;font-weight:800;letter-spacing:.12em}
+.preview-pages .print-title h1{margin:0;color:#202a33;font:700 28px/1.1 "Trebuchet MS","Segoe UI",sans-serif}
+.preview-pages .print-period{text-align:right;font-size:12px;line-height:1.3}
+.preview-pages .print-period span{display:block;color:#66717b;font-size:10px;font-weight:800;letter-spacing:.1em}
+.preview-pages .print-period b{display:block;color:#202a33;font-size:12px}
+.preview-pages .print-period small{display:block;margin-top:3px;color:#66717b;font-size:10px}
+.preview-pages .print-table{font-size:11.5px;line-height:1.28}
+.preview-pages .print-table th,.preview-pages .print-table td{border:1px solid #ccd4dc;padding:9px 6px;text-align:center;vertical-align:middle}
+.preview-pages .print-table thead th{background:#273440;border-color:#273440;color:#fff;font-size:11px;padding:12px 6px}
+.preview-pages .print-table tbody tr:nth-child(even){background:#f5f7f9}
+.preview-pages .print-name{text-align:left!important;font-weight:700}
+.preview-pages .print-seniority{display:block;margin-top:4px;color:#5c6874;font-size:9px;font-weight:400}
+.preview-pages .print-hours{background:#eef2f5;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
+.preview-pages .print-shift{color:#202a33;font-size:12px;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.18}
+.preview-pages .print-shift+.print-shift{margin-top:8px;padding-top:7px;border-top:1px solid #dce2e7}
+.preview-pages .print-shift small{display:block;margin-top:3px;color:#586571;font-size:9px;font-weight:400}
+.preview-pages .print-leave{display:block;color:#c5121b;font-size:10px;font-weight:800;line-height:1.15}
+.preview-pages .print-unfilled th,.preview-pages .print-unfilled td,.preview-pages .print-table tbody tr.print-unfilled{background:#ffe5a3;border-color:#d9a74a}
+.preview-pages .print-unfilled .print-shift{color:#653400}
+.preview-pages .print-summary{margin-top:auto;padding:13px 2px 5px;border:0;border-top:1px solid #cbd3d9;color:#34414c;font-size:11px}
+.preview-pages .print-summary b{color:#8b4800}
+.preview-pages .print-footer{margin-top:7px;color:#6b7680;font-size:9px}
