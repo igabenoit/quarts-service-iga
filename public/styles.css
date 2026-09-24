@@ -108,14 +108,15 @@
 .plano-preview-pages .plano-title div:last-child { text-align: right; font-size: 12px; }
 .plano-preview-pages .plano-title small { display: block; color: #66717b; font-size: 10px; margin-top: 4px; }
 .plano-preview-pages .plano-warning { margin: 0 0 10px; padding: 7px 10px; background: #ffe5a3; color: #653400; font-weight: 800; font-size: 11px; }
-.plano-preview-pages .plano-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+.plano-preview-pages .plano-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13.33px; }
 .plano-preview-pages .plano-table th,.plano-preview-pages .plano-table td { border: 1px solid #aebbc5; text-align: center; vertical-align: middle; padding: 6px 3px; }
-.plano-preview-pages .plano-table thead th { background: #273440; color: #fff; border-color: #273440; font-size: 10px; }
+.plano-preview-pages .plano-table thead th { background: #273440; color: #fff; border-color: #273440; font-size: 12px; }
 .plano-preview-pages .plano-table thead tr:first-child th { padding: 11px 3px; }
 .plano-preview-pages .plano-table thead th:first-child { width: 27%; text-align: left; padding-left: 9px; }
 .plano-preview-pages .plano-table thead th:nth-child(2),.plano-preview-pages .plano-table thead th:nth-child(3) { width: 9%; }
-.plano-preview-pages .plano-table tbody tr { height: 43px; }
-.plano-preview-pages .plano-table .plano-group { height: 30px; }
+.plano-preview-pages .plano-table tbody tr { height: var(--plano-row-height, 48px); }
+.plano-preview-pages .plano-table .plano-group { height: 34px; }
+.plano-preview-pages .plano-unfilled .plano-name { background: #fff1cf; }
 .plano-preview-pages .plano-group th { background: #e8edf2; text-align: left; padding-left: 9px; color: #283440; letter-spacing: .05em; }
 .plano-preview-pages .plano-name { text-align: left !important; padding-left: 9px !important; overflow-wrap: anywhere; font-weight: 700; }
 .plano-preview-pages .plano-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
