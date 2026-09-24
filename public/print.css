@@ -2,3 +2,5 @@
 .print-seniority{display:block;margin-top:2px;font-size:6.5pt;font-weight:400;color:#4e5660}
 .print-start,.print-end{display:block;white-space:nowrap}
 .print-leave{display:block;color:#c5121b;font-size:7pt;line-height:1.1}
+
+.print-unfilled th,.print-unfilled td{background:#ffe5a3;border-color:#a35100}.print-unfilled .print-shift{color:#653400}
