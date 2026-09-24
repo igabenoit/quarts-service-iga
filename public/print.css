@@ -47,16 +47,17 @@ body.printing-planogram #planoPrintSheet { display: block !important; }
 .plano-title div:last-child { text-align: right; font-size: 9pt; }
 .plano-title small { display: block; color: #66717b; font-size: 7.5pt; margin-top: 4px; }
 .plano-warning { margin: 0 0 10px; padding: 7px 10px; background: #ffe5a3; color: #653400; font-weight: 800; font-size: 8pt; }
-.plano-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
+.plano-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10pt; }
 .plano-table th, .plano-table td { border: 1px solid #aebbc5; text-align: center; vertical-align: middle; padding: 5px 3px; }
-.plano-table thead th { background: #273440; color: #fff; border-color: #273440; font-size: 7.5pt; }
+.plano-table thead th { background: #273440; color: #fff; border-color: #273440; font-size: 9pt; }
 .plano-table thead tr:first-child th { padding: 9px 3px; }
 .plano-table thead th:first-child { width: 27%; text-align: left; padding-left: 9px; }
 .plano-table thead th:nth-child(2), .plano-table thead th:nth-child(3) { width: 9%; }
-.plano-table tbody tr { break-inside: avoid; height: 37px; }
-.plano-table .plano-group { height: 29px; }
+.plano-table tbody tr { break-inside: avoid; height: var(--plano-row-height, 48px); }
+.plano-table .plano-group { height: 34px; }
 .plano-group th { background: #e8edf2; text-align: left; padding-left: 9px; color: #283440; letter-spacing: .05em; }
 .plano-name { text-align: left !important; padding-left: 9px !important; overflow-wrap: anywhere; font-weight: 700; }
+.plano-unfilled .plano-name { background: #fff1cf; }
 .plano-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .plano-off { background: #eef1f4; }
 .plano-slot { background: #fff; }
