@@ -542,14 +542,17 @@ app.get("/api/public-schedules/:token", async (request, response) => {
       return response.status(401).json({ error: "Code requis." });
     const weekStart = isoDate(link.rows[0].week_start);
     const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.role AS shift_role
-      FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-      JOIN schedule_employees e ON e.id=a.employee_id
-      WHERE s.week_start=$1 ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart]);
+      FROM schedule_employees e
+      LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN
+        (SELECT id FROM schedule_shifts WHERE week_start=$1)
+      LEFT JOIN schedule_shifts s ON s.id=a.shift_id
+      WHERE e.active=TRUE OR s.id IS NOT NULL
+      ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart]);
     const people = new Map();
     for (const row of result.rows) {
       const id = Number(row.id);
-      if (!people.has(id)) people.set(id,{ name:row.name,role:row.role,rank:row.display_rank,shifts:[] });
-      people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),breakMinutes:Number(row.break_minutes),role:row.shift_role });
+      if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,shifts:[] });
+      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),breakMinutes:Number(row.break_minutes),role:row.shift_role });
     }
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
