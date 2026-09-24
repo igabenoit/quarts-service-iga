@@ -84,7 +84,7 @@ await pool.query(`
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS allow_extra_hours BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS roles JSONB NOT NULL DEFAULT '[]'::jsonb;
   UPDATE schedule_employees SET roles=jsonb_build_array(role)
-    WHERE jsonb_typeof(roles) <> 'array' OR NOT roles ? role;
+    WHERE jsonb_typeof(roles) <> 'array' OR NOT (roles ? role);
 `);
 await pool.query(`
   WITH ranks AS (
