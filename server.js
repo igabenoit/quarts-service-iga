@@ -358,6 +358,10 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     await client.query("BEGIN");
     const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
     const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
+    if (request.body?.replaceAll === true) {
+      await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN
+        (SELECT id FROM schedule_shifts WHERE week_start=$1)`, [request.params.weekStart]);
+    }
     const current = (await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
       WHERE s.week_start=$1`, [request.params.weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
     const result = generateAssignments(shifts, employees, current);
