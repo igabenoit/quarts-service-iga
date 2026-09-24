@@ -90,4 +90,13 @@ $("#employeeForm").onsubmit=async event=>{event.preventDefault();try{const id=$(
 $("#clearEmployee").onclick=resetEmployeeForm;
 $("#employeeImport").onchange=async event=>{try{const file=event.target.files[0];if(!file)return;const data=JSON.parse(await file.text());const result=await api("/api/employees/import",{method:"POST",body:JSON.stringify(data)});await loadEmployees();toast(`${result.count} employés importés`);}catch(error){showError(error);}finally{event.target.value="";}};
 $("#generateSchedule").onclick=async()=>{try{const result=await api(`/api/weeks/${state.weekStart}/generate`,{method:"POST"});state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;render();toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);}catch(error){showError(error);}};
+$("#regenerateSchedule").onclick=async()=>{
+  if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés."))return;
+  try{
+    const result=await api(`/api/weeks/${state.weekStart}/generate`,{method:"POST",body:JSON.stringify({replaceAll:true})});
+    state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;
+    render();
+    toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);
+  }catch(error){showError(error);}
+};
 api("/api/session").then(async session=>{if(session.role==="manager"){$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(mondayOf());}}).catch(()=>{});
