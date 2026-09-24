@@ -24,7 +24,7 @@
   <div id="appView" hidden>
     <header class="app-header">
       <div><p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p><h1>Quarts Service</h1><p>Construire les quarts nécessaires avant l’attribution des employés</p></div>
-      <div class="header-actions"><button id="printBtn" class="secondary">Imprimer</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
+      <div class="header-actions"><button id="previewBtn" class="secondary">Aperçu avant impression</button><button id="printBtn" class="secondary">Imprimer</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
     </header>
     <main>
       <section class="week-toolbar card">
@@ -57,7 +57,7 @@
         <form id="employeeForm">
           <input id="employeeId" type="hidden">
           <label>Nom<input id="employeeName" required maxlength="100"></label>
-          <label>Fonction<select id="employeeRole"><option value="cashier">Caissière</option><option value="supervisor">Superviseur</option><option value="packer">Emballeur</option></select></label>
+          <label>Fonction<select id="employeeRole"><option value="supervisor">Superviseur</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option></select></label>
           <label>Ancienneté<input id="employeeSeniority" type="date"></label>
           <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
           <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
@@ -72,7 +72,7 @@
         <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
         <form id="shiftForm">
           <input id="shiftId" type="hidden">
-          <label>Fonction<select id="role" required><option value="cashier">Caissière</option><option value="supervisor">Superviseur</option><option value="support">Aide d’un autre département</option><option value="packer">Emballeur</option></select></label>
+          <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
           <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
           <label>Début<input id="startTime" type="time" value="08:00" required></label>
           <label>Fin<input id="endTime" type="time" value="16:00" required></label>
@@ -89,6 +89,10 @@
     </main>
     <div id="toast" role="status"></div>
     <section id="printSheet" aria-hidden="true"></section>
+    <dialog id="printPreview" aria-label="Aperçu de l’horaire avant impression">
+      <div class="preview-toolbar"><strong>Aperçu de l’horaire</strong><div><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
+      <div id="previewPages" class="preview-pages"></div>
+    </dialog>
   </div>
   <script src="app.js" defer></script>
 </body>

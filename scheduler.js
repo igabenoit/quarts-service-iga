@@ -1,9 +1,6 @@
 export function canAssign(employee, shift, shifts, assigned = []) {
   if (!employee.active || employee.area !== shift.area) return false;
-  if (shift.role === "supervisor" && employee.role !== "supervisor") return false;
-  if (shift.role === "packer" && employee.role !== "packer") return false;
-  if (shift.role === "cashier" && !["cashier", "supervisor"].includes(employee.role)) return false;
-  if (shift.role === "support") return false;
+  if (shift.role === "support" || employee.role !== shift.role) return false;
   const windows = employee.availability?.[shift.dayIndex] || [];
   if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute)) return false;
   const jobs = assigned.filter(a => a.employeeId === employee.id).map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean);

@@ -71,6 +71,14 @@ await pool.query(`
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 `);
+await pool.query(`
+  ALTER TABLE schedule_shifts DROP CONSTRAINT IF EXISTS schedule_shifts_role_check;
+  ALTER TABLE schedule_shifts ADD CONSTRAINT schedule_shifts_role_check
+    CHECK (role IN ('cashier','supervisor','support','packer','orders'));
+  ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
+  ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
+    CHECK (role IN ('cashier','supervisor','packer','orders'));
+`);
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -137,7 +145,7 @@ function parseMinutes(value, name, min, max) {
 }
 function normalizeShift(body) {
   const role = String(body.role || "");
-  if (!["cashier", "supervisor", "support", "packer"].includes(role)) throw new Error("Fonction invalide.");
+  if (!["cashier", "supervisor", "support", "packer", "orders"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
   const breakMinutes = parseMinutes(body.breakMinutes ?? 0, "Pause", 0, 240);
@@ -175,7 +183,7 @@ function mapShift(row) {
 function normalizeEmployee(body) {
   const name = String(body.name || "").trim().slice(0, 100);
   const role = String(body.role || "");
-  if (!name || !["cashier", "supervisor", "packer"].includes(role)) throw new Error("Nom ou fonction invalide.");
+  if (!name || !["cashier", "supervisor", "packer", "orders"].includes(role)) throw new Error("Nom ou fonction invalide.");
   const availability = {};
   for (let day = 0; day < 7; day++) {
     const windows = body.availability?.[day] || [];
