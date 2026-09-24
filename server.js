@@ -105,6 +105,13 @@ await pool.query(`
     PRIMARY KEY (week_start, employee_id, day_index)
   );
 `);
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedule_day_exceptions (
+    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
+    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id) ON DELETE CASCADE,
+    PRIMARY KEY (week_start, employee_id)
+  );
+`);
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -349,6 +356,25 @@ app.get("/api/weeks/:weekStart/time-off", requireManager, async (request, respon
     response.json({ timeOff: result.rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)})) });
   } catch { response.status(400).json({ error:"Impossible de charger les congés demandés." }); }
 });
+app.get("/api/weeks/:weekStart/day-exceptions", requireManager, async (request, response) => {
+  try {
+    if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
+    const result = await pool.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart]);
+    response.json({ employeeIds: result.rows.map(row => Number(row.employee_id)) });
+  } catch { response.status(400).json({ error: "Impossible de charger les exceptions de jours." }); }
+});
+app.put("/api/weeks/:weekStart/employees/:id/day-exception", requireManager, sameOrigin, async (request, response) => {
+  try {
+    const employeeId = Number(request.params.id), weekStart = request.params.weekStart;
+    if (!validDate(weekStart) || !Number.isInteger(employeeId) || employeeId <= 0 || typeof request.body?.allowed !== "boolean")
+      throw new Error("Exception de jours invalide.");
+    await ensureWeek(weekStart);
+    if (request.body.allowed) await pool.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id)
+      VALUES ($1,$2) ON CONFLICT DO NOTHING`, [weekStart,employeeId]);
+    else await pool.query("DELETE FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
+    response.json({ allowed: request.body.allowed });
+  } catch (error) { response.status(400).json({ error: error.message }); }
+});
 app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrigin, async (request, response) => {
   const client = await pool.connect();
   try {
@@ -387,6 +413,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     const people = await pool.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
     if (!people.rowCount) throw new Error("Employé introuvable.");
     const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0]);
+    e.allowSixOrSevenDays = !!(await pool.query("SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [s.weekStart,employeeId])).rowCount;
     const leave = await pool.query(`SELECT 1 FROM schedule_time_off
       WHERE week_start=$1 AND employee_id=$2 AND day_index=$3`, [s.weekStart,employeeId,s.dayIndex]);
     if (leave.rowCount) throw new Error("Congé demandé pour cette journée.");
@@ -394,7 +421,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
     const all = await pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
     if (!canAssign(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}))))
-      throw new Error("Disponibilité, fonction, maximum d’heures, limite des 17 ans et moins ou autre quart incompatible.");
+      throw new Error("Disponibilité, fonction, maximum de cinq jours, maximum d’heures, limite des 17 ans et moins ou autre quart incompatible.");
     await pool.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
     response.json({ ok:true });
@@ -407,6 +434,8 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     await client.query("BEGIN");
     const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
     const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
+    const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart])).rows;
+    for (const e of employees) e.allowSixOrSevenDays = exceptions.some(x => Number(x.employee_id) === e.id);
     const leaves = (await client.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1", [request.params.weekStart])).rows;
     for (const leave of leaves) {
       const employee=employees.find(e=>e.id===Number(leave.employee_id));
