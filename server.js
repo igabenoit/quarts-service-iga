@@ -80,6 +80,8 @@ await pool.query(`
     CHECK (role IN ('cashier','supervisor','packer','orders'));
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS display_rank INTEGER;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS assignment_rank INTEGER;
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS is_minor BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS allow_extra_hours BOOLEAN NOT NULL DEFAULT FALSE;
 `);
 await pool.query(`
   WITH ranks AS (
@@ -223,10 +225,12 @@ function normalizeEmployee(body) {
   const targetMinutes = parseMinutes(body.targetMinutes ?? 0, "Heures souhaitées", 0, 3000);
   const maxMinutes = parseMinutes(body.maxMinutes ?? 2400, "Maximum", 0, 3600);
   if (targetMinutes > maxMinutes) throw new Error("La cible dépasse le maximum.");
+  const isMinor = body.isMinor === true;
+  if (isMinor && targetMinutes > 1020) throw new Error("Un employé de 17 ans ou moins ne peut pas demander plus de 17 h par semaine.");
   const seniority = validDate(body.seniority) ? body.seniority : "9999-12-31";
   return { name, role, area: role === "packer" ? "packer" : "front", seniority,
     targetMinutes, maxMinutes, availability, notes: String(body.notes || "").slice(0, 300),
-    active: body.active !== false };
+    active: body.active !== false, isMinor, allowExtraHours: body.allowExtraHours === true };
 }
 function desiredRank(value, fallback) {
   return value === undefined || value === null || value === ""
@@ -245,7 +249,8 @@ function mapEmployee(row) {
   return { id: Number(row.id), name: row.name, role: row.role, area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
     availability: row.availability, notes: row.notes, active: row.active,
-    displayRank: row.display_rank, assignmentRank: row.assignment_rank };
+    displayRank: row.display_rank, assignmentRank: row.assignment_rank,
+    isMinor: row.is_minor, allowExtraHours: row.allow_extra_hours };
 }
 
 app.get("/api/employees", requireManager, async (_request, response) => {
@@ -265,9 +270,9 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees");
     if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
     for (const e of normalized) await client.query(
-      `INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
+      `INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
     for (const role of ["supervisor","cashier","packer","orders"]) {
       await client.query(`WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
@@ -287,9 +292,9 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
   try {
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
-    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active]);
+    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
     const id = Number(result.rows[0].id);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
@@ -310,8 +315,8 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
     await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,seniority=$4,target_minutes=$5,max_minutes=$6,
-      availability=$7,notes=$8,active=$9 WHERE id=$10 RETURNING *`,
-      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,request.params.id]);
+      availability=$7,notes=$8,active=$9,is_minor=$10,allow_extra_hours=$11 WHERE id=$12 RETURNING *`,
+      [e.name,e.area,e.role,e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
     const id = Number(request.params.id), old = before.rows[0];
     if (old.role !== e.role) {
       await reorderEmployees(client,old.role,"display_rank",null,1);
@@ -389,7 +394,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
     const all = await pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
     if (!canAssign(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}))))
-      throw new Error("Disponibilité, fonction, maximum d’heures ou autre quart incompatible.");
+      throw new Error("Disponibilité, fonction, maximum d’heures, limite des 17 ans et moins ou autre quart incompatible.");
     await pool.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
     response.json({ ok:true });
