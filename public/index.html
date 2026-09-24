@@ -24,7 +24,7 @@
   <div id="appView" hidden>
     <header class="app-header">
       <div><p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p><h1>Quarts Service</h1><p>Construire les quarts nécessaires avant l’attribution des employés</p></div>
-      <div class="header-actions"><button id="previewBtn" class="secondary">Aperçu avant impression</button><button id="printBtn" class="secondary">Imprimer</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
+      <div class="header-actions"><button id="previewBtn" class="secondary">Aperçu avant impression</button><button id="printBtn" class="secondary">Imprimer</button><button id="planoBtn" class="secondary">Planogramme des pauses</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
     </header>
     <main>
       <section class="week-toolbar card">
@@ -96,11 +96,17 @@
     </main>
     <div id="toast" role="status"></div>
     <section id="printSheet" aria-hidden="true"></section>
+    <section id="planoPrintSheet" aria-hidden="true"></section>
     <dialog id="printPreview" aria-label="Aperçu de l’horaire avant impression">
       <div class="preview-toolbar"><strong>Aperçu de l’horaire</strong><div><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
       <div id="previewPages" class="preview-pages"></div>
     </dialog>
+    <dialog id="planoPreview" aria-label="Aperçu du planogramme des pauses">
+      <div class="preview-toolbar"><strong>Planogramme des pauses · semaine affichée</strong><div><button id="planoPrint" type="button">Imprimer</button><button id="planoClose" type="button" class="secondary">Fermer</button></div></div>
+      <div id="planoPreviewPages" class="preview-pages plano-preview-pages"></div>
+    </dialog>
   </div>
+  <script src="planogram.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

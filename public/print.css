@@ -33,3 +33,32 @@ body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "He
 .print-summary { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding: 13px 2px 5px; border-top: 1px solid #cbd3d9; color: #34414c; font-size: 8.5pt; }
 .print-summary b { color: #8b4800; }
 .print-footer { margin-top: 7px; text-align: right; color: #6b7680; font-size: 7pt; }
+
+/* Feuille de route quotidienne, une journée par page légale. */
+#planoPrintSheet { display: none; }
+body.printing-planogram #printSheet { display: none !important; }
+body.printing-planogram #planoPrintSheet { display: block !important; }
+#planoPreview { display: none !important; }
+.plano-page { min-height: 13.2in; break-after: page; display: flex; flex-direction: column; color: #24303b; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+.plano-page:last-child { break-after: auto; }
+.plano-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 15px; padding-bottom: 12px; margin-bottom: 15px; border-bottom: 2.5pt solid #d71920; }
+.plano-title p { margin: 0 0 4px; color: #b51c24; font-size: 8pt; font-weight: 800; letter-spacing: .12em; }
+.plano-title h1 { margin: 0; font: 700 20pt/1.1 "Trebuchet MS", "Segoe UI", sans-serif; }
+.plano-title div:last-child { text-align: right; font-size: 9pt; }
+.plano-title small { display: block; color: #66717b; font-size: 7.5pt; margin-top: 4px; }
+.plano-warning { margin: 0 0 10px; padding: 7px 10px; background: #ffe5a3; color: #653400; font-weight: 800; font-size: 8pt; }
+.plano-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
+.plano-table th, .plano-table td { border: 1px solid #aebbc5; text-align: center; vertical-align: middle; padding: 5px 3px; }
+.plano-table thead th { background: #273440; color: #fff; border-color: #273440; font-size: 7.5pt; }
+.plano-table thead tr:first-child th { padding: 9px 3px; }
+.plano-table thead th:first-child { width: 27%; text-align: left; padding-left: 9px; }
+.plano-table thead th:nth-child(2), .plano-table thead th:nth-child(3) { width: 9%; }
+.plano-table tbody tr { break-inside: avoid; height: 37px; }
+.plano-table .plano-group { height: 29px; }
+.plano-group th { background: #e8edf2; text-align: left; padding-left: 9px; color: #283440; letter-spacing: .05em; }
+.plano-name { text-align: left !important; padding-left: 9px !important; overflow-wrap: anywhere; font-weight: 700; }
+.plano-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plano-off { background: #eef1f4; }
+.plano-slot { background: #fff; }
+.plano-empty td { color: #77818b; text-align: left; padding-left: 9px; }
+.plano-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #cbd3d9; color: #66717b; font-size: 7pt; }
