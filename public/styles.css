@@ -43,3 +43,5 @@
 .preview-pages .print-summary{margin-top:auto;border:1px solid #69717a;padding:8px;display:flex;justify-content:space-between}
 .preview-pages .print-footer{text-align:right;color:#6c737b;font-size:10px;margin-top:5px}
 @media(max-width:900px){.schedule-grid{grid-template-columns:repeat(7,180px)}}
+
+.preview-pages .print-table th:first-child{width:24%;text-align:left}.preview-pages .print-table th:last-child{width:9%}.preview-pages .print-name{text-align:left;overflow-wrap:anywhere}.preview-pages .print-hours{font-weight:900;white-space:nowrap}.preview-pages .print-unfilled th,.preview-pages .print-unfilled td{background:#fff3cd}.preview-pages .print-shift{font-weight:800}.preview-pages .print-shift+.print-shift{margin-top:4px}
