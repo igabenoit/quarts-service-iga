@@ -45,3 +45,4 @@
 @media(max-width:900px){.schedule-grid{grid-template-columns:repeat(7,180px)}}
 
 .preview-pages .print-table th:first-child{width:24%;text-align:left}.preview-pages .print-table th:last-child{width:9%}.preview-pages .print-name{text-align:left;overflow-wrap:anywhere}.preview-pages .print-hours{font-weight:900;white-space:nowrap}.preview-pages .print-unfilled th,.preview-pages .print-unfilled td{background:#fff3cd}.preview-pages .print-shift{font-weight:800}.preview-pages .print-shift+.print-shift{margin-top:4px}
+.preview-pages .print-seniority{display:block;margin-top:2px;font-size:9px;font-weight:400;color:#4e5660}

@@ -25,7 +25,9 @@ export function generateAssignments(shifts, employees, existing = []) {
       const load = e => assigned.filter(x => x.employeeId === e.id).reduce((sum, x) => sum + (shifts.find(s => s.id === x.shiftId)?.paidMinutes || 0), 0);
       const aGap = Math.max(0, a.targetMinutes - load(a));
       const bGap = Math.max(0, b.targetMinutes - load(b));
-      return (bGap > 0) - (aGap > 0) || a.seniority.localeCompare(b.seniority) || load(a) - load(b) || a.id - b.id;
+      return (bGap > 0) - (aGap > 0)
+        || (a.assignmentRank ?? 9999) - (b.assignmentRank ?? 9999)
+        || a.seniority.localeCompare(b.seniority) || load(a) - load(b) || a.id - b.id;
     });
     if (!candidates.length) { unfilled.push(shift.id); continue; }
     const assignment = { shiftId: shift.id, employeeId: candidates[0].id };
