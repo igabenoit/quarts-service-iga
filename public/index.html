@@ -36,6 +36,13 @@
         <span id="saveStatus" class="save-status">Tout est enregistré</span>
       </section>
 
+      <section class="card share-card">
+        <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Lien de l’horaire de cette semaine</h2><p>Lecture seule, adapté au téléphone. Les changements de quarts apparaissent dès que l’employé actualise la page. Un code commun est requis en plus du lien.</p></div>
+        <label for="shareCode">Code commun des employés (6 à 12 chiffres)</label><input id="shareCode" type="password" inputmode="numeric" pattern="[0-9]{6,12}" autocomplete="new-password" placeholder="Choisir un code à partager">
+        <div class="share-actions"><button id="createShareLink" type="button">Créer le lien</button><button id="changeShareCode" type="button" class="secondary" hidden>Changer le code</button><button id="copyShareLink" type="button" class="secondary" hidden>Copier le lien</button><button id="revokeShareLink" type="button" class="danger" hidden>Désactiver le lien</button></div>
+        <output id="shareLinkDisplay" aria-live="polite"></output>
+      </section>
+
       <section class="summary-grid">
         <article class="metric card combined-total"><span>Total des heures planifiées · caissières, superviseurs et emballeurs</span><strong id="combinedPlanned">0 h</strong><small id="combinedBreakdown"></small></article>
         <article class="metric card"><span>Budget caisse et supervision</span><label><input id="frontBudget" type="number" min="0" step="0.25"> h</label></article>
