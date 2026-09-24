@@ -5,6 +5,7 @@ export function canAssign(employee, shift, shifts, assigned = []) {
   if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute)) return false;
   const jobs = assigned.filter(a => a.employeeId === employee.id).map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean);
   if (jobs.some(s => s.dayIndex === shift.dayIndex)) return false;
+  if (!employee.allowSixOrSevenDays && jobs.length >= 5) return false;
   const minutes = jobs.reduce((sum, s) => sum + s.paidMinutes, 0);
   if (employee.isMinor && (minutes + shift.paidMinutes > 17 * 60 ||
     (shift.dayIndex < 5 && jobs.filter(s => s.dayIndex < 5).length >= 2))) return false;
