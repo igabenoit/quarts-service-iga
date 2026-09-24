@@ -1,7 +1,7 @@
 @page { size: legal portrait; margin: .4in; }
 * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 body { background: #fff !important; color: #24303b; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
-.app-header, main, #toast, #printPreview { display: none !important; }
+.app-header, main, #toast, #printPreview, #loginView { display: none !important; }
 #printSheet { display: block !important; }
 .print-page { min-height: 12.6in; display: flex; flex-direction: column; break-inside: avoid; }
 .print-page + .print-page { break-before: page; }
