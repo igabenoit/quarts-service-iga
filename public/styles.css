@@ -143,6 +143,8 @@
 .plano-preview-pages .plano-unfilled .plano-name { background: #fff1cf; }
 .plano-preview-pages .plano-group th { background: #e8edf2; text-align: left; padding-left: 9px; color: #283440; letter-spacing: .05em; }
 .plano-preview-pages .plano-name { text-align: left !important; padding-left: 9px !important; overflow-wrap: anywhere; font-weight: 700; }
+.plano-preview-pages .plano-supervisor .plano-name,.plano-preview-pages .plano-supervisor .plano-time { background: #fce5e6; color: #7d1920; }
+.plano-preview-pages .plano-supervisor .plano-name { border-left: 4px solid #b51c24; }
 .plano-preview-pages .plano-time { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .plano-preview-pages .plano-off { background: #eef1f4; }
 .plano-preview-pages .plano-slot { background: #fff; }
