@@ -29,12 +29,19 @@ function shiftCard(shift){const detail=shift.role==="support"&&shift.sourceDepar
 function renderBoard(area,target){$(target).innerHTML=dayNames.map((day,index)=>{const date=addDays(state.weekStart,index);const shifts=state.shifts.filter(s=>s.area===area&&s.dayIndex===index).sort((a,b)=>a.startMinute-b.startMinute);return `<article class="day-column"><div class="day-head"><strong>${day}</strong><small>${fmtDate.format(new Date(`${date}T12:00:00Z`))}</small></div><div class="shift-list">${shifts.length?shifts.map(shiftCard).join(""):'<div class="empty">Aucun quart</div>'}</div><div class="day-total">${durationText(dayTotal(area,index))}</div></article>`;}).join("");document.querySelectorAll(`${target} .shift-card`).forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));}
 function renderWarnings(){const warnings=[];for(let day=0;day<7;day++){const front=state.shifts.filter(s=>s.area==="front"&&s.dayIndex===day);if(front.length&&!front.some(s=>s.role==="supervisor"))warnings.push(`${shortDays[day]} sans superviseur`);}$("#frontWarnings").innerHTML=warnings.map(w=>`<span class="warning">${w}</span>`).join("");}
 function renderPrint(){
+  const shiftText=s=>`<div class="print-shift">${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.breakMinutes?`<small>Pause ${s.breakMinutes} min</small>`:""}${s.role==="support"&&s.sourceDepartment?`<small>${escapeHtml(s.sourceDepartment)}</small>`:""}</div>`;
   const buildPage=group=>{
-    const byDay=dayNames.map((_,day)=>state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute));
-    const max=Math.max(1,...byDay.map(x=>x.length));
-    const rows=Array.from({length:max},(_,row)=>`<tr><th>${row+1}</th>${byDay.map(shifts=>{const s=shifts[row];return `<td>${s?`<div class="print-shift">${timeText(s.startMinute)}–${timeText(s.endMinute)}<small>${roleNames[s.role]} · ${durationText(s.paidMinutes)}${s.sourceDepartment?` · ${escapeHtml(s.sourceDepartment)}`:""}<br><b>${escapeHtml(assignedName(s.id)||"À couvrir")}</b></small></div>`:""}</td>`;}).join("")}</tr>`).join("");
-    const total=state.shifts.filter(s=>group.roles.includes(s.role)).reduce((sum,s)=>sum+s.paidMinutes,0);
-    return `<article class="print-page"><div class="print-title"><div><p>IGA EXTRA FAMILLE BENOIT</p><h1>${group.title}</h1></div><div><b>Semaine du ${formatWeek(state.weekStart)}</b><br>Horaire de travail</div></div><table class="print-table"><thead><tr><th>No</th>${dayNames.map(n=>`<th>${n}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table><div class="print-summary"><span>Heures planifiées</span><b>${durationText(total)}</b></div><div class="print-footer">Imprimé le ${new Date().toLocaleDateString("fr-CA")}</div></article>`;
+    const groupShifts=state.shifts.filter(s=>group.roles.includes(s.role));
+    const employees=state.employees.filter(e=>group.roles.includes(e.role)&&(e.active||state.assignments.some(a=>a.employeeId===e.id)));
+    const employeeRows=employees.map(e=>{
+      const jobs=groupShifts.filter(s=>state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id));
+      const paid=jobs.reduce((sum,s)=>sum+s.paidMinutes,0);
+      return `<tr><th scope="row" class="print-name">${escapeHtml(e.name)}</th>${dayNames.map((_,day)=>`<td>${jobs.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(shiftText).join("")}</td>`).join("")}<td class="print-hours">${paid?durationText(paid):"—"}</td></tr>`;
+    }).join("");
+    const unfilled=groupShifts.filter(s=>!state.assignments.some(a=>a.shiftId===s.id));
+    const pendingRow=unfilled.length?`<tr class="print-unfilled"><th scope="row" class="print-name">À couvrir</th>${dayNames.map((_,day)=>`<td>${unfilled.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(shiftText).join("")}</td>`).join("")}<td class="print-hours">${durationText(unfilled.reduce((sum,s)=>sum+s.paidMinutes,0))}</td></tr>`:"";
+    const total=groupShifts.reduce((sum,s)=>sum+s.paidMinutes,0);
+    return `<article class="print-page"><div class="print-title"><div><p>IGA EXTRA FAMILLE BENOIT</p><h1>${group.title}</h1></div><div><b>Semaine du ${formatWeek(state.weekStart)}</b><br>Horaire par employé</div></div><table class="print-table"><thead><tr><th>Employé</th>${dayNames.map(n=>`<th>${n}</th>`).join("")}<th>Total</th></tr></thead><tbody>${employeeRows||`<tr><td colspan="9">Aucun employé</td></tr>`}${pendingRow}</tbody></table><div class="print-summary"><span>Heures planifiées : ${durationText(total)}</span><b>${unfilled.length} quart${unfilled.length>1?"s":""} à couvrir</b></div><div class="print-footer">Imprimé le ${new Date().toLocaleDateString("fr-CA")}</div></article>`;
   };
   $("#printSheet").innerHTML=scheduleGroups.map(buildPage).join("");
 }
