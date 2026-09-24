@@ -1,6 +1,31 @@
-*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#26323e;font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}header{background:#202b36;color:#fff;padding:24px max(18px,calc((100vw - 900px)/2));border-bottom:5px solid #d71920}header p{margin:0;color:#f3989d;font-size:12px;font-weight:900;letter-spacing:.1em}header h1{margin:5px 0;font-size:27px}#period{font-weight:700}main{max-width:900px;margin:auto;padding:18px 14px 40px}.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.toolbar label{font-weight:700}.toolbar input{flex:1;min-width:180px;border:1px solid #bdc8d1;border-radius:9px;padding:11px;font:inherit}.toolbar button{border:0;border-radius:9px;background:#d71920;color:#fff;font:inherit;font-weight:800;padding:11px 15px;cursor:pointer}#status{color:#566475;font-size:14px}.group{margin-top:24px}.group h2{font-size:19px;border-bottom:2px solid #d71920;padding-bottom:7px}.employees{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px}.employee{background:#fff;border:1px solid #dbe1e7;border-radius:12px;padding:14px;box-shadow:0 2px 9px #2030400d}.employee h3{margin:0 0 9px;font-size:18px}.shift{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid #edf0f3}.shift strong{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.shift small{display:block;color:#667789}.shift .alternate{color:#a3153e;font-weight:800}.empty{padding:30px;text-align:center;color:#566475}@media(max-width:600px){header h1{font-size:24px}.employees{grid-template-columns:1fr}}
+*{box-sizing:border-box}
+body{margin:0;background:#f4f6f8;color:#26323e;font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:#202b36;color:#fff;padding:24px max(18px,calc((100vw - 760px)/2));border-bottom:5px solid #d71920}
+header p{margin:0;color:#f3989d;font-size:12px;font-weight:900;letter-spacing:.1em}
+header h1{margin:5px 0;font-size:27px}
+#period{font-weight:700}
+main{max-width:760px;margin:auto;padding:20px 14px 40px}
+button,input{font:inherit}
+.toolbar{display:flex;align-items:flex-end;gap:10px}
+.toolbar[hidden],#accessForm[hidden],#suggestions[hidden]{display:none}
+.search-area{position:relative;flex:1;min-width:0}
+.search-area label{display:block;margin-bottom:6px;font-weight:800}
+.search-area input,#accessForm input{width:100%;border:1px solid #bdc8d1;border-radius:9px;padding:12px;background:#fff}
+.toolbar button,#accessForm button{border:0;border-radius:9px;background:#d71920;color:#fff;font-weight:800;padding:12px 15px;cursor:pointer}
+#suggestions{position:absolute;z-index:5;top:100%;left:0;right:0;max-height:280px;overflow:auto;margin-top:3px;background:#fff;border:1px solid #bfcbd5;border-radius:10px;box-shadow:0 12px 28px #20304025}
+#suggestions button{display:block;width:100%;padding:12px;text-align:left;background:#fff;color:#26323e;border:0;border-bottom:1px solid #edf0f3;border-radius:0;cursor:pointer}
+#suggestions button:hover,#suggestions button:focus-visible{background:#f3e8e9}
+#suggestions p{margin:0;padding:12px;color:#667789}
+#status{color:#566475;font-size:14px}
 #accessForm{max-width:430px;margin:30px auto;background:#fff;border:1px solid #dbe1e7;border-radius:12px;padding:22px;display:grid;gap:10px}
-#accessForm[hidden],.toolbar[hidden]{display:none}
 #accessForm label{font-weight:800}
-#accessForm input{border:1px solid #bdc8d1;border-radius:9px;padding:12px;font:inherit}
-#accessForm button{border:0;border-radius:9px;background:#d71920;color:#fff;font:inherit;font-weight:800;padding:12px;cursor:pointer}
+.personal-card{background:#fff;border:1px solid #dbe1e7;border-radius:14px;padding:18px;box-shadow:0 2px 9px #2030400d}
+.personal-card .eyebrow{margin:0;color:#c41922;font-size:11px;font-weight:900;letter-spacing:.1em}
+.personal-card h2{margin:4px 0 16px;font-size:23px}
+.day-row{display:grid;grid-template-columns:minmax(120px,1fr) auto;align-items:center;gap:4px 14px;padding:13px 0;border-top:1px solid #e4e9ee}
+.day-date strong,.day-date span{display:block}
+.day-date span{color:#667789;font-size:13px}
+.day-hours{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.day-role{grid-column:1/-1;color:#a3153e;font-size:13px;font-weight:800}
+.empty{margin:0;color:#566475}
+@media(max-width:550px){header h1{font-size:24px}.toolbar{align-items:stretch;flex-direction:column}.toolbar>button{align-self:flex-end}.personal-card{padding:15px}.day-hours{font-size:17px}}
