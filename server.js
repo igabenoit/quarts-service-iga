@@ -18,6 +18,7 @@ const pool = new Pool({
   max: 5,
 });
 const attempts = new Map();
+const scheduleAccessAttempts = new Map();
 const sessionSecret = process.env.SESSION_SECRET;
 
 await pool.query(`
@@ -115,6 +116,14 @@ await pool.query(`
     PRIMARY KEY (week_start, employee_id)
   );
 `);
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedule_public_links (
+    week_start DATE PRIMARY KEY REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    access_code_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+`);
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -157,6 +166,17 @@ function secureEqual(left, right) {
   const a = crypto.createHash("sha256").update(String(left)).digest();
   const b = crypto.createHash("sha256").update(String(right)).digest();
   return crypto.timingSafeEqual(a, b);
+}
+function staffCodeHash(code) { return crypto.createHmac("sha256", sessionSecret).update(`staff-code:${code}`).digest("hex"); }
+function staffAccessCookie(token, codeHash) {
+  const expires = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  return `${token}.${expires}.${sign(`staff-access:${token}:${codeHash}:${expires}`)}`;
+}
+function hasStaffAccess(request, token, codeHash) {
+  const cookie = parseCookies(request.headers.cookie).schedule_view || "";
+  const [issuedToken, expires, signature] = cookie.split(".");
+  return issuedToken === token && /^\d{13}$/.test(expires || "") && Number(expires) > Date.now()
+    && typeof signature === "string" && secureEqual(signature, sign(`staff-access:${token}:${codeHash}:${expires}`));
 }
 function requireManager(request, response, next) {
   if (!readSession(request)) return response.status(401).json({ error: "Accès gestionnaire requis." });
@@ -485,6 +505,78 @@ app.post("/api/logout", sameOrigin, (_request, response) => {
   response.json({ ok: true });
 });
 app.get("/api/session", (request, response) => response.json({ role: readSession(request)?.role || null }));
+
+app.get("/api/weeks/:weekStart/share-link", requireManager, async (request, response) => {
+  try {
+    if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
+    const result = await pool.query("SELECT token FROM schedule_public_links WHERE week_start=$1", [request.params.weekStart]);
+    response.set("Cache-Control", "no-store").json({ path: result.rowCount ? `/h/${result.rows[0].token}` : null });
+  } catch { response.status(500).json({ error: "Impossible de charger le lien." }); }
+});
+app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
+  try {
+    if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
+    const code = String(request.body?.code || "").trim();
+    if (!/^\d{6,12}$/.test(code)) return response.status(400).json({ error: "Choisis un code numérique de 6 à 12 chiffres." });
+    await ensureWeek(request.params.weekStart);
+    const token = crypto.randomBytes(32).toString("base64url");
+    const result = await pool.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
+      ON CONFLICT (week_start) DO UPDATE SET access_code_hash=EXCLUDED.access_code_hash RETURNING token`, [request.params.weekStart,token,staffCodeHash(code)]);
+    response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}` });
+  } catch { response.status(500).json({ error: "Impossible de créer le lien." }); }
+});
+app.delete("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
+  try {
+    if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
+    await pool.query("DELETE FROM schedule_public_links WHERE week_start=$1", [request.params.weekStart]);
+    response.json({ ok: true });
+  } catch { response.status(500).json({ error: "Impossible de désactiver le lien." }); }
+});
+
+app.get("/api/public-schedules/:token", async (request, response) => {
+  try {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
+    const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
+    if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
+    if (!hasStaffAccess(request,request.params.token,link.rows[0].access_code_hash))
+      return response.status(401).json({ error: "Code requis." });
+    const weekStart = isoDate(link.rows[0].week_start);
+    const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.role AS shift_role
+      FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+      JOIN schedule_employees e ON e.id=a.employee_id
+      WHERE s.week_start=$1 ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart]);
+    const people = new Map();
+    for (const row of result.rows) {
+      const id = Number(row.id);
+      if (!people.has(id)) people.set(id,{ name:row.name,role:row.role,rank:row.display_rank,shifts:[] });
+      people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),breakMinutes:Number(row.break_minutes),role:row.shift_role });
+    }
+    response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
+  } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
+});
+app.post("/api/public-schedules/:token/access", sameOrigin, async (request, response) => {
+  try {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
+    const key = `${request.ip}:${request.params.token}`;
+    const now = Date.now(), entry = scheduleAccessAttempts.get(key) || { count:0,since:now };
+    if (now-entry.since > 15*60*1000) { entry.count=0;entry.since=now; }
+    if (entry.count>=20) return response.status(429).json({ error: "Trop d’essais. Réessaie dans 15 minutes." });
+    const link = await pool.query("SELECT access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
+    const code = String(request.body?.code || "").trim();
+    if (!link.rowCount || !/^\d{6,12}$/.test(code) || !secureEqual(staffCodeHash(code),link.rows[0].access_code_hash)) {
+      entry.count++;scheduleAccessAttempts.set(key,entry);
+      return response.status(401).json({ error: "Code incorrect ou lien désactivé." });
+    }
+    scheduleAccessAttempts.delete(key);
+    response.setHeader("Set-Cookie", `schedule_view=${staffAccessCookie(request.params.token,link.rows[0].access_code_hash)}; Path=/api/public-schedules; HttpOnly; SameSite=Lax; Max-Age=2592000${production?"; Secure":""}`);
+    response.set("Cache-Control","no-store").json({ ok:true });
+  } catch { response.status(500).json({ error: "Impossible de vérifier le code." }); }
+});
+app.get("/h/:token", (request, response) => {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).send("Lien invalide.");
+  response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" });
+  response.sendFile("horaire.html", { root: "public" });
+});
 
 app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
   try {
