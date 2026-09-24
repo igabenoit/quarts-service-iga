@@ -52,7 +52,7 @@
       </section>
 
       <section class="card add-card">
-        <div class="section-title"><div><p class="eyebrow">ÉQUIPE</p><h2>Employés et disponibilités</h2></div><p>Une plage par jour, au format 08:00-17:00. Laisser vide si indisponible.</p></div>
+        <div class="section-title"><div><p class="eyebrow">ÉQUIPE</p><h2>Employés et disponibilités</h2></div><p>Clique sur un employé pour modifier sa disponibilité permanente.</p></div>
         <div id="employeeList" class="employee-list"></div>
         <form id="employeeForm">
           <input id="employeeId" type="hidden">
@@ -67,7 +67,7 @@
           <label class="employee-option"><input id="employeeMinor" type="checkbox"> 17 ans ou moins (maximum 17 h et 2 jours du lundi au vendredi)</label>
           <label class="employee-option"><input id="employeeExtraHours" type="checkbox"> Autoriser la génération à dépasser les heures souhaitées</label>
           <label class="employee-option"><input id="employeeSixOrSevenDays" type="checkbox"> Autoriser exceptionnellement 6 ou 7 jours travaillés dans cette semaine</label>
-          <fieldset><legend>Disponibilités</legend><div id="availabilityFields" class="availability-grid"></div></fieldset>
+          <fieldset><legend>Disponibilités permanentes (chaque semaine)</legend><p>Entre une plage comme 08:00-17:00. Laisse vide pour une journée toujours indisponible. Les changements s’appliquent aussi aux semaines futures.</p><div id="availabilityFields" class="availability-grid"></div></fieldset>
           <fieldset class="requested-leave"><legend>Congés demandés pour la semaine affichée</legend><p>Coche les journées à bloquer avant de générer l’horaire. Une affectation déjà faite pour ce jour sera retirée.</p><div id="timeOffFields" class="time-off-grid"></div></fieldset>
           <label class="notes-field">Précision<input id="employeeNotes" maxlength="300"></label>
           <label><input id="employeeActive" type="checkbox" checked> Employé actif</label>
