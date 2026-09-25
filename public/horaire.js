@@ -61,6 +61,7 @@ function selectPerson(id){
   hideSuggestions();
   renderSelected();
   document.querySelector("#status").textContent="Actualise la page pour voir les dernières modifications.";
+  fetch(`/api/public-schedules/${encodeURIComponent(token)}/views`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employeeId:id})}).catch(()=>{});
 }
 async function load(){
   document.querySelector("#status").textContent="Chargement de l’horaire…";
