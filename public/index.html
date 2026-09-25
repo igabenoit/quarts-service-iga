@@ -41,6 +41,7 @@
         <label for="shareCode">Code commun des employés (6 à 12 chiffres)</label><input id="shareCode" type="password" inputmode="numeric" pattern="[0-9]{6,12}" autocomplete="new-password" placeholder="Choisir un code à partager">
         <div class="share-actions"><button id="createShareLink" type="button">Créer le lien</button><button id="changeShareCode" type="button" class="secondary" hidden>Changer le code</button><button id="copyShareLink" type="button" class="secondary" hidden>Copier le lien</button><button id="revokeShareLink" type="button" class="danger" hidden>Désactiver le lien</button></div>
         <output id="shareLinkDisplay" aria-live="polite"></output>
+        <div class="view-dashboard"><div class="view-dashboard-header"><div><h3>Consultation des horaires</h3><p>Un nom sélectionné avec le code commun ne confirme pas l’identité de la personne.</p></div><button id="refreshScheduleViews" type="button" class="secondary">Actualiser le suivi</button></div><div id="scheduleViews" aria-live="polite">Chargement…</div></div>
       </section>
 
       <section class="summary-grid">
