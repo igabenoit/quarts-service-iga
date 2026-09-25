@@ -124,6 +124,16 @@ await pool.query(`
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 `);
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedule_schedule_views (
+    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
+    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id) ON DELETE CASCADE,
+    first_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    view_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (week_start, employee_id)
+  );
+`);
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -533,6 +543,19 @@ app.delete("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async
   } catch { response.status(500).json({ error: "Impossible de désactiver le lien." }); }
 });
 
+app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, response) => {
+  try {
+    if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
+    const result = await pool.query(`SELECT e.id, e.name, e.role, v.first_viewed_at, v.last_viewed_at, v.view_count
+      FROM schedule_employees e
+      LEFT JOIN schedule_schedule_views v ON v.employee_id=e.id AND v.week_start=$1
+      WHERE EXISTS (SELECT 1 FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+        WHERE a.employee_id=e.id AND s.week_start=$1)
+      ORDER BY (v.last_viewed_at IS NOT NULL), e.role, e.name`, [request.params.weekStart]);
+    response.set("Cache-Control", "no-store").json({ employees: result.rows });
+  } catch { response.status(500).json({ error: "Impossible de charger les consultations." }); }
+});
+
 app.get("/api/public-schedules/:token", async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
@@ -556,6 +579,26 @@ app.get("/api/public-schedules/:token", async (request, response) => {
     }
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
+});
+app.post("/api/public-schedules/:token/views", sameOrigin, async (request, response) => {
+  try {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
+    const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
+    if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
+    if (!hasStaffAccess(request, request.params.token, link.rows[0].access_code_hash))
+      return response.status(401).json({ error: "Code requis." });
+    const employeeId = Number(request.body?.employeeId);
+    if (!Number.isSafeInteger(employeeId) || employeeId <= 0) return response.status(400).json({ error: "Employé invalide." });
+    const weekStart = isoDate(link.rows[0].week_start);
+    const employee = await pool.query(`SELECT 1 FROM schedule_employees e WHERE e.id=$1 AND
+      (e.active=TRUE OR EXISTS (SELECT 1 FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+        WHERE a.employee_id=e.id AND s.week_start=$2))`, [employeeId, weekStart]);
+    if (!employee.rowCount) return response.status(404).json({ error: "Employé introuvable." });
+    await pool.query(`INSERT INTO schedule_schedule_views (week_start,employee_id) VALUES ($1,$2)
+      ON CONFLICT (week_start,employee_id) DO UPDATE SET last_viewed_at=NOW(),
+      view_count=schedule_schedule_views.view_count+1`, [weekStart, employeeId]);
+    response.set("Cache-Control", "no-store").json({ ok:true });
+  } catch { response.status(500).json({ error: "Impossible d’enregistrer la consultation." }); }
 });
 app.post("/api/public-schedules/:token/access", sameOrigin, async (request, response) => {
   try {
