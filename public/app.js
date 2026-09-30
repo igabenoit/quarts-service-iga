@@ -4,7 +4,7 @@ const roleNames={cashier:"Caissière",supervisor:"Superviseur",support:"Aide aut
 const employeeRoles=["supervisor","cashier","packer","orders"];
 function canWorkRole(employee,role){return (employee.roles||[employee.role]).includes(role);}
 const scheduleGroups=[{title:"Superviseurs",roles:["supervisor"]},{title:"Caissières",roles:["cashier","support"]},{title:"Emballeurs",roles:["packer"]},{title:"Commandes téléphoniques",roles:["orders"]}];
-const state={weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],dayExceptions:[],saving:null,sharePath:null};
+const state={weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],approvedLeaves:[],dayExceptions:[],saving:null,sharePath:null};
 const $=selector=>document.querySelector(selector);
 const fmtDate=new Intl.DateTimeFormat("fr-CA",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
 
@@ -50,7 +50,7 @@ function renderPrint(){
   $("#printSheet").innerHTML=[buildPage("Superviseurs et commandes",[scheduleGroups[0],scheduleGroups[3]]),buildPage("Caissières",[scheduleGroups[1]]),buildPage("Emballeurs",[scheduleGroups[2]])].join("");
 }
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
-async function loadWeek(start){state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";}
+async function loadWeek(start){state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";}
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
 function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=active;$("#changeShareCode").hidden=!active;$("#copyShareLink").hidden=!active;$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=active?`${location.origin}${state.sharePath} · Code requis pour consulter`:`Aucun lien actif pour cette semaine.`;}
@@ -65,7 +65,9 @@ function renderEmployees(){
   document.querySelectorAll(".employee-row").forEach(b=>b.onclick=()=>editEmployee(Number(b.dataset.id)));
 }
 async function loadEmployees(){state.employees=(await api("/api/employees")).employees;renderEmployees();renderSchedule();}
+function approvedForDay(id,day){return state.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(state.weekStart,day));}
 function availableForShift(employee,shift){
+  if(approvedForDay(employee.id,shift.dayIndex).some(p=>p.startMinute<shift.endMinute&&p.endMinute>shift.startMinute))return false;
   if(!employee.active||!canWorkRole(employee,shift.role)||state.timeOff.some(x=>x.employeeId===employee.id&&x.dayIndex===shift.dayIndex))return false;
   return (employee.availability?.[shift.dayIndex]||[]).some(([start,end])=>start<=shift.startMinute&&end>=shift.endMinute);
 }
@@ -78,6 +80,7 @@ function shiftAvailabilityPanel(shift){
     const windows=e.availability?.[shift.dayIndex]||[];
     const constraints=[];
     if(leave)constraints.push("Congé demandé");
+    for(const p of approvedForDay(e.id,shift.dayIndex))constraints.push(p.allDay?"Congé approuvé — journée complète":`Congé approuvé ${timeText(p.startMinute)}–${timeText(p.endMinute)}`);
     if(dayJob)constraints.push(`Déjà assigné ${timeText(dayJob.startMinute)}–${timeText(dayJob.endMinute)}`);
     if(!state.dayExceptions.includes(e.id)&&assigned.length>=5&&!dayJob)constraints.push("5 jours atteints");
     const remaining=e.maxMinutes-assigned.reduce((sum,s)=>sum+s.paidMinutes,0);
@@ -89,6 +92,9 @@ function shiftAvailabilityPanel(shift){
   return `<details class="shift-availability"><summary>Voir les disponibilités ${shortDays[shift.dayIndex]}</summary><ul>${rows||"<li>Aucun employé actif dans cette fonction</li>"}</ul><button type="button" class="secondary edit-unfilled-shift" data-id="${shift.id}">Modifier ce quart</button></details>`;
 }
 function renderSchedule(){
+  const leaveRows=state.employees.flatMap(e=>Array.from({length:7},(_,day)=>approvedForDay(e.id,day).map(p=>`<li>${escapeHtml(e.name)} · ${fmtDate.format(new Date(p.date+'T12:00:00Z'))} · ${p.allDay?'Journée complète':timeText(p.startMinute)+' à '+timeText(p.endMinute)}</li>`)).flat());
+  $("#approvedLeaveSummary").innerHTML=leaveRows.length?'<h3>Congés approuvés cette semaine</h3><ul>'+leaveRows.join('')+'</ul>':'';
+
   if(!state.week)return;
   const missing=state.shifts.filter(s=>!assignedName(s.id));
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
