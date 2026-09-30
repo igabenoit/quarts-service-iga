@@ -1,3 +1,4 @@
+import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
@@ -25,6 +26,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     status TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
   );`);
   app.use('/api/leave',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
+  await installLeaveArchive(app,pool,{requireManager,sameOrigin});
   const departments=await installDepartments(app,pool,{requireManager,sameOrigin});
   const requireStoreStaff=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
@@ -98,8 +100,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       const test=req.query.test==='true';
       const start=req.query.start||'2000-01-01',end=req.query.end||'2099-12-31';
       if(!isDate(start)||!isDate(end)||end<start)return res.status(400).json({error:'Période invalide.'});
-      const rows=(await pool.query(`SELECT r.*,m.status AS notification_status,m.error AS notification_error FROM schedule_leave_requests r LEFT JOIN schedule_leave_mail m ON m.request_id=r.id WHERE is_test=$1
-        AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end])).rows.filter(r=>r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
+      const rows=(await pool.query(`SELECT r.*,m.status AS notification_status,m.error AS notification_error FROM schedule_leave_requests r LEFT JOIN schedule_leave_mail m ON m.request_id=r.id WHERE is_test=$1 AND (r.archived_at IS NOT NULL)=$4
+        AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
       const events=(await pool.query(`SELECT e.* FROM schedule_leave_events e JOIN schedule_leave_requests r ON r.id=e.request_id
         WHERE r.is_test=$1 AND r.first_date<=$3 AND r.last_date>=$2 ORDER BY e.created_at,e.id`,[test,start,end])).rows;
       res.json({requests:rows.map(r=>({...r,submission_key:undefined,events:events.filter(e=>e.request_id===r.id)})),statistics:leaveStatistics(rows)});
@@ -118,6 +120,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Demande introuvable.'});}
+      if(row.archived_at){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande est archivée.'});}
       if(row.version!==b.version){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande a changé. Actualisez le suivi.'});}
       if(!((row.status==='pending'&&['approved','refused','cancelled'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Les demandes hors délai doivent être traitées directement avec la gérante.'});}
       if(b.status==='approved'&&!row.is_test){
