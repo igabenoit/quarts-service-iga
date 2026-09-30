@@ -1,17 +1,10 @@
-export const LATE_MESSAGE = 'Votre demande ne respecte pas le délai minimum de 10 jours. Veuillez vous adresser à votre gérante.';
-export const LEAVE_ZONE = 'America/Toronto';
-export function localDate(now) {
-  return new Intl.DateTimeFormat('fr-CA', {timeZone: LEAVE_ZONE, year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(now));
-}
-export function addDays(date, count) {
-  const d = new Date(`${date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + count); return d.toISOString().slice(0,10);
-}
+import {addDays,weekOf,localDate,earliestLeaveDate,deadlineForDate,isBeforeDeadline} from './public/leave-calendar.js';
+export {addDays,weekOf,localDate,earliestLeaveDate} from './public/leave-calendar.js';
+export const LATE_MESSAGE = 'Votre demande est hors délai. Elle devait être reçue avant 9 h le jeudi précédant la semaine du congé. Veuillez vous adresser à votre gérante.';
 export function isDate(date) {
   return typeof date === 'string' && /^20\d{2}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0,10) === date;
 }
-export function weekOf(date) {
-  const day = new Date(`${date}T12:00:00Z`).getUTCDay(); return addDays(date, -(day === 0 ? 6 : day - 1));
-}
+
 function minute(time) {
   if (typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('Heure invalide.');
   const [h,m] = time.split(':').map(Number); return h*60+m;
@@ -34,8 +27,8 @@ export function normalizeLeave(body, now) {
   }
   periods.sort((a,b)=>a.date.localeCompare(b.date)||a.startMinute-b.startMinute);
   for (let i=1;i<periods.length;i++) if (periods[i].date===periods[i-1].date && periods[i].startMinute<periods[i-1].endMinute) throw new Error('Deux périodes se chevauchent.');
-  const earliest = addDays(localDate(now),10);
-  return {email, reason, periods, late:periods[0].date < earliest, earliest};
+  const earliest = earliestLeaveDate(now);
+  return {email, reason, periods, late:!isBeforeDeadline(periods[0].date,now), earliest, deadline:deadlineForDate(periods[0].date)};
 }
 export function conflictsWithLeave(shift, periods = []) {
   if (!shift.weekStart) return false;
