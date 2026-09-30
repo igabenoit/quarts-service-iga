@@ -1,3 +1,4 @@
+import {deadlineForDate} from './leave-calendar.js';
 const $=s=>document.querySelector(s), form=$('#leaveForm');
 const parts=location.pathname.split('/'),test=location.pathname==='/conges-test';
 const token=parts[1]==='h'?parts[2]:null;
@@ -6,13 +7,19 @@ const keyName=`leave-draft-key:${test?'test':token}`;
 let submissionKey=sessionStorage.getItem(keyName)||crypto.randomUUID();sessionStorage.setItem(keyName,submissionKey);
 let earliest='',index=0;
 const longDate=d=>new Intl.DateTimeFormat('fr-CA',{dateStyle:'full',timeZone:'UTC'}).format(new Date(`${d}T12:00:00Z`));
+function updateDeadline(){
+  const dates=[...document.querySelectorAll('[name=startDate]')].map(i=>i.value).filter(Boolean).sort();
+  const date=dates[0]||earliest;if(!date)return;
+  $('#deadline').textContent=dates.length?`Pour cette demande : envoi avant 9 h le ${longDate(deadlineForDate(date))} (heure du Québec).`:`Première semaine encore admissible : celle du ${longDate(earliest)}. Envoi avant 9 h le ${longDate(deadlineForDate(earliest))}.`;
+}
+$('#periods').addEventListener('input',updateDeadline);
 function addPeriod(){
   if($('#periods').children.length>=31)return;
   const id=++index,box=document.createElement('fieldset');
   box.innerHTML=`<legend>Période ${id}</legend><div class="grid"><label>Du<input name="startDate" type="date" required></label><label>Au (inclusivement)<input name="endDate" type="date" required></label></div><label>Type d’indisponibilité<select name="kind"><option value="all">Journée complète</option><option value="partial">Une partie de la journée</option></select></label><div class="grid hours" hidden><label>De<input name="startTime" type="time"></label><label>À<input name="endTime" type="time"></label></div><button type="button" class="secondary remove">Retirer cette période</button>`;
   box.querySelector('[name=startDate]').addEventListener('change',e=>{const end=box.querySelector('[name=endDate]');if(!end.value||end.value<e.target.value)end.value=e.target.value;});
   box.querySelector('[name=kind]').addEventListener('change',e=>{const partial=e.target.value==='partial';box.querySelector('.hours').hidden=!partial;box.querySelectorAll('input[type=time]').forEach(i=>i.required=partial);});
-  box.querySelector('.remove').onclick=()=>{if($('#periods').children.length>1)box.remove();};
+  box.querySelector('.remove').onclick=()=>{if($('#periods').children.length>1){box.remove();updateDeadline();}};
   $('#periods').append(box);
 }
 function message(value){$('#message').textContent=value;$('#message').focus();}
@@ -39,7 +46,7 @@ async function load(){
   try{
     const response=await fetch(`${base}/${test?'test-form':'leave-form'}`,{cache:'no-store'}),data=await response.json();
     if(!response.ok)throw new Error(data.error||'Connexion requise.');
-    earliest=data.earliest;$('#deadline').textContent=`Pour un envoi aujourd’hui, la première date admissible est le ${longDate(earliest)}.`;
+    earliest=data.earliest;updateDeadline();
     for(const e of data.employees){const option=document.createElement('option');option.value=e.id??'test';option.textContent=e.name;$('#employee').append(option);}
     $('#testBanner').hidden=!data.isTest;if(data.isTest)$('#employee').value='test';
     addPeriod();form.hidden=false;
