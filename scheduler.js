@@ -1,4 +1,6 @@
+import {conflictsWithLeave} from "./leave-rules.js";
 export function canAssign(employee, shift, shifts, assigned = []) {
+  if (conflictsWithLeave(shift,employee.leavePeriods)) return false;
   if (!employee.active || shift.role === "support") return false;
   if (!(employee.roles || [employee.role]).includes(shift.role)) return false;
   const windows = employee.availability?.[shift.dayIndex] || [];
