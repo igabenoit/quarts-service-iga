@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import express from "express";
 import pg from "pg";
+import {installLeave, approvedLeave} from "./leave.js";
+import {conflictsWithLeave} from "./leave-rules.js";
 import { canAssign, generateAssignments } from "./scheduler.js";
 
 const { Pool } = pg;
@@ -440,38 +442,48 @@ app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrig
   } finally { client.release(); }
 });
 app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const id = Number(request.params.id), employeeId = Number(request.body?.employeeId);
-    const shiftResult = await pool.query("SELECT * FROM schedule_shifts WHERE id=$1", [id]);
-    if (!shiftResult.rowCount) return response.status(404).json({ error: "Quart introuvable." });
+    const shiftResult = await client.query("SELECT * FROM schedule_shifts WHERE id=$1", [id]);
+    if (!shiftResult.rowCount) throw new Error("Quart introuvable.");
     if (request.body?.employeeId === null) {
-      await pool.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
+      await client.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
+      await client.query("COMMIT");
       return response.json({ ok:true });
     }
-    const people = await pool.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
+    const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
     if (!people.rowCount) throw new Error("Employé introuvable.");
     const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0]);
-    e.allowSixOrSevenDays = !!(await pool.query("SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [s.weekStart,employeeId])).rowCount;
-    const leave = await pool.query(`SELECT 1 FROM schedule_time_off
+    e.leavePeriods=(await approvedLeave(client,s.weekStart)).filter(r=>Number(r.employee_id)===employeeId).flatMap(r=>r.periods);
+    if(conflictsWithLeave(s,e.leavePeriods)) throw new Error("Un congé approuvé chevauche ce quart.");
+    e.allowSixOrSevenDays = !!(await client.query("SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [s.weekStart,employeeId])).rowCount;
+    const leave = await client.query(`SELECT 1 FROM schedule_time_off
       WHERE week_start=$1 AND employee_id=$2 AND day_index=$3`, [s.weekStart,employeeId,s.dayIndex]);
     if (leave.rowCount) throw new Error("Congé demandé pour cette journée.");
-    const current = await pool.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+    const current = await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
       WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
-    const all = await pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
+    const all = await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
     if (!canAssign(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}))))
       throw new Error("Disponibilité, fonction, maximum de cinq jours, maximum d’heures, limite des 17 ans et moins ou autre quart incompatible.");
-    await pool.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
+    await client.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
+    await client.query("COMMIT");
     response.json({ ok:true });
-  } catch (error) { response.status(400).json({ error:error.message }); }
+  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(400).json({ error:error.message }); } finally { client.release(); }
 });
 app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (request, response) => {
   const client = await pool.connect();
   try {
     if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
     const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
+    const approved=await approvedLeave(client,request.params.weekStart);
+    for(const e of employees) e.leavePeriods=approved.filter(r=>Number(r.employee_id)===e.id).flatMap(r=>r.periods);
     const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart])).rows;
     for (const e of employees) e.allowSixOrSevenDays = exceptions.some(x => Number(x.employee_id) === e.id);
     const leaves = (await client.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1", [request.params.weekStart])).rows;
@@ -494,6 +506,9 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     response.status(400).json({ error:error.message || "Génération impossible." });
   } finally { client.release(); }
 });
+
+await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));
 
 app.get("/health", (_request, response) => response.json({ ok: true }));
 app.post("/api/login", sameOrigin, (request, response) => {
@@ -679,15 +694,24 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
 });
 
 app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
+    await client.query("BEGIN");await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const id = Number(request.params.id);
     if (!Number.isInteger(id) || id <= 0) throw new Error("Quart invalide.");
     const shift = normalizeShift(request.body || {});
     const dayIndex = parseMinutes(request.body?.dayIndex, "Journée", 0, 6);
-    const result = await pool.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id]);
-    if (!result.rowCount) return response.status(404).json({ error: "Quart introuvable." });
+    const existing=(await client.query("SELECT s.week_start,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1",[id])).rows[0];
+    if(existing?.employee_id){
+      const weekStart=isoDate(existing.week_start);
+      const periods=(await approvedLeave(client,weekStart)).filter(r=>String(r.employee_id)===String(existing.employee_id)).flatMap(r=>r.periods);
+      if(conflictsWithLeave({...shift,weekStart,dayIndex},periods))throw new Error("Ce changement chevauche un congé approuvé. Réattribuez le quart d’abord.");
+    }
+    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id]);
+    if (!result.rowCount) throw new Error("Quart introuvable.");
+    await client.query("COMMIT");
     response.json({ shift: mapShift(result.rows[0]) });
-  } catch (error) { response.status(400).json({ error: error.message || "Quart invalide." }); }
+  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(400).json({ error: error.message || "Quart invalide." }); } finally {client.release();}
 });
 
 app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
