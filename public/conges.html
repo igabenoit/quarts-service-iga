@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Demande de congé · Quarts Service</title><link rel="stylesheet" href="/conges.css"></head>
+<body><main class="shell"><a id="back" href="/">← Quarts Service</a><p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p><h1>Demande de congé</h1>
+<p class="intro">Une journée, quelques heures ou plusieurs jours : précisez chaque période d’indisponibilité.</p>
+<div id="testBanner" class="notice" hidden>MODE TEST — Aucun effet sur les horaires ou les statistiques réelles.</div>
+<div class="notice"><strong>Préavis minimum : 10 jours civils</strong><p id="deadline">Chargement…</p><p>Le délai s’applique à la première date demandée. L’heure de remise est enregistrée automatiquement, à l’heure du Québec.</p></div>
+<p id="message" role="status" tabindex="-1"></p>
+<form id="leaveForm" hidden><label>Votre nom<select id="employee" required><option value="">Sélectionnez votre nom</option></select></label>
+<label>Votre courriel<input id="email" type="email" autocomplete="email" maxlength="254" required></label><small>Coordonnée pour le suivi par la gérante. Les notifications de test sont envoyées à l’adresse configurée par la gestion.</small>
+<h2>Dates et heures</h2><p>Pour une plage horaire répétée sur plusieurs jours, les mêmes heures s’appliquent à chaque date. Ajoutez une période si les heures changent.</p><div id="periods"></div>
+<button id="addPeriod" type="button" class="secondary">+ Ajouter une période</button>
+<label>Motif de la demande<textarea id="reason" rows="4" maxlength="1000" required placeholder="Indiquez brièvement le motif de votre demande."></textarea></label>
+<p>Une demande couvrant plusieurs semaines sera transmise en une seule fois. La gérante verra chacune des dates concernées.</p>
+<label class="check"><input id="confirm" type="checkbox" required> Je confirme mon nom et les dates indiquées. L’envoi ne constitue pas une approbation.</label>
+<button id="send" type="submit">Envoyer ma demande</button></form>
+<section id="receipt" class="notice" hidden></section><button id="another" class="secondary" hidden>Faire une autre demande</button>
+</main><script src="/conges-form.js" type="module"></script></body></html>
