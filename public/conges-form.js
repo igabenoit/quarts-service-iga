@@ -1,9 +1,10 @@
 import {deadlineForDate} from './leave-calendar.js';
 const $=s=>document.querySelector(s), form=$('#leaveForm');
 const parts=location.pathname.split('/'),test=location.pathname==='/conges-test';
+const store=location.pathname==='/conges';
 const token=parts[1]==='h'?parts[2]:null;
-const base=test?'/api/leave':`/api/public-schedules/${encodeURIComponent(token)}`;
-const keyName=`leave-draft-key:${test?'test':token}`;
+const base=(test||store)?'/api/leave':`/api/public-schedules/${encodeURIComponent(token)}`;
+const keyName=`leave-draft-key:${test?'test':store?'store':token}`;
 let submissionKey=sessionStorage.getItem(keyName)||crypto.randomUUID();sessionStorage.setItem(keyName,submissionKey);
 let earliest='',index=0;
 const longDate=d=>new Intl.DateTimeFormat('fr-CA',{dateStyle:'full',timeZone:'UTC'}).format(new Date(`${d}T12:00:00Z`));
@@ -29,7 +30,7 @@ form.onsubmit=async event=>{
   event.preventDefault();$('#send').disabled=true;$('#message').textContent='Envoi en cours…';
   const periods=[...$('#periods').children].map(box=>{const v=n=>box.querySelector(`[name=${n}]`).value;return{startDate:v('startDate'),endDate:v('endDate'),allDay:v('kind')==='all',startTime:v('startTime'),endTime:v('endTime')};});
   try {
-    const response=await fetch(`${base}/${test?'test-requests':'leave-requests'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionKey,employeeId:$('#employee').value,email:$('#email').value,reason:$('#reason').value,periods})});
+    const response=await fetch(`${base}/${test?'test-requests':store?'submit':'leave-requests'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionKey,employeeId:$('#employee').value,employeeName:$('#employeeName').value,departmentId:$('#department').value,email:$('#email').value,reason:$('#reason').value,periods})});
     const data=await response.json();
     if(response.status===409){submissionKey=crypto.randomUUID();sessionStorage.setItem(keyName,submissionKey);throw new Error('Une demande a déjà été enregistrée avec cette référence. Vérifiez avec votre gérante avant de renvoyer une nouvelle demande.');}
     if(!response.ok&&!(response.status===422&&data.id))throw new Error(data.error||'Envoi impossible.');
@@ -41,15 +42,24 @@ form.onsubmit=async event=>{
   }catch(error){message(error.message);}finally{$('#send').disabled=false;}
 };
 async function load(){
+  if(store)$('#back').hidden=true;
   if(test)$('#back').href='/conges-gestion';else if(token)$('#back').href=`/h/${encodeURIComponent(token)}`;
   $('#back').textContent=test?'← Suivi des demandes':'← Retour à mon horaire';
   try{
-    const response=await fetch(`${base}/${test?'test-form':'leave-form'}`,{cache:'no-store'}),data=await response.json();
+    const response=await fetch(`${base}/${test?'test-form':store?'form':'leave-form'}`,{cache:'no-store'}),data=await response.json();
+    if(store&&response.status===401){$('#accessForm').hidden=false;form.hidden=true;$('#deadline').textContent='Entrez le code du magasin pour remplir votre demande.';$('#message').textContent='';return;}
     if(!response.ok)throw new Error(data.error||'Connexion requise.');
+    $('#accessForm').hidden=true;
     earliest=data.earliest;updateDeadline();
+    $('#employee').replaceChildren(new Option('Sélectionnez votre nom',''));
+    $('#department').replaceChildren(new Option('Choisissez votre département',''));
+    for(const d of data.departments||[])$('#department').append(new Option(d.name,d.id));
+    const manual=data.nameEntry==='manual';$('#employeeNameLabel').hidden=!manual;$('#employeeName').disabled=!manual;$('#employeeName').required=manual;$('#employeeSelectLabel').hidden=manual;$('#employee').disabled=manual;$('#employee').required=!manual;
+    if(!store){const service=data.departments?.find(d=>d.isService);if(service)$('#department').value=service.id;$('#department').disabled=!test;}
     for(const e of data.employees){const option=document.createElement('option');option.value=e.id??'test';option.textContent=e.name;$('#employee').append(option);}
     $('#testBanner').hidden=!data.isTest;if(data.isTest)$('#employee').value='test';
-    addPeriod();form.hidden=false;
+    if(!$('#periods').children.length)addPeriod();form.hidden=false;
   }catch(error){message(error.message);$('#deadline').textContent='Veuillez vous connecter pour remplir le formulaire.';}
 }
+$('#accessForm').onsubmit=async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;try{const r=await fetch('/api/leave/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})});const d=await r.json();if(!r.ok)throw new Error(d.error);$('#staffCode').value='';await load();}catch(error){message(error.message);}finally{button.disabled=false;}};
 load();
