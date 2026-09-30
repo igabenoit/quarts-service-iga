@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js"
+    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js && node --check leave.js && node --check leave-rules.js && node --check public/conges-form.js && node --check public/conges-manager.js && node --check public/horaire.js && node --check leave-notifications.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^5.1.0",
