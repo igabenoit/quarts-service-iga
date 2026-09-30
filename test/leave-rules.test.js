@@ -3,12 +3,22 @@ import assert from 'node:assert/strict';
 import {normalizeLeave,localDate,weekOf,leaveStatistics,conflictsWithLeave} from '../leave-rules.js';
 import {canAssign,generateAssignments} from '../scheduler.js';
 const body=(date,extra={})=>({email:'test@example.com',reason:'Essai',periods:[{startDate:date,endDate:date,allDay:true}],...extra});
-test('10 jours civils, limite exacte et heure locale du Québec',()=>{
- const now='2026-09-30T02:00:00Z';assert.equal(localDate(now),'2026-09-29');
- assert.equal(normalizeLeave(body('2026-10-09'),now).late,false);
- assert.equal(normalizeLeave(body('2026-10-08'),now).late,true);
- assert.equal(normalizeLeave(body('2026-10-09'),'2026-09-30T04:00:00Z').late,true);
- assert.equal(normalizeLeave(body('2026-03-12'),'2026-03-02T17:00:00Z').late,false);
+test('jeudi avant 9 h au Québec, exemple du lundi 5 octobre',()=>{
+ assert.equal(normalizeLeave(body('2026-10-05'),'2026-10-01T12:59:59.999Z').late,false);
+ assert.equal(normalizeLeave(body('2026-10-05'),'2026-10-01T13:00:00Z').late,true);
+ assert.equal(normalizeLeave(body('2026-10-05'),'2026-09-30T23:00:00Z').deadline,'2026-10-01');
+ for(const date of ['2026-10-05','2026-10-08','2026-10-11'])assert.equal(normalizeLeave(body(date),'2026-10-01T13:01:00Z').late,true);
+ assert.equal(normalizeLeave(body('2026-10-12'),'2026-10-01T13:01:00Z').late,false);
+ assert.equal(normalizeLeave(body('2026-10-05'),'2026-10-01T12:59:00Z').earliest,'2026-10-05');
+ assert.equal(normalizeLeave(body('2026-10-05'),'2026-10-01T13:00:00Z').earliest,'2026-10-12');
+});
+test('heure d’hiver, changement d’année et première semaine d’une demande',()=>{
+ assert.equal(normalizeLeave(body('2026-11-09'),'2026-11-05T13:59:59Z').late,false);
+ assert.equal(normalizeLeave(body('2026-11-09'),'2026-11-05T14:00:00Z').late,true);
+ assert.equal(normalizeLeave(body('2027-01-04'),'2026-12-31T13:59:59Z').late,false);
+ const multi=body('2026-10-11',{periods:[{startDate:'2026-10-11',endDate:'2026-10-12',allDay:true}]});
+ assert.equal(normalizeLeave(multi,'2026-10-02T12:00:00Z').late,true);
+ assert.equal(normalizeLeave(multi,'2026-10-01T12:59:00Z').late,false);
 });
 test('une demande conserve tous les jours sur plusieurs semaines et années',()=>{
  const result=normalizeLeave(body('2026-12-27',{periods:[{startDate:'2026-12-27',endDate:'2027-01-04',allDay:true}]}),'2026-12-01T12:00Z');
