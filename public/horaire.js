@@ -51,7 +51,7 @@ function renderSelected(){
   if(!person){selectedId=null;return;}
   const shifts=[...person.shifts].sort((a,b)=>a.dayIndex-b.dayIndex||a.startMinute-b.startMinute);
   const rows=shifts.map(shift=>`<div class="day-row"><div class="day-date"><strong>${dayNames[shift.dayIndex]}</strong><span>${dateFor(schedule.weekStart,shift.dayIndex)}</span></div><div class="day-hours">${hour(shift.startMinute)} – ${hour(shift.endMinute)}</div>${shift.role!==person.role?`<div class="day-role">${escapeHtml(roleNames[shift.role]||shift.role)}</div>`:""}</div>`).join("");
-  card.innerHTML=`<article class="personal-card"><p class="eyebrow">MON HORAIRE</p><h2>${escapeHtml(person.name)}</h2><a class="leave-request-button" href="/h/${encodeURIComponent(token)}/conges">Faire une demande de congé <span aria-hidden="true">→</span></a><p class="leave-request-help">À envoyer avant 9 h le jeudi précédant la semaine du congé.</p>${rows||'<p class="empty">Aucun quart prévu cette semaine.</p>'}</article>`;
+  card.innerHTML=`<article class="personal-card"><p class="eyebrow">MON HORAIRE</p><h2>${escapeHtml(person.name)}</h2><a class="leave-request-button" href="/conges">Faire une demande de congé <span aria-hidden="true">→</span></a><p class="leave-request-help">À envoyer avant 9 h le jeudi précédant la semaine du congé.</p>${rows||'<p class="empty">Aucun quart prévu cette semaine.</p>'}</article>`;
 }
 function selectPerson(id){
   const person=schedule?.employees.find(item=>item.id===id);
