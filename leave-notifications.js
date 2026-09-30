@@ -38,7 +38,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
       await pool.query(`UPDATE schedule_leave_mail SET status='review',error='Envoi à vérifier dans Resend avant toute relance.'
         WHERE status IN ('pending','sending','error') AND first_attempt_at<clock_timestamp()-interval '20 hours'`);
       const jobs=(await pool.query(`SELECT m.request_id,r.submitted_at,r.status AS request_status,r.is_test,r.employee_name,r.email,r.reason,r.periods,r.department_name,d.recipient,d.mail_enabled FROM schedule_leave_mail m
-        JOIN schedule_leave_requests r ON r.id=m.request_id LEFT JOIN schedule_leave_departments d ON d.id=r.department_id WHERE (r.is_test=TRUE OR (d.mail_enabled=TRUE AND d.recipient<>'')) AND
+        JOIN schedule_leave_requests r ON r.id=m.request_id LEFT JOIN schedule_leave_departments d ON d.id=r.department_id WHERE r.archived_at IS NULL AND (r.is_test=TRUE OR (d.mail_enabled=TRUE AND d.recipient<>'')) AND
         ((m.status IN ('pending','error') AND (m.last_attempt_at IS NULL OR m.last_attempt_at<clock_timestamp()-interval '1 minute'))
         OR (m.status='sending' AND m.last_attempt_at<clock_timestamp()-interval '2 minutes')) ORDER BY m.request_id LIMIT 10`)).rows;
       for(const job of jobs){
