@@ -37,13 +37,18 @@ export function conflictsWithLeave(shift, periods = []) {
 }
 export function leaveStatistics(rows) {
   const counts = {total:rows.length,pending:0,approved:0,refused:0,cancelled:0,late:0,fullDays:0,partialHours:0};
-  const employees = new Map(); let delay = 0, decided = 0;
+  const employees = new Map(),departments = new Map(); let delay = 0, decided = 0;
   for (const r of rows) {
     counts[r.status]++;
-    const person = employees.get(r.employee_name)||{name:r.employee_name,total:0,approved:0,late:0};
-    person.total++; if (r.status==='approved') person.approved++; if (r.status==='late') person.late++; employees.set(r.employee_name,person);
+    const departmentName=r.department_name||'Service';
+    const departmentKey=String(r.department_id||departmentName);
+    const dep=departments.get(departmentKey)||{name:departmentName,total:0,pending:0,approved:0,late:0};
+    dep.total++;if(r.status==='pending')dep.pending++;if(r.status==='approved')dep.approved++;if(r.status==='late')dep.late++;departments.set(departmentKey,dep);
+    const personKey=departmentKey+':'+((r.email||'').trim().toLowerCase()+':'+r.employee_name.trim().toLocaleLowerCase('fr-CA'));
+    const person = employees.get(personKey)||{name:r.employee_name,department:departmentName,total:0,approved:0,late:0};
+    person.total++; if (r.status==='approved') person.approved++; if (r.status==='late') person.late++; employees.set(personKey,person);
     if (r.status==='approved') for (const p of r.periods) { if (p.allDay) counts.fullDays++; else counts.partialHours+=(p.endMinute-p.startMinute)/60; }
     if (r.decided_at) {delay += Math.max(0,new Date(r.decided_at)-new Date(r.submitted_at));decided++;}
   }
-  return {...counts,averageResponseHours:decided?delay/decided/3600000:null,employees:[...employees.values()]};
+  return {...counts,averageResponseHours:decided?delay/decided/3600000:null,employees:[...employees.values()],departments:[...departments.values()]};
 }
