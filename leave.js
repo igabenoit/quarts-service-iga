@@ -1,5 +1,5 @@
 import {installNotifications} from './leave-notifications.js';
-import {normalizeLeave, localDate, addDays, isDate, leaveStatistics, conflictsWithLeave, LATE_MESSAGE} from './leave-rules.js';
+import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, conflictsWithLeave, LATE_MESSAGE} from './leave-rules.js';
 
 export async function approvedLeave(pool, weekStart) {
   const result = await pool.query(`SELECT employee_id, periods FROM schedule_leave_requests
@@ -37,7 +37,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     try {
       const clock = (await pool.query('SELECT clock_timestamp() AS now')).rows[0].now;
       const people = test ? [{id:null,name:'Employé test'}] : (await pool.query('SELECT id,name FROM schedule_employees WHERE active=TRUE ORDER BY name')).rows;
-      res.set('Cache-Control','no-store').json({employees:people,earliest:addDays(localDate(clock),10),isTest:test,timeZone:'America/Toronto'});
+      res.set('Cache-Control','no-store').json({employees:people,earliest:earliestLeaveDate(clock),isTest:test,timeZone:'America/Toronto'});
     } catch {res.status(500).json({error:'Impossible de charger le formulaire.'});}
   };
   app.get('/api/public-schedules/:token/leave-form',staff,formInfo(false));
