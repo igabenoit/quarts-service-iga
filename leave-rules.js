@@ -5,8 +5,9 @@ export function isDate(date) {
   return typeof date === 'string' && /^20\d{2}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && new Date(`${date}T12:00:00Z`).toISOString().slice(0,10) === date;
 }
 
-function minute(time) {
-  if (typeof time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('Heure invalide.');
+function minute(time,allowEnd=false) {
+  if(allowEnd&&time==='24:00')return 1440;
+  if (typeof time !== 'string' || !/^([01]\d|2[0-3]):(00|15|30|45)$/.test(time)) throw new Error('Choisissez une heure aux 15 minutes (ex. 8 h 00, 8 h 15, 8 h 30).');
   const [h,m] = time.split(':').map(Number); return h*60+m;
 }
 export function normalizeLeave(body, now) {
@@ -18,7 +19,7 @@ export function normalizeLeave(body, now) {
   const periods = [];
   for (const item of body.periods) {
     if (!item || !isDate(item.startDate) || !isDate(item.endDate) || item.endDate < item.startDate || typeof item.allDay !== 'boolean') throw new Error('Vérifiez les dates de début et de fin.');
-    const start = item.allDay ? 0 : minute(item.startTime), end = item.allDay ? 1440 : minute(item.endTime);
+    const start = item.allDay ? 0 : minute(item.startTime), end = item.allDay ? 1440 : minute(item.endTime,true);
     if (end <= start) throw new Error('L’heure de fin doit suivre l’heure de début. Séparez les périodes qui passent minuit.');
     for (let date = item.startDate; date <= item.endDate; date = addDays(date,1)) {
       if (periods.length >= 366) throw new Error('Maximum de 366 journées par demande.');
