@@ -39,7 +39,16 @@ function renderPrint(){
     const employeeRows=employees.map(e=>{
       const jobs=state.shifts.filter(s=>state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id));
       const paid=jobs.reduce((sum,s)=>sum+s.paidMinutes,0);
-      return `<tr><th scope="row" class="print-name">${e.displayRank??"—"}. ${escapeHtml(e.name)}<small class="print-seniority">Ancienneté : ${seniorityText(e.seniority)}</small></th>${dayNames.map((_,day)=>{const leave=state.timeOff.some(x=>x.employeeId===e.id&&x.dayIndex===day);const shifts=jobs.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute);const unavailable=!e.availability?.[day]?.length;return `<td class="${!leave&&unavailable&&!shifts.length?"print-unavailable":""}">${leave?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':shifts.length?shifts.map(s=>shiftText(s,e.role)).join(""):unavailable?'<span class="print-unavailable-label">Indisponible</span>':""}</td>`;}).join("")}<td class="print-hours">${paid?durationText(paid):"—"}</td></tr>`;
+      return `<tr><th scope="row" class="print-name">${e.displayRank??"—"}. ${escapeHtml(e.name)}<small class="print-seniority">Ancienneté : ${seniorityText(e.seniority)}</small></th>${dayNames.map((_,day)=>{
+        const leave=state.timeOff.some(x=>x.employeeId===e.id&&x.dayIndex===day);
+        const approved=approvedForDay(e.id,day);
+        const shifts=jobs.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute);
+        const unavailable=!e.availability?.[day]?.length;
+        const labels=approved.map(p=>`<strong class="print-leave">CONGÉ APPROUVÉ${p.allDay?"":`<br>${timeText(p.startMinute)}–${timeText(p.endMinute)}`}</strong>`).join("");
+        const manual=leave?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':"";
+        const work=shifts.map(s=>shiftText(s,e.role)).join("");
+        return `<td class="${!leave&&!approved.length&&unavailable&&!shifts.length?"print-unavailable":""}">${labels}${manual}${work}${!labels&&!manual&&!work&&unavailable?'<span class="print-unavailable-label">Indisponible</span>':""}</td>`;
+      }).join("")}<td class="print-hours">${paid?durationText(paid):"—"}</td></tr>`;
     }).join("");
     const unfilled=groupShifts.filter(s=>!state.assignments.some(a=>a.shiftId===s.id));
     const pendingRow=unfilled.length?`<tr class="print-unfilled"><th scope="row" class="print-name">À couvrir</th>${dayNames.map((_,day)=>`<td>${unfilled.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(shiftText).join("")}</td>`).join("")}<td class="print-hours">${durationText(unfilled.reduce((sum,s)=>sum+s.paidMinutes,0))}</td></tr>`:"";
