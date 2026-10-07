@@ -31,6 +31,23 @@ export function normalizeLeave(body, now) {
   const earliest = earliestLeaveDate(now);
   return {email, reason, periods, late:!isBeforeDeadline(periods[0].date,now), earliest, deadline:deadlineForDate(periods[0].date)};
 }
+// Preserve the submitted request while approving only time not already covered.
+export function uncoveredLeavePeriods(periods, approved) {
+  return periods.flatMap(period => {
+    let parts = [{...period}];
+    for (const covered of approved) {
+      if (covered.date !== period.date) continue;
+      parts = parts.flatMap(p => {
+        if (covered.endMinute <= p.startMinute || covered.startMinute >= p.endMinute) return [p];
+        const remaining = [];
+        if (covered.startMinute > p.startMinute) remaining.push({...p, endMinute:covered.startMinute, allDay:false});
+        if (covered.endMinute < p.endMinute) remaining.push({...p, startMinute:covered.endMinute, allDay:false});
+        return remaining;
+      });
+    }
+    return parts;
+  });
+}
 export function conflictsWithLeave(shift, periods = []) {
   if (!shift.weekStart) return false;
   const date = addDays(shift.weekStart, shift.dayIndex);
@@ -48,7 +65,7 @@ export function leaveStatistics(rows) {
     const personKey=departmentKey+':'+((r.email||'').trim().toLowerCase()+':'+r.employee_name.trim().toLocaleLowerCase('fr-CA'));
     const person = employees.get(personKey)||{name:r.employee_name,department:departmentName,total:0,approved:0,late:0};
     person.total++; if (r.status==='approved') person.approved++; if (r.status==='late') person.late++; employees.set(personKey,person);
-    if (r.status==='approved') for (const p of r.periods) { if (p.allDay) counts.fullDays++; else counts.partialHours+=(p.endMinute-p.startMinute)/60; }
+    if (r.status==='approved') for (const p of (r.effective_periods ?? r.periods)) { if (p.allDay) counts.fullDays++; else counts.partialHours+=(p.endMinute-p.startMinute)/60; }
     if (r.decided_at) {delay += Math.max(0,new Date(r.decided_at)-new Date(r.submitted_at));decided++;}
   }
   return {...counts,averageResponseHours:decided?delay/decided/3600000:null,employees:[...employees.values()],departments:[...departments.values()]};

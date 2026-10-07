@@ -5,7 +5,7 @@ import {conflictsWithLeave} from './leave-rules.js';
 export async function releaseLeaveConflicts(client, {weekStart=null, requestId=null}={}) {
   if (!weekStart && !requestId) throw new Error('Une semaine ou une demande est requise.');
   const candidates=(await client.query(`SELECT s.id, s.week_start, s.day_index,
-    s.start_minute, s.end_minute, a.employee_id, r.id AS request_id, r.periods
+    s.start_minute, s.end_minute, a.employee_id, r.id AS request_id, COALESCE(r.effective_periods, r.periods) AS periods
     FROM schedule_assignments a
     JOIN schedule_shifts s ON s.id=a.shift_id
     JOIN schedule_leave_requests r ON r.employee_id=a.employee_id

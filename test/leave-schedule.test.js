@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {releaseLeaveConflicts} from '../leave-schedule.js';
 import {installLeave} from '../leave.js';
+import {uncoveredLeavePeriods, leaveStatistics} from '../leave-rules.js';
 
 const period=(date,startMinute=0,endMinute=1440)=>({date,startMinute,endMinute,allDay:startMinute===0&&endMinute===1440});
 const assignment=(id,day,start=480,end=1020,week='2026-10-12')=>({id:String(id),week_start:week,day_index:day,start_minute:start,end_minute:end,employee_id:'7',request_id:'20',periods:[period('2026-10-17')]});
@@ -46,13 +47,21 @@ test('une portée explicite est obligatoire et une erreur de retrait remonte au 
   await assert.rejects(releaseLeaveConflicts(clientFor([assignment(1,5)],{failDelete:true}),{requestId:'20'}),/database error/);
 });
 
-async function routesFor(client,{status='pending',isTest=false,version=1}={}){
+async function routesFor(client,{status='pending',isTest=false,version=1,periods=[period('2026-10-17')],other=[]}={}){
   const routes=new Map();
   const app={use(){}};
   for(const verb of ['get','post','put','patch'])app[verb]=(path,...handlers)=>routes.set(`${verb} ${path}`,handlers);
   const original=client.query.bind(client);
   client.query=async(sql,args)=>{
-    if(sql.startsWith('SELECT * FROM schedule_leave_requests WHERE id='))return {rows:[{id:'20',employee_id:'7',department_id:'1',version,status,is_test:isTest,periods:[period('2026-10-17')],first_date:'2026-10-17',last_date:'2026-10-17'}]};
+    if(sql.startsWith('SELECT * FROM schedule_leave_requests WHERE id='))return {rows:[{id:'20',employee_id:'7',department_id:'1',version,status,is_test:isTest,periods,first_date:periods[0].date,last_date:periods.at(-1).date}]};
+    if(sql.startsWith('SELECT COALESCE(effective_periods, periods)')){
+      assert.match(sql,/employee_id=\$1/);
+      assert.match(sql,/archived_at IS NULL/);
+      return {rows:other};
+    }
+    if(sql.startsWith('UPDATE schedule_leave_requests SET effective_periods=')){
+      for(const r of client.remaining.values())if(r.request_id===args[1])r.periods=JSON.parse(args[0]);
+    }
     if(sql.startsWith('SELECT code FROM schedule_leave_departments'))return {rows:[{code:'service'}]};
     return original(sql,args);
   };
@@ -66,6 +75,41 @@ async function routesFor(client,{status='pending',isTest=false,version=1}={}){
   return {routes,manager,origin};
 }
 function response(){return {code:200,body:null,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};}
+
+test('ajout du 18 à un congé du 17 : seul le quart du 18 de 11 h 15 à 17 h 15 est libéré',async()=>{
+  const client=clientFor([assignment(1,5),assignment(2,6,675,1035),assignment(3,4)]);
+  const periods=[period('2026-10-17'),period('2026-10-18')];
+  const {routes}=await routesFor(client,{periods,other:[{periods:[period('2026-10-17')]}]});
+  const res=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:'20'},body:{status:'approved',version:1}},res);
+  assert.equal(res.code,200);assert.equal(res.body.releasedShifts,1);
+  assert.deepEqual([...client.remaining.keys()],['1','3']);
+  const saved=client.calls.find(c=>c.sql.startsWith('UPDATE schedule_leave_requests SET effective_periods='));
+  assert.deepEqual(JSON.parse(saved.args[0]),[period('2026-10-18')]);
+  assert.equal(client.calls.at(-1).sql,'COMMIT');
+});
+
+test('une demande entièrement couverte explique le doublon sans modifier les quarts',async()=>{
+  const client=clientFor([assignment(1,5)]);
+  const {routes}=await routesFor(client,{other:[{periods:[period('2026-10-17')]}]});
+  const res=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:'20'},body:{status:'approved',version:1}},res);
+  assert.equal(res.code,409);assert.match(res.body.error,/déjà approuvées/);
+  assert.equal(client.calls.some(c=>c.sql.startsWith('UPDATE')||c.sql.startsWith('DELETE')),false);
+  assert.equal(client.calls.at(-1).sql,'ROLLBACK');
+});
+
+test('les chevauchements partiels et multiples conservent exactement les heures supplémentaires',()=>{
+  const requested=[period('2026-10-18',480,1020)];
+  const covered=[period('2026-10-18',600,720),period('2026-10-18',660,780),period('2026-10-18',900,1020),period('2026-10-17')];
+  assert.deepEqual(uncoveredLeavePeriods(requested,covered),[period('2026-10-18',480,600),period('2026-10-18',780,900)]);
+  assert.deepEqual(requested,[period('2026-10-18',480,1020)]);
+  assert.deepEqual(uncoveredLeavePeriods(requested,[period('2026-10-18',1020,1080)]),requested);
+});
+
+test('les statistiques comptent les périodes ajoutées sans doubler le 17',()=>{
+  const base={status:'approved',employee_name:'Raphaël',email:'r@example.com',department_name:'Service'};
+  const result=leaveStatistics([{...base,periods:[period('2026-10-17')]},{...base,periods:[period('2026-10-17'),period('2026-10-18')],effective_periods:[period('2026-10-18')]}]);
+  assert.equal(result.fullDays,2);
+});
 test('approbation et libération sont atomiques, protégées, avec compte rendu',async()=>{
   const client=clientFor([assignment(1,5),assignment(2,4)]);
   const {routes,manager,origin}=await routesFor(client);

@@ -2,11 +2,11 @@ import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
-import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, LATE_MESSAGE} from './leave-rules.js';
+import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
 import {releaseLeaveConflicts} from './leave-schedule.js';
 
 export async function approvedLeave(pool, weekStart) {
-  const result = await pool.query(`SELECT employee_id, periods FROM schedule_leave_requests
+  const result = await pool.query(`SELECT employee_id, COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests
     WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1`, [weekStart,addDays(weekStart,6)]);
   return result.rows;
 }
@@ -21,6 +21,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     decided_at TIMESTAMPTZ, decision_note TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1
   );
+  ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS effective_periods JSONB;
   CREATE INDEX IF NOT EXISTS schedule_leave_dates_idx ON schedule_leave_requests(first_date,last_date);
   CREATE TABLE IF NOT EXISTS schedule_leave_events (
     id BIGSERIAL PRIMARY KEY, request_id BIGINT NOT NULL REFERENCES schedule_leave_requests(id),
@@ -132,8 +133,13 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
           row.employee_id=linked.id;
           await client.query('UPDATE schedule_leave_requests SET employee_id=$1 WHERE id=$2',[linked.id,row.id]);
         }
-        const other=(await client.query(`SELECT periods FROM schedule_leave_requests WHERE employee_id=$1 AND status='approved' AND is_test=FALSE AND first_date<=$3 AND last_date>=$2`,[row.employee_id,row.first_date,row.last_date])).rows;
-        if(other.some(o=>o.periods.some(p=>row.periods.some(q=>p.date===q.date&&p.startMinute<q.endMinute&&q.startMinute<p.endMinute)))){await client.query('ROLLBACK');return res.status(409).json({error:'Cette période chevauche un congé déjà approuvé.'});}
+        const other=(await client.query(`SELECT COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests WHERE employee_id=$1 AND status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$3 AND last_date>=$2`,[row.employee_id,row.first_date,row.last_date])).rows;
+        const effective=uncoveredLeavePeriods(row.periods,other.flatMap(o=>o.periods));
+        if(!effective.length){await client.query('ROLLBACK');return res.status(409).json({error:'Toutes les périodes de cette demande sont déjà approuvées. Aucun changement à l’horaire.'});}
+        await client.query('UPDATE schedule_leave_requests SET effective_periods=$1::jsonb WHERE id=$2',[JSON.stringify(effective),row.id]);
+        if(JSON.stringify(effective)!==JSON.stringify(row.periods)){
+          await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,'approved','Les périodes déjà approuvées restent dans leur demande initiale. Seules les périodes supplémentaires sont ajoutées par cette approbation.']);
+        }
       }
       await client.query(`UPDATE schedule_leave_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3`,[b.status,note,row.id]);
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
