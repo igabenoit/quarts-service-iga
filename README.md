@@ -22,11 +22,15 @@ npm run check
 npm start
 ```
 
-## Retour avant une recréation
+## Annuler la dernière action
 
-Chaque « Recréer selon les priorités » enregistre automatiquement les affectations précédentes de la semaine dans la même transaction. Le bouton « Revenir avant la dernière recréation » affiche les changements à confirmer, puis restaure les affectations sauvegardées, y compris les choix manuels. Les changements d’affectation faits depuis cette recréation sont également remplacés. L’état remplacé est conservé dans l’historique technique. Les autres semaines, les paramètres des employés et les congés restent inchangés.
+La touche « Annuler la dernière action » fonctionne directement, sans aperçu, dans l’horaire et le suivi des congés. Le libellé précise l’action qui sera annulée. Ctrl+Z (ou Cmd+Z) déclenche le même retour hors des champs de saisie. Plusieurs clics remontent les actions successives. L’historique est commun aux gestionnaires et persiste après un rechargement.
 
-Cette option couvre uniquement les recréations effectuées après sa mise en service. Une sauvegarde déjà restaurée ne peut pas être appliquée de nouveau. Un nouvel aperçu est nécessaire si l’horaire change entre l’aperçu et la confirmation. Une modification des besoins de quarts ou un congé incompatible bloque la restauration avec une explication; aucune restauration partielle n’est effectuée.
+Sont enregistrés : ajouts, modifications et suppressions de quarts, affectations, générations, copie de semaine, budgets et notes, fiches employés et congés manuels, décisions de congé et application des congés. L’enregistrement d’une fiche employé et de ses congés constitue une seule action. Une annulation rétablit uniquement les lignes modifiées par cette commande, avec les affectations supprimées en cascade. L’historique des décisions de congé est conservé. Les réglages de connexion, de partage et de courriel ne font pas partie de ce retour.
+
+Chaque commande et son historique sont enregistrés dans la même transaction. Les erreurs et opérations sans changement ne consomment pas le retour. Une action plus récente ou des données modifiées hors de cet historique bloquent un retour périmé. Les actions antérieures à la mise en service ne sont pas récupérables. Les sauvegardes techniques des recréations de la version précédente restent conservées.
+
+Les tests d’annulation utilisent PostgreSQL embarqué (PGlite, dépendance de développement) : exécuter npm ci puis npm test.
 
 ## Demandes de congé
 

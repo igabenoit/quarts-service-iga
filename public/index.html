@@ -24,7 +24,7 @@
   <div id="appView" hidden>
     <header class="app-header">
       <div><img class="brand-logo" src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit — Saint-Hyacinthe" width="1200" height="586"><p class="eyebrow">IGA EXTRA FAMILLE BENOIT</p><h1>Quarts Service</h1><p>Construire les quarts nécessaires avant l’attribution des employés</p></div>
-      <div class="header-actions"><a href="/conges-gestion">Demandes de congé</a><button id="previewBtn" class="secondary">Aperçu avant impression</button><button id="printBtn" class="secondary">Imprimer</button><button id="planoBtn" class="secondary">Planogramme des pauses</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
+      <div class="header-actions"><button id="undoLastAction" type="button" class="secondary" disabled>↶ Annuler la dernière action</button><span id="undoStatus" role="status"></span><a href="/conges-gestion">Demandes de congé</a><button id="previewBtn" class="secondary">Aperçu avant impression</button><button id="printBtn" class="secondary">Imprimer</button><button id="planoBtn" class="secondary">Planogramme des pauses</button><button id="logoutBtn" class="ghost">Déconnexion</button></div>
     </header>
     <main>
       <section class="week-toolbar card">
@@ -58,8 +58,6 @@
         <p>Un congé approuvé remet uniquement les quarts concernés à couvrir. Choisissez ensuite leur remplaçant dans la grille. Pour reprendre les congés déjà approuvés, utilisez le bouton ci-dessous.</p>
         <button id="applyApprovedLeaves" type="button" class="secondary">Appliquer les congés approuvés</button>
         <p id="leaveApplyStatus" role="status"></p>
-        <button id="undoRegeneration" type="button" class="secondary">Revenir avant la dernière recréation</button>
-        <p id="restoreStatus" role="status">Une sauvegarde est créée pour cette semaine avant chaque « Recréer selon les priorités ».</p>
         <p id="scheduleStatus"></p><div id="approvedLeaveSummary"></div>
         <div id="scheduleBoard"></div>
         <div id="employeeTotals" class="employee-totals"></div>
@@ -112,14 +110,6 @@
     <div id="toast" role="status"></div>
     <section id="printSheet" aria-hidden="true"></section>
     <section id="planoPrintSheet" aria-hidden="true"></section>
-    <dialog id="restorePreview" aria-labelledby="restoreTitle">
-      <h2 id="restoreTitle">Revenir avant la dernière recréation</h2>
-      <p id="restoreSummary"></p>
-      <p>Seules les affectations de cette semaine seront rétablies, y compris les choix manuels remplacés lors de la recréation. Les congés restent inchangés.</p>
-      <div id="restoreChanges"></div>
-      <p id="restoreError" role="status"></p>
-      <div class="form-actions"><button id="confirmRestore" type="button">Rétablir ces affectations</button><button id="cancelRestore" type="button" class="secondary">Fermer</button></div>
-    </dialog>
     <dialog id="printPreview" aria-label="Aperçu de l’horaire avant impression">
       <div class="preview-toolbar"><strong>Aperçu de l’horaire</strong><div><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
       <div id="previewPages" class="preview-pages"></div>
@@ -130,6 +120,7 @@
     </dialog>
   </div>
   <script src="planogram.js" defer></script>
+  <script src="undo-control.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {beginUndo,installUndo} from "./undo.js";
 import express from "express";
 import pg from "pg";
 import {installLeave, approvedLeave} from "./leave.js";
@@ -315,6 +316,7 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
     const normalized = people.map(normalizeEmployee);
     if (new Set(normalized.map(e => e.name.toLocaleLowerCase("fr-CA"))).size !== normalized.length) throw new Error("Noms en double.");
     await client.query("BEGIN");
+    await beginUndo(client,"Importer les employés",request.params.weekStart||null,request);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees");
     if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
     for (const e of normalized) await client.query(
@@ -340,6 +342,7 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
   try {
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
+    await beginUndo(client,"Ajouter un employé",request.params.weekStart||null,request);
     const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
@@ -360,6 +363,7 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
   try {
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
+    await beginUndo(client,"Modifier un employé",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
@@ -406,16 +410,21 @@ app.get("/api/weeks/:weekStart/day-exceptions", requireManager, async (request, 
   } catch { response.status(400).json({ error: "Impossible de charger les exceptions de jours." }); }
 });
 app.put("/api/weeks/:weekStart/employees/:id/day-exception", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
     const employeeId = Number(request.params.id), weekStart = request.params.weekStart;
     if (!validDate(weekStart) || !Number.isInteger(employeeId) || employeeId <= 0 || typeof request.body?.allowed !== "boolean")
       throw new Error("Exception de jours invalide.");
-    await ensureWeek(weekStart);
-    if (request.body.allowed) await pool.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id)
+    await client.query('BEGIN');
+    await beginUndo(client,'Modifier l’exception de jours',weekStart,request);
+    await ensureWeek(weekStart,client);
+    if (request.body.allowed) await client.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id)
       VALUES ($1,$2) ON CONFLICT DO NOTHING`, [weekStart,employeeId]);
-    else await pool.query("DELETE FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
+    else await client.query("DELETE FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
+    await client.query('COMMIT');
     response.json({ allowed: request.body.allowed });
-  } catch (error) { response.status(400).json({ error: error.message }); }
+  } catch (error) {await client.query('ROLLBACK').catch(()=>{}); response.status(400).json({ error: error.message }); }
+  finally{client.release();}
 });
 app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrigin, async (request, response) => {
   const client = await pool.connect();
@@ -426,6 +435,7 @@ app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrig
       || !Array.isArray(request.body?.days) || days.some(d=>!Number.isInteger(d)||d<0||d>6))
       throw new Error("Congés demandés invalides.");
     await client.query("BEGIN");
+    await beginUndo(client,"Modifier les congés manuels",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart,client);
     const employee = await client.query("SELECT id FROM schedule_employees WHERE id=$1 FOR UPDATE", [employeeId]);
@@ -452,6 +462,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     const id = Number(request.params.id), employeeId = Number(request.body?.employeeId);
     const shiftResult = await client.query("SELECT * FROM schedule_shifts WHERE id=$1", [id]);
     if (!shiftResult.rowCount) throw new Error("Quart introuvable.");
+    await beginUndo(client,"Modifier une affectation",isoDate(shiftResult.rows[0].week_start),request);
     if (request.body?.employeeId === null) {
       await client.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
       await client.query("COMMIT");
@@ -482,6 +493,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
   try {
     if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
     await client.query("BEGIN");
+    await beginUndo(client,request.body?.replaceAll===true?"Recréer selon les priorités":"Attribuer les quarts libres",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
     const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
@@ -513,6 +525,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 
 await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
+await installUndo(app,pool,{requireManager,sameOrigin});
 app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));
 
 app.get("/health", (_request, response) => response.json({ ok: true }));
@@ -661,18 +674,23 @@ app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
 });
 
 app.put("/api/weeks/:weekStart", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
     const { weekStart } = request.params;
     if (!validDate(weekStart)) return response.status(400).json({ error: "Date invalide." });
     const cashierBudgetMinutes = parseMinutes(request.body?.cashierBudgetMinutes, "Budget caisse", 0, 100000);
     const packerBudgetMinutes = parseMinutes(request.body?.packerBudgetMinutes, "Budget emballeurs", 0, 100000);
     const notes = String(request.body?.notes || "").trim().slice(0, 1000);
-    await ensureWeek(weekStart);
-    const result = await pool.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart]);
+    await client.query('BEGIN');
+    await beginUndo(client,'Modifier les budgets ou notes',weekStart,request);
+    await ensureWeek(weekStart,client);
+    const result = await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart]);
+    await client.query('COMMIT');
     response.json({ week: mapWeek(result.rows[0]) });
   } catch (error) {
+    await client.query('ROLLBACK').catch(()=>{});
     response.status(400).json({ error: error.message || "Paramètres invalides." });
-  }
+  }finally{client.release();}
 });
 
 app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (request, response) => {
@@ -684,6 +702,7 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
     const days = [...new Set(Array.isArray(request.body?.days) ? request.body.days.map(Number) : [])];
     if (!days.length || days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error("Choisissez au moins une journée.");
     await client.query("BEGIN");
+    await beginUndo(client,"Ajouter des quarts",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart, client);
     const created = [];
@@ -702,12 +721,14 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
 app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
   const client=await pool.connect();
   try {
-    await client.query("BEGIN");await client.query("SELECT pg_advisory_xact_lock(8675309)");
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const id = Number(request.params.id);
     if (!Number.isInteger(id) || id <= 0) throw new Error("Quart invalide.");
     const shift = normalizeShift(request.body || {});
     const dayIndex = parseMinutes(request.body?.dayIndex, "Journée", 0, 6);
     const existing=(await client.query("SELECT s.week_start,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1",[id])).rows[0];
+    await beginUndo(client,"Modifier un quart",existing?isoDate(existing.week_start):null,request);
     if(existing?.employee_id){
       const weekStart=isoDate(existing.week_start);
       const periods=(await approvedLeave(client,weekStart)).filter(r=>String(r.employee_id)===String(existing.employee_id)).flatMap(r=>r.periods);
@@ -727,6 +748,8 @@ app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, respon
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    const previous=(await client.query("SELECT week_start FROM schedule_shifts WHERE id=$1",[id])).rows[0];
+    await beginUndo(client,"Supprimer un quart",previous?isoDate(previous.week_start):null,request);
     await client.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
     await client.query('COMMIT');
     response.json({ ok: true });
@@ -741,6 +764,7 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
     if (!validDate(weekStart)) throw new Error("Date invalide.");
     const previous = addDays(weekStart, -7);
     await client.query("BEGIN");
+    await beginUndo(client,"Copier la semaine précédente",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart, client);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [weekStart]);

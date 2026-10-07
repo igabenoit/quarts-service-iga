@@ -11,6 +11,7 @@ function clientFor(rows,{failDelete=false}={}) {
   const calls=[];
   return {remaining,calls,release(){},async query(sql,args=[]){
     calls.push({sql,args});
+    if(sql.startsWith('INSERT INTO schedule_undo_actions'))return {rows:[{id:'1'}]};
     if(sql.includes('FROM schedule_assignments a')){
       assert.match(sql,/r.status='approved' AND r.is_test=FALSE AND r.archived_at IS NULL/);
       assert.match(sql,/r.employee_id=a.employee_id/);

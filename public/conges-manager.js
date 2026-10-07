@@ -1,12 +1,13 @@
 const $=s=>document.querySelector(s),escape=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const mailLabels={pending:'En attente d’envoi',sending:'Envoi en cours',sent:'Pris en charge par Resend',error:'Envoi non confirmé',review:'À vérifier dans Resend'};
+const undoControl=window.createUndoControl({onUndo:async()=>{await load();}});
 const labels={pending:'En attente',approved:'Approuvée',refused:'Refusée',cancelled:'Annulée',late:'Hors délai'};
 const date=d=>new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeZone:'UTC'}).format(new Date(`${d.slice(0,10)}T12:00:00Z`));
 const stamp=d=>new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(d));
 const time=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
 const monday=d=>{const dt=new Date(`${d}T12:00:00Z`),day=dt.getUTCDay();dt.setUTCDate(dt.getUTCDate()-(day===0?6:day-1));return dt.toISOString().slice(0,10);};
 let requests=[],departments=[],scheduleEmployees=[];
-async function api(url,options={}){const res=await fetch(url,{cache:'no-store',...options});const data=await res.json();if(!res.ok)throw new Error(res.status===401?'Connexion gestionnaire requise : utilisez « Retour aux horaires » pour vous connecter.':data.error);return data;}
+async function api(url,options={}){const res=await undoControl.request(url,{cache:'no-store',...options});const data=await res.json();if(!res.ok)throw new Error(res.status===401?'Connexion gestionnaire requise : utilisez « Retour aux horaires » pour vous connecter.':data.error);return data;}
 function render(){
   const query=$('#search').value.trim().toLocaleLowerCase('fr-CA'),status=$('#status').value;
   const rows=requests.filter(r=>(!status||r.status===status)&&r.employee_name.toLocaleLowerCase('fr-CA').includes(query));

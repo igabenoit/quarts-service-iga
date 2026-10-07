@@ -1,3 +1,4 @@
+import {beginUndo} from "./undo.js";
 import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
@@ -120,6 +121,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       if(!['approved','refused','cancelled'].includes(b.status)||!Number.isSafeInteger(b.version)||note.length>1000) return res.status(400).json({error:'Décision invalide.'});
       if(b.status!=='approved'&&!note)return res.status(400).json({error:'Précisez la raison de votre décision.'});
       await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
+      await beginUndo(client,b.status==='approved'?'Approuver un congé':b.status==='cancelled'?'Annuler un congé':'Refuser un congé',null,req);
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Demande introuvable.'});}
       if(row.archived_at){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande est archivée.'});}
@@ -154,6 +156,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     try{
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(8675309)');
+      await beginUndo(client,'Appliquer les congés approuvés',weekStart,req);
       const released=await releaseLeaveConflicts(client,{weekStart});
       await client.query('COMMIT');res.json({ok:true,releasedShifts:released.length});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’appliquer les congés. Aucun changement enregistré.'});}

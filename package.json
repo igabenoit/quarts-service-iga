@@ -8,11 +8,14 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js && node --check leave.js && node --check leave-rules.js && node --check public/conges-form.js && node --check public/conges-manager.js && node --check public/horaire.js && node --check leave-notifications.js && node --check leave-access.js && node --check leave-departments.js && node --check leave-schedule.js && node --check schedule-backup.js",
+    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js && node --check leave.js && node --check leave-rules.js && node --check public/conges-form.js && node --check public/conges-manager.js && node --check public/horaire.js && node --check leave-notifications.js && node --check leave-access.js && node --check leave-departments.js && node --check leave-schedule.js && node --check schedule-backup.js && node --check undo.js && node --check public/undo-control.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^5.1.0",
     "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }

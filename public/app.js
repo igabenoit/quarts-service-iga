@@ -18,7 +18,7 @@ function durationText(value){const h=value/60;return `${h.toLocaleString("fr-CA"
 function seniorityText(value){if(!value||value==="9999-12-31")return "À préciser";const [year,month,day]=value.slice(0,10).split("-");return `${day}/${month}/${year}`;}
 function formatWeek(start){return `${fmtDate.format(new Date(`${start}T12:00:00Z`))} au ${fmtDate.format(new Date(`${addDays(start,6)}T12:00:00Z`))}`;}
 function escapeHtml(value){return String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");}
-async function api(url,options={}){const response=await fetch(url,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||"Une erreur est survenue.");return body;}
+async function api(url,options={}){const response=await undoControl.request(url,{...options,headers:{"Content-Type":"application/json",...(options.undoGroup?{"X-Undo-Group":options.undoGroup}:{}),...(options.headers||{})}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||"Une erreur est survenue.");return body;}
 function toast(text){const node=$("#toast");node.textContent=text;node.classList.add("show");setTimeout(()=>node.classList.remove("show"),2200);}
 function showError(error){console.error(error);toast(error.message||"Une erreur est survenue.");}
 
@@ -59,7 +59,7 @@ function renderPrint(){
   $("#printSheet").innerHTML=[buildPage("Superviseurs et commandes",[scheduleGroups[0],scheduleGroups[3]]),buildPage("Caissières",[scheduleGroups[1]]),buildPage("Emballeurs",[scheduleGroups[2]])].join("");
 }
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
-async function loadWeek(start){$("#restoreStatus").textContent="Une sauvegarde est créée pour cette semaine avant chaque « Recréer selon les priorités ».";state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";}
+async function loadWeek(start){state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";undoControl.refresh();}
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
 function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=active;$("#changeShareCode").hidden=!active;$("#copyShareLink").hidden=!active;$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=active?`${location.origin}${state.sharePath} · Code requis pour consulter`:`Aucun lien actif pour cette semaine.`;}
@@ -112,7 +112,7 @@ function renderSchedule(){
   document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=async()=>{try{await api(`/api/shifts/${select.dataset.shift}/assignment`,{method:"PUT",body:JSON.stringify({employeeId:select.value?Number(select.value):null})});state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;render();toast("Horaire enregistré");}catch(error){showError(error);renderSchedule();}});
   document.querySelectorAll(".edit-unfilled-shift").forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));
 }
-async function saveWeek(){clearTimeout(state.saving);$("#saveStatus").textContent="Enregistrement…";const result=await api(`/api/weeks/${state.weekStart}`,{method:"PUT",body:JSON.stringify({cashierBudgetMinutes:Math.round(Number($("#frontBudget").value||0)*60),packerBudgetMinutes:Math.round(Number($("#packerBudget").value||0)*60),notes:$("#weekNotes").value})});state.week=result.week;renderSummary();renderPrint();$("#saveStatus").textContent="Tout est enregistré";}
+async function saveWeek(){clearTimeout(state.saving);state.saving=null;$("#saveStatus").textContent="Enregistrement…";const result=await api(`/api/weeks/${state.weekStart}`,{method:"PUT",body:JSON.stringify({cashierBudgetMinutes:Math.round(Number($("#frontBudget").value||0)*60),packerBudgetMinutes:Math.round(Number($("#packerBudget").value||0)*60),notes:$("#weekNotes").value})});state.week=result.week;renderSummary();renderPrint();$("#saveStatus").textContent="Tout est enregistré";}
 function queueSave(){clearTimeout(state.saving);state.saving=setTimeout(()=>saveWeek().catch(showError),600);}
 function resetForm(day=0){$("#shiftForm").reset();$("#shiftId").value="";$("#role").value="cashier";$("#startTime").value="08:00";$("#endTime").value="16:00";$("#breakMinutes").value="0";renderDayChoices([day]);$("#submitShift").textContent="Ajouter le quart";$("#cancelEdit").hidden=true;$("#deleteShift").hidden=true;$("#departmentWrap").hidden=true;}
 function editShift(id){const s=state.shifts.find(x=>x.id===id);if(!s)return;$("#shiftId").value=s.id;$("#role").value=s.role;$("#startTime").value=`${String(Math.floor(s.startMinute/60)).padStart(2,"0")}:${String(s.startMinute%60).padStart(2,"0")}`;$("#endTime").value=`${String(Math.floor(s.endMinute/60)).padStart(2,"0")}:${String(s.endMinute%60).padStart(2,"0")}`;$("#breakMinutes").value=String(s.breakMinutes);$("#sourceDepartment").value=s.sourceDepartment;$("#shiftNotes").value=s.notes;renderDayChoices([s.dayIndex]);document.querySelectorAll("#dayChoices input").forEach(input=>input.onchange=()=>{if(input.checked)document.querySelectorAll("#dayChoices input").forEach(other=>{if(other!==input)other.checked=false;});});$("#departmentWrap").hidden=s.role!=="support";$("#submitShift").textContent="Enregistrer le quart";$("#cancelEdit").hidden=false;$("#deleteShift").hidden=false;$("#shiftForm").scrollIntoView({behavior:"smooth",block:"center"});}
@@ -144,7 +144,7 @@ renderOtherRoles();
 $("#employeeRole").onchange=()=>{const selected=[...document.querySelectorAll("#employeeOtherRoles input:checked")].map(input=>input.value);renderOtherRoles(selected);};
 $("#availabilityFields").innerHTML=shortDays.map((name,d)=>`<label>${name}<input id="availability${d}" placeholder="08:00-17:00"></label>`).join("");
 $("#timeOffFields").innerHTML=shortDays.map((name,d)=>`<label><input id="timeOff${d}" type="checkbox"> ${name}</label>`).join("");
-$("#employeeForm").onsubmit=async event=>{event.preventDefault();try{const id=$("#employeeId").value;const availability={};for(let d=0;d<7;d++)availability[d]=parseWindow($("#availability"+d).value);const body={name:$("#employeeName").value,role:$("#employeeRole").value,roles:[$("#employeeRole").value,...[...document.querySelectorAll("#employeeOtherRoles input:checked")].map(input=>input.value)],seniority:$("#employeeSeniority").value,displayRank:$("#employeeDisplayRank").value||null,assignmentRank:$("#employeeAssignmentRank").value||null,targetMinutes:Math.round(Number($("#employeeTarget").value)*60),maxMinutes:Math.round(Number($("#employeeMax").value)*60),isMinor:$("#employeeMinor").checked,allowExtraHours:$("#employeeExtraHours").checked,availability,notes:$("#employeeNotes").value,active:$("#employeeActive").checked};const saved=await api(id?`/api/employees/${id}`:"/api/employees",{method:id?"PUT":"POST",body:JSON.stringify(body)});const employeeId=saved.employee.id;await api(`/api/weeks/${state.weekStart}/employees/${employeeId}/day-exception`,{method:"PUT",body:JSON.stringify({allowed:$("#employeeSixOrSevenDays").checked})});state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;const days=Array.from({length:7},(_,d)=>d).filter(d=>$("#timeOff"+d).checked);await api(`/api/weeks/${state.weekStart}/employees/${employeeId}/time-off`,{method:"PUT",body:JSON.stringify({days})});state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;resetEmployeeForm();await loadEmployees();render();toast("Employé et congés enregistrés");}catch(error){showError(error);}};
+$("#employeeForm").onsubmit=async event=>{event.preventDefault();const undoGroup=crypto.randomUUID();try{const id=$("#employeeId").value;const availability={};for(let d=0;d<7;d++)availability[d]=parseWindow($("#availability"+d).value);const body={name:$("#employeeName").value,role:$("#employeeRole").value,roles:[$("#employeeRole").value,...[...document.querySelectorAll("#employeeOtherRoles input:checked")].map(input=>input.value)],seniority:$("#employeeSeniority").value,displayRank:$("#employeeDisplayRank").value||null,assignmentRank:$("#employeeAssignmentRank").value||null,targetMinutes:Math.round(Number($("#employeeTarget").value)*60),maxMinutes:Math.round(Number($("#employeeMax").value)*60),isMinor:$("#employeeMinor").checked,allowExtraHours:$("#employeeExtraHours").checked,availability,notes:$("#employeeNotes").value,active:$("#employeeActive").checked};const saved=await api(id?`/api/employees/${id}`:"/api/employees",{undoGroup,method:id?"PUT":"POST",body:JSON.stringify(body)});const employeeId=saved.employee.id;await api(`/api/weeks/${state.weekStart}/employees/${employeeId}/day-exception`,{undoGroup,method:"PUT",body:JSON.stringify({allowed:$("#employeeSixOrSevenDays").checked})});state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;const days=Array.from({length:7},(_,d)=>d).filter(d=>$("#timeOff"+d).checked);await api(`/api/weeks/${state.weekStart}/employees/${employeeId}/time-off`,{undoGroup,method:"PUT",body:JSON.stringify({days})});state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;resetEmployeeForm();await loadEmployees();render();toast("Employé et congés enregistrés");}catch(error){showError(error);}};
 $("#clearEmployee").onclick=resetEmployeeForm;
 $("#employeeImport").onchange=async event=>{try{const file=event.target.files[0];if(!file)return;const data=JSON.parse(await file.text());const result=await api("/api/employees/import",{method:"POST",body:JSON.stringify(data)});await loadEmployees();toast(`${result.count} employés importés`);}catch(error){showError(error);}finally{event.target.value="";}};
 $("#generateSchedule").onclick=async()=>{try{const result=await api(`/api/weeks/${state.weekStart}/generate`,{method:"POST"});state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;render();toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);}catch(error){showError(error);}};
@@ -164,44 +164,18 @@ $("#applyApprovedLeaves").onclick=async()=>{
   finally{button.disabled=false;}
 };
 $("#regenerateSchedule").onclick=async()=>{
-  if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés. Une sauvegarde permettra de revenir avant cette recréation."))return;
+  if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés. La touche Annuler permettra de revenir en arrière."))return;
   const button=$("#regenerateSchedule"),week=state.weekStart;button.disabled=true;
   try{
     const result=await api(`/api/weeks/${week}/generate`,{method:"POST",body:JSON.stringify({replaceAll:true})});
-    if(state.weekStart===week){await loadWeek(week);$("#restoreStatus").textContent="Horaire précédent sauvegardé. Le bouton ci-dessus permet de revenir avant cette recréation.";}
+    if(state.weekStart===week){await loadWeek(week);}
     toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);
   }catch(error){showError(error);}finally{button.disabled=false;}
 };
-let restoration=null,restoring=false;
-$("#undoRegeneration").onclick=async()=>{
-  const button=$("#undoRegeneration"),week=state.weekStart;button.disabled=true;
-  try{
-    const {backup}=await api(`/api/weeks/${week}/regeneration-backup`);
-    if(state.weekStart!==week)return;
-    if(!backup){$("#restoreStatus").textContent="Aucune recréation à annuler pour cette semaine. Les sauvegardes couvrent uniquement les recréations faites depuis l’ajout de cette option.";return;}
-    restoration={...backup,week};
-    const stamp=new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(backup.createdAt));
-    $("#restoreSummary").textContent=`Semaine du ${formatWeek(week)}. Sauvegarde du ${stamp} (Québec). ${backup.changes.length} affectation(s) à modifier. Les changements faits après cette recréation seront aussi remplacés.`;
-    $("#restoreChanges").innerHTML=backup.changes.length?'<table><thead><tr><th>Quart</th><th>Maintenant</th><th>Après restauration</th></tr></thead><tbody>'+backup.changes.map(c=>`<tr><td>${escapeHtml(c.date)}<br>${timeText(c.startMinute)}–${timeText(c.endMinute)}</td><td>${escapeHtml(c.current)}</td><td>${escapeHtml(c.restored)}</td></tr>`).join('')+'</tbody></table>':'<p>Les affectations correspondent déjà à la sauvegarde.</p>';
-    $("#restoreError").textContent=backup.issues.join(' ');
-    $("#confirmRestore").disabled=!backup.canRestore;
-    $("#restorePreview").showModal();
-  }catch(error){$("#restoreStatus").textContent=error.message;}finally{button.disabled=false;}
-};
-$("#cancelRestore").onclick=()=>{if(!restoring)$("#restorePreview").close();};
-$("#restorePreview").addEventListener('cancel',event=>{if(restoring)event.preventDefault();});
-$("#confirmRestore").onclick=async()=>{
-  if(!restoration||restoring)return;
-  const backup=restoration;restoring=true;$("#confirmRestore").disabled=true;$("#cancelRestore").disabled=true;
-  $("#restoreError").textContent='Restauration en cours…';
-  try{
-    await api(`/api/weeks/${backup.week}/regeneration-backup/restore`,{method:'POST',body:JSON.stringify({backupId:backup.id,token:backup.token})});
-    $("#restorePreview").close();restoration=null;
-    if(state.weekStart===backup.week){await loadWeek(backup.week);$("#restoreStatus").textContent='Les affectations précédant la dernière recréation sont rétablies.';}
-    toast('Horaire précédent rétabli');
-  }catch(error){$("#restoreError").textContent=error.message+' Fermez puis rouvrez cet aperçu pour vérifier l’état actuel.';}
-  finally{restoring=false;$("#cancelRestore").disabled=false;}
-};
+const undoControl=window.createUndoControl({
+  beforeUndo:async()=>{if(!state.saving)return false;await saveWeek();return true;},
+  onUndo:async action=>{clearTimeout(state.saving);state.saving=null;await loadEmployees();await loadWeek(action.week_start?String(action.week_start).slice(0,10):state.weekStart);toast('Dernière action annulée');}
+});
 api("/api/session").then(async session=>{if(session.role==="manager"){$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(mondayOf());}}).catch(()=>{});
 
 
