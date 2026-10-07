@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {beginUndo,installUndo} from "./undo.js";
+import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
 import {installLeave, approvedLeave} from "./leave.js";
@@ -88,6 +89,7 @@ await pool.query(`
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS is_minor BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS allow_extra_hours BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS roles JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS departed_at TIMESTAMPTZ;
   UPDATE schedule_employees SET roles=jsonb_build_array(role)
     WHERE jsonb_typeof(roles) <> 'array' OR NOT (roles ? role);
 `);
@@ -297,7 +299,7 @@ function mapEmployee(row) {
   return { id: Number(row.id), name: row.name, role: row.role,
     roles: [...new Set([row.role, ...(Array.isArray(row.roles) ? row.roles : [])])], area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
-    availability: row.availability, notes: row.notes, active: row.active,
+    availability: row.availability, notes: row.notes, active: row.active && !row.departed_at, departedAt: row.departed_at,
     displayRank: row.display_rank, assignmentRank: row.assignment_rank,
     isMinor: row.is_minor, allowExtraHours: row.allow_extra_hours };
 }
@@ -367,6 +369,7 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
+    if(before.rows[0].departed_at){await client.query('ROLLBACK');return response.status(409).json({error:'Cet employé a été retiré pour un départ définitif. Sa fiche ne peut plus être modifiée.'});}
     await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,roles=$4,seniority=$5,target_minutes=$6,max_minutes=$7,
       availability=$8,notes=$9,active=$10,is_minor=$11,allow_extra_hours=$12 WHERE id=$13 RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
@@ -387,6 +390,15 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     await client.query("ROLLBACK").catch(()=>{});
     response.status(400).json({ error: error.message });
   } finally { client.release(); }
+});
+app.post('/api/employees/:id/departure',requireManager,sameOrigin,async(request,response)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const employee=await recordDeparture(client,Number(request.params.id),request);
+    await client.query('COMMIT');response.json({employee:mapEmployee(employee)});
+  }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(400).json({error:error.message});}
+  finally{client.release();}
 });
 app.get("/api/weeks/:weekStart/assignments", requireManager, async (request, response) => {
   try {

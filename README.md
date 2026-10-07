@@ -32,6 +32,10 @@ Chaque commande et son historique sont enregistrés dans la même transaction. L
 
 Les tests d’annulation utilisent PostgreSQL embarqué (PGlite, dépendance de développement) : exécuter npm ci puis npm test.
 
+## Employés inactifs et départs définitifs
+
+Décocher « Employé actif » correspond à une absence temporaire (par exemple un arrêt maladie de longue durée) : la fiche reste dans la liste. « Retirer de la liste — départ définitif », visible lors de la modification d’une fiche, masque l’employé et l’exclut des nouvelles propositions d’affectation. Les quarts déjà attribués et l’historique restent conservés; les quarts à venir doivent être vérifiés par le gestionnaire. La touche Annuler peut rétablir la fiche et son statut antérieur.
+
 ## Demandes de congé
 
 - Gestion : lien **Demandes de congé** dans l’application, ou /conges-gestion après connexion gestionnaire.

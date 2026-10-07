@@ -16,6 +16,10 @@ export async function installUndoSchema(pool){
     action_id BIGINT NOT NULL REFERENCES schedule_undo_actions(id),table_name TEXT NOT NULL,
     row_key JSONB NOT NULL,before_row JSONB,after_row JSONB,PRIMARY KEY(action_id,table_name,row_key)
   );
+  UPDATE schedule_undo_rows SET
+    before_row=CASE WHEN before_row IS NOT NULL AND NOT before_row ? 'departed_at' THEN before_row||'{"departed_at":null}'::jsonb ELSE before_row END,
+    after_row=CASE WHEN after_row IS NOT NULL AND NOT after_row ? 'departed_at' THEN after_row||'{"departed_at":null}'::jsonb ELSE after_row END
+    WHERE table_name='schedule_employees';
   CREATE OR REPLACE FUNCTION schedule_record_undo() RETURNS trigger LANGUAGE plpgsql AS $$
   DECLARE action BIGINT; previous JSONB; following JSONB; identity JSONB='{}'; field TEXT;
   BEGIN

@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 import {installUndoSchema,beginUndo,undoLast} from '../undo.js';
 import {installLeave} from '../leave.js';
+import {recordDeparture} from '../employee-status.js';
 
 test('annulation transactionnelle sur PostgreSQL : quarts, cascade, congés, groupes, pile et concurrence',async()=>{
   const db=new PGlite();
@@ -29,6 +30,17 @@ test('annulation transactionnelle sur PostgreSQL : quarts, cascade, congés, gro
     const undo=async id=>{await pool.query('BEGIN');try{const result=await undoLast(pool,id);await pool.query('COMMIT');return result;}catch(e){await pool.query('ROLLBACK');throw e;}};
     const assignments=async()=>(await pool.query('SELECT shift_id,employee_id FROM schedule_assignments ORDER BY shift_id')).rows;
     const initial=await assignments();
+    await pool.query('BEGIN');await recordDeparture(pool,1);await pool.query('COMMIT');
+    const departed=(await pool.query('SELECT active,departed_at FROM schedule_employees WHERE id=1')).rows[0];
+    assert.equal(departed.active,false);assert.ok(departed.departed_at);
+    assert.deepEqual(await assignments(),initial);
+    await undo((await pool.query('SELECT MAX(id) AS id FROM schedule_undo_actions')).rows[0].id);
+    const restored=(await pool.query('SELECT active,departed_at FROM schedule_employees WHERE id=1')).rows[0];
+    assert.equal(restored.active,true);assert.equal(restored.departed_at,null);
+    const legacy=await act('Ancienne modification',"UPDATE schedule_employees SET notes='Note' WHERE id=1");
+    await pool.query("UPDATE schedule_undo_rows SET before_row=before_row-'departed_at',after_row=after_row-'departed_at' WHERE action_id=$1",[legacy]);
+    await installUndoSchema(pool);await undo(legacy);
+    assert.equal((await pool.query('SELECT notes FROM schedule_employees WHERE id=1')).rows[0].notes,'');
     const edited=await act('Modifier un quart',"UPDATE schedule_shifts SET start_minute=720 WHERE id=1");
     const removed=await act('Supprimer un quart','DELETE FROM schedule_shifts WHERE id=1');
     assert.equal((await assignments()).length,1);
