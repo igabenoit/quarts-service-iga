@@ -59,7 +59,7 @@ function renderPrint(){
   $("#printSheet").innerHTML=[buildPage("Superviseurs et commandes",[scheduleGroups[0],scheduleGroups[3]]),buildPage("Caissières",[scheduleGroups[1]]),buildPage("Emballeurs",[scheduleGroups[2]])].join("");
 }
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
-async function loadWeek(start){state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";}
+async function loadWeek(start){$("#restoreStatus").textContent="Une sauvegarde est créée pour cette semaine avant chaque « Recréer selon les priorités ».";state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";}
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
 function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=active;$("#changeShareCode").hidden=!active;$("#copyShareLink").hidden=!active;$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=active?`${location.origin}${state.sharePath} · Code requis pour consulter`:`Aucun lien actif pour cette semaine.`;}
@@ -164,13 +164,43 @@ $("#applyApprovedLeaves").onclick=async()=>{
   finally{button.disabled=false;}
 };
 $("#regenerateSchedule").onclick=async()=>{
-  if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés."))return;
+  if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés. Une sauvegarde permettra de revenir avant cette recréation."))return;
+  const button=$("#regenerateSchedule"),week=state.weekStart;button.disabled=true;
   try{
-    const result=await api(`/api/weeks/${state.weekStart}/generate`,{method:"POST",body:JSON.stringify({replaceAll:true})});
-    state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;
-    render();
+    const result=await api(`/api/weeks/${week}/generate`,{method:"POST",body:JSON.stringify({replaceAll:true})});
+    if(state.weekStart===week){await loadWeek(week);$("#restoreStatus").textContent="Horaire précédent sauvegardé. Le bouton ci-dessus permet de revenir avant cette recréation.";}
     toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);
-  }catch(error){showError(error);}
+  }catch(error){showError(error);}finally{button.disabled=false;}
+};
+let restoration=null,restoring=false;
+$("#undoRegeneration").onclick=async()=>{
+  const button=$("#undoRegeneration"),week=state.weekStart;button.disabled=true;
+  try{
+    const {backup}=await api(`/api/weeks/${week}/regeneration-backup`);
+    if(state.weekStart!==week)return;
+    if(!backup){$("#restoreStatus").textContent="Aucune recréation à annuler pour cette semaine. Les sauvegardes couvrent uniquement les recréations faites depuis l’ajout de cette option.";return;}
+    restoration={...backup,week};
+    const stamp=new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(backup.createdAt));
+    $("#restoreSummary").textContent=`Semaine du ${formatWeek(week)}. Sauvegarde du ${stamp} (Québec). ${backup.changes.length} affectation(s) à modifier. Les changements faits après cette recréation seront aussi remplacés.`;
+    $("#restoreChanges").innerHTML=backup.changes.length?'<table><thead><tr><th>Quart</th><th>Maintenant</th><th>Après restauration</th></tr></thead><tbody>'+backup.changes.map(c=>`<tr><td>${escapeHtml(c.date)}<br>${timeText(c.startMinute)}–${timeText(c.endMinute)}</td><td>${escapeHtml(c.current)}</td><td>${escapeHtml(c.restored)}</td></tr>`).join('')+'</tbody></table>':'<p>Les affectations correspondent déjà à la sauvegarde.</p>';
+    $("#restoreError").textContent=backup.issues.join(' ');
+    $("#confirmRestore").disabled=!backup.canRestore;
+    $("#restorePreview").showModal();
+  }catch(error){$("#restoreStatus").textContent=error.message;}finally{button.disabled=false;}
+};
+$("#cancelRestore").onclick=()=>{if(!restoring)$("#restorePreview").close();};
+$("#restorePreview").addEventListener('cancel',event=>{if(restoring)event.preventDefault();});
+$("#confirmRestore").onclick=async()=>{
+  if(!restoration||restoring)return;
+  const backup=restoration;restoring=true;$("#confirmRestore").disabled=true;$("#cancelRestore").disabled=true;
+  $("#restoreError").textContent='Restauration en cours…';
+  try{
+    await api(`/api/weeks/${backup.week}/regeneration-backup/restore`,{method:'POST',body:JSON.stringify({backupId:backup.id,token:backup.token})});
+    $("#restorePreview").close();restoration=null;
+    if(state.weekStart===backup.week){await loadWeek(backup.week);$("#restoreStatus").textContent='Les affectations précédant la dernière recréation sont rétablies.';}
+    toast('Horaire précédent rétabli');
+  }catch(error){$("#restoreError").textContent=error.message+' Fermez puis rouvrez cet aperçu pour vérifier l’état actuel.';}
+  finally{restoring=false;$("#cancelRestore").disabled=false;}
 };
 api("/api/session").then(async session=>{if(session.role==="manager"){$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(mondayOf());}}).catch(()=>{});
 

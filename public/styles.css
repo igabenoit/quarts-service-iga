@@ -159,3 +159,10 @@
 .plano-preview-pages .plano-slot { background: #fff; }
 .plano-preview-pages .plano-empty td { color: #77818b; text-align: left; padding-left: 9px; }
 .plano-preview-pages .plano-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #cbd3d9; color: #66717b; font-size: 10px; }
+
+#restorePreview { width: min(780px, 94vw); max-height: 90vh; border: 0; border-radius: 14px; padding: 24px; }
+#restorePreview::backdrop { background: #0009; }
+#restoreChanges { overflow-x: auto; }
+#restoreChanges table { width: 100%; border-collapse: collapse; }
+#restoreChanges th, #restoreChanges td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; }
+#restoreError { color: #a4161a; }

@@ -22,6 +22,12 @@ npm run check
 npm start
 ```
 
+## Retour avant une recréation
+
+Chaque « Recréer selon les priorités » enregistre automatiquement les affectations précédentes de la semaine dans la même transaction. Le bouton « Revenir avant la dernière recréation » affiche les changements à confirmer, puis restaure les affectations sauvegardées, y compris les choix manuels. Les changements d’affectation faits depuis cette recréation sont également remplacés. L’état remplacé est conservé dans l’historique technique. Les autres semaines, les paramètres des employés et les congés restent inchangés.
+
+Cette option couvre uniquement les recréations effectuées après sa mise en service. Une sauvegarde déjà restaurée ne peut pas être appliquée de nouveau. Un nouvel aperçu est nécessaire si l’horaire change entre l’aperçu et la confirmation. Une modification des besoins de quarts ou un congé incompatible bloque la restauration avec une explication; aucune restauration partielle n’est effectuée.
+
 ## Demandes de congé
 
 - Gestion : lien **Demandes de congé** dans l’application, ou /conges-gestion après connexion gestionnaire.

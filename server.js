@@ -4,6 +4,7 @@ import pg from "pg";
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
 import { canAssign, generateAssignments } from "./scheduler.js";
+import {backupBeforeRegeneration, installScheduleBackup} from './schedule-backup.js';
 
 const { Pool } = pg;
 const app = express();
@@ -359,6 +360,7 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
   try {
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
     await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,roles=$4,seniority=$5,target_minutes=$6,max_minutes=$7,
@@ -424,6 +426,7 @@ app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrig
       || !Array.isArray(request.body?.days) || days.some(d=>!Number.isInteger(d)||d<0||d>6))
       throw new Error("Congés demandés invalides.");
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart,client);
     const employee = await client.query("SELECT id FROM schedule_employees WHERE id=$1 FOR UPDATE", [employeeId]);
     if (!employee.rowCount) throw new Error("Employé introuvable.");
@@ -492,6 +495,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
       if (employee) employee.availability={...employee.availability,[leave.day_index]:[]};
     }
     if (request.body?.replaceAll === true) {
+      await backupBeforeRegeneration(client,request.params.weekStart);
       await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN
         (SELECT id FROM schedule_shifts WHERE week_start=$1)`, [request.params.weekStart]);
     }
@@ -508,6 +512,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 });
 
 await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));
 
 app.get("/health", (_request, response) => response.json({ ok: true }));
@@ -679,6 +684,7 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
     const days = [...new Set(Array.isArray(request.body?.days) ? request.body.days.map(Number) : [])];
     if (!days.length || days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error("Choisissez au moins une journée.");
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart, client);
     const created = [];
     for (const dayIndex of days) {
@@ -717,8 +723,15 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
 app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
   const id = Number(request.params.id);
   if (!Number.isInteger(id) || id <= 0) return response.status(400).json({ error: "Quart invalide." });
-  await pool.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
-  response.json({ ok: true });
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    await client.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
+    await client.query('COMMIT');
+    response.json({ ok: true });
+  } catch {await client.query('ROLLBACK').catch(()=>{});response.status(500).json({error:'Suppression impossible.'});}
+  finally {client.release();}
 });
 
 app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, async (request, response) => {
@@ -728,6 +741,7 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
     if (!validDate(weekStart)) throw new Error("Date invalide.");
     const previous = addDays(weekStart, -7);
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(8675309)");
     await ensureWeek(weekStart, client);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [weekStart]);
     if (count.rows[0].count > 0) throw new Error("La semaine contient déjà des quarts.");
