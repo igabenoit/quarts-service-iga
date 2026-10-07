@@ -55,6 +55,9 @@
       <section class="card add-card" id="schedulePanel">
         <div class="section-title"><div><p class="eyebrow">HORAIRE</p><h2>Attribuer les quarts</h2></div><p>Les affectations existantes sont conservées. Les quarts impossibles à couvrir restent visibles.</p></div>
         <div class="form-actions"><button id="generateSchedule" type="button">Attribuer les quarts libres</button><button id="regenerateSchedule" type="button" class="secondary">Recréer selon les priorités</button><label class="secondary import-label">Importer la liste initiale <input id="employeeImport" type="file" accept=".json,application/json" hidden></label></div>
+        <p>Un congé approuvé remet uniquement les quarts concernés à couvrir. Choisissez ensuite leur remplaçant dans la grille. Pour reprendre les congés déjà approuvés, utilisez le bouton ci-dessous.</p>
+        <button id="applyApprovedLeaves" type="button" class="secondary">Appliquer les congés approuvés</button>
+        <p id="leaveApplyStatus" role="status"></p>
         <p id="scheduleStatus"></p><div id="approvedLeaveSummary"></div>
         <div id="scheduleBoard"></div>
         <div id="employeeTotals" class="employee-totals"></div>

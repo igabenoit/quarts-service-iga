@@ -2,11 +2,12 @@ import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
-import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, conflictsWithLeave, LATE_MESSAGE} from './leave-rules.js';
+import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, LATE_MESSAGE} from './leave-rules.js';
+import {releaseLeaveConflicts} from './leave-schedule.js';
 
 export async function approvedLeave(pool, weekStart) {
   const result = await pool.query(`SELECT employee_id, periods FROM schedule_leave_requests
-    WHERE status='approved' AND is_test=FALSE AND first_date<=$2 AND last_date>=$1`, [weekStart,addDays(weekStart,6)]);
+    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1`, [weekStart,addDays(weekStart,6)]);
   return result.rows;
 }
 export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaffAccess}) {
@@ -131,18 +132,26 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
           row.employee_id=linked.id;
           await client.query('UPDATE schedule_leave_requests SET employee_id=$1 WHERE id=$2',[linked.id,row.id]);
         }
-        const conflicts=(await client.query(`SELECT s.* FROM schedule_shifts s JOIN schedule_assignments a ON a.shift_id=s.id
-          WHERE a.employee_id=$1 AND s.week_start<=$3 AND s.week_start+6>=$2`,[row.employee_id,row.first_date,row.last_date])).rows;
-        if(conflicts.some(s=>conflictsWithLeave({weekStart:typeof s.week_start==='string'?s.week_start.slice(0,10):s.week_start.toISOString().slice(0,10),dayIndex:s.day_index,startMinute:s.start_minute,endMinute:s.end_minute},row.periods))){
-          await client.query('ROLLBACK');return res.status(409).json({error:'Un quart déjà attribué chevauche ce congé. Réattribuez ou retirez ce quart dans l’horaire, puis approuvez la demande.'});
-        }
         const other=(await client.query(`SELECT periods FROM schedule_leave_requests WHERE employee_id=$1 AND status='approved' AND is_test=FALSE AND first_date<=$3 AND last_date>=$2`,[row.employee_id,row.first_date,row.last_date])).rows;
         if(other.some(o=>o.periods.some(p=>row.periods.some(q=>p.date===q.date&&p.startMinute<q.endMinute&&q.startMinute<p.endMinute)))){await client.query('ROLLBACK');return res.status(409).json({error:'Cette période chevauche un congé déjà approuvé.'});}
       }
       await client.query(`UPDATE schedule_leave_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3`,[b.status,note,row.id]);
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
-      await client.query('COMMIT');res.json({ok:true});
+      const released=b.status==='approved'&&!row.is_test?await releaseLeaveConflicts(client,{requestId:row.id}):[];
+      await client.query('COMMIT');res.json({ok:true,releasedShifts:released.length});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
+  });
+  app.post('/api/leave/week/:weekStart/apply',requireManager,sameOrigin,async(req,res)=>{
+    const weekStart=req.params.weekStart;
+    if(!isDate(weekStart)||new Date(`${weekStart}T12:00:00Z`).getUTCDay()!==1)return res.status(400).json({error:'Semaine invalide.'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(8675309)');
+      const released=await releaseLeaveConflicts(client,{weekStart});
+      await client.query('COMMIT');res.json({ok:true,releasedShifts:released.length});
+    }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’appliquer les congés. Aucun changement enregistré.'});}
+    finally{client.release();}
   });
   app.get('/h/:token/conges',(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile('conges.html',{root:'public'}));
 }

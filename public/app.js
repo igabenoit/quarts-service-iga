@@ -148,6 +148,21 @@ $("#employeeForm").onsubmit=async event=>{event.preventDefault();try{const id=$(
 $("#clearEmployee").onclick=resetEmployeeForm;
 $("#employeeImport").onchange=async event=>{try{const file=event.target.files[0];if(!file)return;const data=JSON.parse(await file.text());const result=await api("/api/employees/import",{method:"POST",body:JSON.stringify(data)});await loadEmployees();toast(`${result.count} employés importés`);}catch(error){showError(error);}finally{event.target.value="";}};
 $("#generateSchedule").onclick=async()=>{try{const result=await api(`/api/weeks/${state.weekStart}/generate`,{method:"POST"});state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;render();toast(`${result.assignments.length} quarts attribués; ${result.unfilled.length} à couvrir`);}catch(error){showError(error);}};
+$("#applyApprovedLeaves").onclick=async()=>{
+  const button=$("#applyApprovedLeaves"),week=state.weekStart;
+  button.disabled=true;$("#leaveApplyStatus").textContent="Application des congés…";
+  try{
+    const result=await api(`/api/leave/week/${week}/apply`,{method:"POST"});
+    if(state.weekStart===week){
+      const leaves=(await api(`/api/leave/week/${week}`)).leaves;
+      const assignments=await api(`/api/weeks/${week}/assignments`);
+      if(state.weekStart===week){state.approvedLeaves=leaves;state.assignments=assignments.assignments;render();
+        $("#leaveApplyStatus").textContent=result.releasedShifts?`${result.releasedShifts} quart(s) remis à couvrir. Choisissez leur remplaçant dans la grille. Toutes les autres affectations sont conservées.`:"Les congés approuvés sont appliqués. Aucune affectation à retirer.";
+      }
+    }
+  }catch(error){$("#leaveApplyStatus").textContent=error.message;showError(error);}
+  finally{button.disabled=false;}
+};
 $("#regenerateSchedule").onclick=async()=>{
   if(!confirm("Recréer toutes les affectations de cette semaine selon les priorités actuelles? Les choix faits à la main seront remplacés."))return;
   try{

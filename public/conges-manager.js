@@ -23,9 +23,9 @@ function render(){
     if(button.dataset.status!=='approved'&&!note.value.trim()){showError('Pour '+(button.dataset.status==='refused'?'refuser':'annuler')+' cette demande, indiquez la raison dans la note ci-dessus, puis appuyez de nouveau sur le bouton.',note);return;}
     card.querySelectorAll('button').forEach(b=>b.disabled=true);feedback.textContent='Enregistrement de la décision…';
     try{
-      await api('/api/leave/requests/'+r.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:button.dataset.status,note:note.value.trim(),version:r.version,employeeId:card.querySelector('.link-employee')?.value?Number(card.querySelector('.link-employee').value):undefined})});
+      const decision=await api('/api/leave/requests/'+r.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:button.dataset.status,note:note.value.trim(),version:r.version,employeeId:card.querySelector('.link-employee')?.value?Number(card.querySelector('.link-employee').value):undefined})});
       await load();
-      const result=button.dataset.status==='refused'?'Demande refusée.':button.dataset.status==='cancelled'?'Demande annulée. Elle ne bloque plus les horaires.':'Demande approuvée.';
+      const result=button.dataset.status==='refused'?'Demande refusée.':button.dataset.status==='cancelled'?'Demande annulée. Elle ne bloque plus les horaires.':`Demande approuvée. ${decision.releasedShifts||0} quart(s) remis à couvrir. Les autres affectations sont conservées.`;
       $('#message').textContent=result+' La décision est enregistrée dans l’historique.';
       const updated=[...$('#requests').children].find(c=>c.dataset.id===String(r.id));
       const target=updated?.querySelector('.badge')||$('#message');target.tabIndex=-1;target.focus();target.scrollIntoView({block:'center',behavior:'smooth'});
