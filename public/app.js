@@ -12,6 +12,10 @@ function mondayOf(value=new Date()){
   const date=new Date(value);date.setUTCHours(12,0,0,0);const day=date.getUTCDay();date.setUTCDate(date.getUTCDate()-(day===0?6:day-1));return date.toISOString().slice(0,10);
 }
 function addDays(iso,days){const d=new Date(`${iso}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+function upcomingWeekStart(value=new Date()){
+  const today=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Toronto",year:"numeric",month:"2-digit",day:"2-digit"}).format(value);
+  return addDays(mondayOf(`${today}T12:00:00Z`),7);
+}
 function minutes(time){const [h,m]=time.split(":").map(Number);return h*60+m;}
 function timeText(total){const h=Math.floor(total/60),m=total%60;return `${h} h${m?String(m).padStart(2,"0"):""}`;}
 function durationText(value){const h=value/60;return `${h.toLocaleString("fr-CA",{maximumFractionDigits:2})} h`;}
@@ -130,7 +134,7 @@ function queueSave(){clearTimeout(state.saving);state.saving=setTimeout(()=>save
 function resetForm(day=0){$("#shiftForm").reset();$("#shiftId").value="";$("#role").value="cashier";$("#startTime").value="08:00";$("#endTime").value="16:00";$("#breakMinutes").value="0";renderDayChoices([day]);$("#submitShift").textContent="Ajouter le quart";$("#cancelEdit").hidden=true;$("#deleteShift").hidden=true;$("#departmentWrap").hidden=true;}
 function editShift(id){const s=state.shifts.find(x=>x.id===id);if(!s)return;$("#shiftId").value=s.id;$("#role").value=s.role;$("#startTime").value=`${String(Math.floor(s.startMinute/60)).padStart(2,"0")}:${String(s.startMinute%60).padStart(2,"0")}`;$("#endTime").value=`${String(Math.floor(s.endMinute/60)).padStart(2,"0")}:${String(s.endMinute%60).padStart(2,"0")}`;$("#breakMinutes").value=String(s.breakMinutes);$("#sourceDepartment").value=s.sourceDepartment;$("#shiftNotes").value=s.notes;renderDayChoices([s.dayIndex]);document.querySelectorAll("#dayChoices input").forEach(input=>input.onchange=()=>{if(input.checked)document.querySelectorAll("#dayChoices input").forEach(other=>{if(other!==input)other.checked=false;});});$("#departmentWrap").hidden=s.role!=="support";$("#submitShift").textContent="Enregistrer le quart";$("#cancelEdit").hidden=false;$("#deleteShift").hidden=false;$("#shiftForm").scrollIntoView({behavior:"smooth",block:"center"});}
 
-$("#loginForm").onsubmit=async event=>{event.preventDefault();try{await api("/api/login",{method:"POST",body:JSON.stringify({code:$("#loginCode").value})});$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(mondayOf());}catch(error){$("#loginError").textContent=error.message;}};
+$("#loginForm").onsubmit=async event=>{event.preventDefault();try{await api("/api/login",{method:"POST",body:JSON.stringify({code:$("#loginCode").value})});$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(upcomingWeekStart());}catch(error){$("#loginError").textContent=error.message;}};
 $("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload();};
 $("#prevWeek").onclick=()=>loadWeek(addDays(state.weekStart,-7)).catch(showError);$("#nextWeek").onclick=()=>loadWeek(addDays(state.weekStart,7)).catch(showError);$("#weekPicker").onchange=e=>loadWeek(e.target.value).catch(showError);
 $("#copyPrevious").onclick=async()=>{if(!confirm("Copier tous les quarts et budgets de la semaine précédente?"))return;try{await api(`/api/weeks/${state.weekStart}/copy-previous`,{method:"POST"});await loadWeek(state.weekStart);toast("Semaine précédente copiée");}catch(error){showError(error);}};
@@ -201,7 +205,7 @@ const undoControl=window.createUndoControl({
   beforeUndo:async()=>{if(!state.saving)return false;await saveWeek();return true;},
   onUndo:async action=>{clearTimeout(state.saving);state.saving=null;await loadEmployees();await loadWeek(action.week_start?String(action.week_start).slice(0,10):state.weekStart);toast('Dernière action annulée');}
 });
-api("/api/session").then(async session=>{if(session.role==="manager"){$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(mondayOf());}}).catch(()=>{});
+api("/api/session").then(async session=>{if(session.role==="manager"){$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(upcomingWeekStart());}}).catch(()=>{});
 
 
 $("#employeeMinor").onchange=event=>{if(event.target.checked&&Number($("#employeeTarget").value)>17)$("#employeeTarget").value="17";};
