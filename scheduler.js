@@ -1,17 +1,32 @@
 import {conflictsWithLeave} from "./leave-rules.js";
-export function canAssign(employee, shift, shifts, assigned = []) {
-  if (conflictsWithLeave(shift,employee.leavePeriods)) return false;
-  if (!employee.active || shift.role === "support") return false;
-  if (!(employee.roles || [employee.role]).includes(shift.role)) return false;
+const hoursText = minutes => `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${String(minutes % 60).padStart(2, "0")}` : ""}`;
+
+export function assignmentConflict(employee, shift, shifts, assigned = []) {
+  if (conflictsWithLeave(shift,employee.leavePeriods)) return "Un congé approuvé chevauche ce quart.";
+  if (!employee.active) return "Cet employé est inactif.";
+  if (shift.role === "support") return "Ce quart est réservé à l’aide d’un autre département.";
+  if (!(employee.roles || [employee.role]).includes(shift.role)) return "Ce poste ne fait pas partie des fonctions de cet employé.";
   const windows = employee.availability?.[shift.dayIndex] || [];
-  if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute)) return false;
+  if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute))
+    return `Les disponibilités de cet employé ne couvrent pas le quart complet de ${hoursText(shift.startMinute)} à ${hoursText(shift.endMinute)}.`;
   const jobs = assigned.filter(a => a.employeeId === employee.id).map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean);
-  if (jobs.some(s => s.dayIndex === shift.dayIndex)) return false;
-  if (!employee.allowSixOrSevenDays && jobs.length >= 5) return false;
+  const sameDay = jobs.find(s => s.dayIndex === shift.dayIndex);
+  if (sameDay) return `Cet employé a déjà un quart ce jour-là, de ${hoursText(sameDay.startMinute)} à ${hoursText(sameDay.endMinute)}. Un seul quart par jour est permis.`;
+  if (!employee.allowSixOrSevenDays && jobs.length >= 5)
+    return "Cet employé travaille déjà cinq jours cette semaine. Pour ajouter une journée, activez l’exception de 6 ou 7 jours dans sa fiche pour cette semaine.";
   const minutes = jobs.reduce((sum, s) => sum + s.paidMinutes, 0);
-  if (employee.isMinor && (minutes + shift.paidMinutes > 17 * 60 ||
-    (shift.dayIndex < 5 && jobs.filter(s => s.dayIndex < 5).length >= 2))) return false;
-  return minutes + shift.paidMinutes <= employee.maxMinutes;
+  const total = minutes + shift.paidMinutes;
+  if (employee.isMinor && total > 17 * 60)
+    return `Ce quart porterait la semaine à ${hoursText(total)}, au-delà de la limite de 17 h pour un employé de 17 ans ou moins.`;
+  if (employee.isMinor && shift.dayIndex < 5 && jobs.filter(s => s.dayIndex < 5).length >= 2)
+    return "Cet employé de 17 ans ou moins a déjà deux jours travaillés du lundi au vendredi.";
+  if (!(total <= employee.maxMinutes))
+    return `Ce quart porterait la semaine à ${hoursText(total)}, au-delà du « Maximum / semaine » de ${hoursText(employee.maxMinutes)}. L’autorisation de dépasser les heures souhaitées ne change pas ce maximum. Ajustez-le dans la fiche de l’employé pour autoriser ce total.`;
+  return null;
+}
+
+export function canAssign(employee, shift, shifts, assigned = []) {
+  return assignmentConflict(employee, shift, shifts, assigned) === null;
 }
 
 export function generateAssignments(shifts, employees, existing = []) {

@@ -8,6 +8,12 @@ uniquement quand la liste est vide. Les quarts attribués manuellement sont cons
 d’une nouvelle génération. Les quarts « Aide autre département » restent à couvrir séparément.
 Les quarts sans candidat et les totaux par employé sont visibles avant l’impression.
 
+Les heures souhaitées servent de cible à la génération. L’option de dépassement permet
+de compléter les quarts libres au-delà de cette cible, jusqu’au maximum hebdomadaire.
+Une attribution manuelle peut déjà dépasser la cible, avec ou sans cette option.
+Le « Maximum / semaine », les disponibilités, les congés et les limites de jours et
+de mineurs restent applicables. Un refus d’attribution indique la contrainte précise.
+
 ## Variables requises
 
 - `DATABASE_URL`

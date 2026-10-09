@@ -5,7 +5,7 @@ import express from "express";
 import pg from "pg";
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
-import { canAssign, generateAssignments } from "./scheduler.js";
+import { assignmentConflict, generateAssignments } from "./scheduler.js";
 import {backupBeforeRegeneration, installScheduleBackup} from './schedule-backup.js';
 
 const { Pool } = pg;
@@ -492,8 +492,8 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     const current = await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
       WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
     const all = await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
-    if (!canAssign(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}))))
-      throw new Error("Disponibilité, fonction, maximum de cinq jours, maximum d’heures, limite des 17 ans et moins ou autre quart incompatible.");
+    const conflict = assignmentConflict(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)})));
+    if (conflict) throw new Error(conflict);
     await client.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
     await client.query("COMMIT");

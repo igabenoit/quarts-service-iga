@@ -59,6 +59,7 @@
         <button id="applyApprovedLeaves" type="button" class="secondary">Appliquer les congés approuvés</button>
         <p id="leaveApplyStatus" role="status"></p>
         <p id="scheduleStatus"></p><div id="approvedLeaveSummary"></div>
+        <p id="assignmentMessage" class="error" role="alert" hidden></p>
         <div id="scheduleBoard"></div>
         <div id="employeeTotals" class="employee-totals"></div>
       </section>
@@ -78,7 +79,8 @@
           <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
           <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
           <label class="employee-option"><input id="employeeMinor" type="checkbox"> 17 ans ou moins (maximum 17 h et 2 jours du lundi au vendredi)</label>
-          <label class="employee-option"><input id="employeeExtraHours" type="checkbox"> Autoriser la génération à dépasser les heures souhaitées</label>
+          <label class="employee-option"><input id="employeeExtraHours" type="checkbox" aria-describedby="employeeHoursHelp"> Autoriser la génération à dépasser les heures souhaitées</label>
+          <p id="employeeHoursHelp" class="rank-help">Un quart attribué manuellement peut déjà dépasser les heures souhaitées. Le « Maximum / semaine » reste une limite, même avec cette case cochée.</p>
           <label class="employee-option"><input id="employeeSixOrSevenDays" type="checkbox"> Autoriser exceptionnellement 6 ou 7 jours travaillés dans cette semaine</label>
           <fieldset><legend>Disponibilités permanentes (chaque semaine)</legend><p>Entre une plage comme 08:00-17:00. Laisse vide pour une journée toujours indisponible. Les changements s’appliquent aussi aux semaines futures.</p><div id="availabilityFields" class="availability-grid"></div></fieldset>
           <fieldset class="requested-leave"><legend>Congés demandés pour la semaine affichée</legend><p>Coche les journées à bloquer avant de générer l’horaire. Une affectation déjà faite pour ce jour sera retirée.</p><div id="timeOffFields" class="time-off-grid"></div></fieldset>
