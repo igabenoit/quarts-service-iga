@@ -64,7 +64,8 @@ export async function loadContactDirectory(pool){
       d.code AS department_code,l.employee_id AS contact_employee_id FROM schedule_leave_requests r
       LEFT JOIN schedule_leave_departments d ON d.id=r.department_id LEFT JOIN schedule_leave_contact_links l ON l.request_id=r.id WHERE r.is_test=FALSE`),
     pool.query('SELECT employee_id,email FROM schedule_employee_contacts'),
-    pool.query(`SELECT 'disponibilite-'||id::text AS id,employee_id,employee_name,email,submitted_at,FALSE AS is_test,'Service' AS department_name,'service' AS department_code FROM schedule_availability_requests WHERE is_test=FALSE`)
+    pool.query(`SELECT 'disponibilite-'||r.id::text AS id,r.employee_id,r.employee_name,r.email,r.submitted_at,r.department_id,FALSE AS is_test,r.department_name,d.code AS department_code
+      FROM schedule_availability_requests r LEFT JOIN schedule_leave_departments d ON d.id=r.department_id WHERE r.is_test=FALSE`)
   ]);
   return buildContactDirectory(employees.rows,[...requests.rows,...availability.rows],preferences.rows);
 }

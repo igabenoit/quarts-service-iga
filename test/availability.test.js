@@ -6,14 +6,14 @@ import {PGlite} from '@electric-sql/pglite';
 import {normalizeAvailability,minimumEffectiveDate,appendAvailability,profileAt,employeeAvailability,localDate} from '../availability-rules.js';
 import {installLeave} from '../leave.js';
 import {installUndoSchema,undoLast} from '../undo.js';
-import {availabilityConflicts,availabilityRevision,recordManualAvailability} from '../availability.js';
+import {installAvailability,availabilityConflicts,availabilityRevision,recordManualAvailability} from '../availability.js';
 import {installAvailabilityMail,availabilityMailPayload} from '../availability-mail.js';
 import {loadContactDirectory} from '../employee-contacts.js';
 import {assignmentConflict,generateAssignments} from '../scheduler.js';
 import {addDays} from '../leave-rules.js';
 
 const grid=()=>({0:[],1:[[1020,1290]],2:[],3:[[1020,1290]],4:[],5:[[450,1290]],6:[[450,1290]]});
-const body=(extra={})=>({submissionKey:randomUUID(),employeeId:1,employeeName:'Camille Exemple',email:'camille@example.com',effectiveDate:'2030-01-14',targetMinutes:1020,availability:grid(),acknowledged:true,comments:'',...extra});
+const body=(extra={})=>({submissionKey:randomUUID(),departmentId:1,employeeId:1,employeeName:'Camille Exemple',email:'camille@example.com',effectiveDate:'2030-01-14',targetMinutes:1020,availability:grid(),acknowledged:true,comments:'',...extra});
 const baseline=()=>Object.fromEntries(Array.from({length:7},(_,d)=>[d,[[480,1020]]]));
 const response=()=>({code:200,body:null,set(){return this;},status(n){this.code=n;return this;},json(b){this.body=b;return this;}});
 
@@ -39,6 +39,17 @@ test('dates : 28 jours calendaires, changement d’année et d’heure, disponib
  row.availability_history.push({effectiveDate:'2030-12-20',source:'request'});assert.equal(minimumEffectiveDate(row,'2030-12-20'),'2031-01-17');
  assert.equal(localDate('2026-11-01T03:30:00Z'),'2026-10-31');
  const next={availability_history:[{source:'request',effectiveDate:'2026-10-18'}]};assert.equal(minimumEffectiveDate(next,'2026-10-19'),'2026-11-15');
+});
+
+test('chaque plage permet un quart de trois heures, y compris une journée facultative',()=>{
+ for(const [start,end] of [[450,465],[480,645],[1110,1275],[1125,1290]]){
+  const b=body();b.availability[0]=[[start,end]];
+  assert.throws(()=>normalizeAvailability(b,{today:'2030-01-01'}),/au moins 3 h/);
+ }
+ for(const [start,end] of [[450,630],[480,660],[1110,1290]]){
+  const b=body();b.availability[0]=[[start,end]];
+  assert.deepEqual(normalizeAvailability(b,{today:'2030-01-01'}).availability[0],[[start,end]]);
+ }
 });
 
 test('génération et attribution respectent la version de la semaine sans déplacer les affectations',()=>{
@@ -122,6 +133,56 @@ test('PostgreSQL : demandes, approbation future, délai, conflits conservés, an
    for(const p of payloads.filter(p=>p.subject.startsWith('[TEST]'))){assert.deepEqual(p.to,['test@example.com']);assert.equal(p.cc,undefined);assert.equal(p.reply_to,undefined);}
    const count=sent.length;await worker.run();assert.equal(sent.length,count);process.env.RESEND_API_KEY='';
    const requests=(await call('get','/requests')).body.requests;assert.equal(requests.some(r=>r.is_test),false);assert.equal((await pool.query('SELECT * FROM schedule_assignments')).rows.length,2);
+  });
+  let externalId;
+  await t.test('autres départements : nom libre, destinataire privé, identité et idempotence',async()=>{
+   await pool.query("INSERT INTO schedule_leave_departments(id,code,name,recipient,mail_enabled,active) VALUES(2,'bakery','Boulangerie','bakery@example.com',TRUE,TRUE),(3,'meat','Boucherie','meat@example.com',TRUE,TRUE),(4,'old','Ancien','old@example.com',TRUE,FALSE)");
+   const info=(await call('get','/form')).body;assert.equal(info.departments.length,3);assert.equal(info.departments.find(d=>d.id===2).isService,false);assert.equal(JSON.stringify(info).includes('bakery@example.com'),false);
+   const external=body({departmentId:2,employeeId:null,effectiveDate:effective,email:'external@example.com'});
+   for(const change of [{departmentId:null},{departmentId:999},{departmentId:4},{employeeName:''},{employeeId:1},{departmentId:1},{availability:{...grid(),0:[[480,645]]}}]){
+    const rejected=await call('post','/submit',{body:{...external,...change}});assert.equal(rejected.code,400,JSON.stringify(change));
+   }
+   const before=await employee(),sent=await call('post','/submit',{body:external});assert.equal(sent.code,201,JSON.stringify(sent.body));externalId=sent.body.id;
+   const r=(await pool.query('SELECT * FROM schedule_availability_requests WHERE id=$1',[externalId])).rows[0];assert.equal(r.employee_id,null);assert.equal(Number(r.department_id),2);assert.equal(r.department_name,'Boulangerie');assert.equal(r.employee_name,'Camille Exemple');
+   assert.deepEqual(await employee(),before);
+   assert.equal((await call('post','/submit',{body:external})).body.id,externalId);
+   assert.equal((await call('post','/submit',{body:{...external,departmentId:3}})).code,400);
+   const duplicate=await call('post','/submit',{body:{...external,submissionKey:randomUUID(),employeeName:'  CAMILLE  EXEMPLE  ',email:'changed@example.com'}});assert.equal(duplicate.code,400);assert.match(duplicate.body.error,/déjà en attente/);
+   const contacts=await loadContactDirectory(pool);assert.equal(contacts.employees.find(e=>e.id===1).addresses.some(a=>a.email==='external@example.com'),false);assert.ok(contacts.received.some(r=>r.email==='external@example.com'&&r.department==='Boulangerie'));
+  });
+  await t.test('autres départements : approbation, 28 jours et annulation sans toucher le Service',async()=>{
+   const before=(await pool.query('SELECT * FROM schedule_employees ORDER BY id')).rows,assignments=(await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows;
+   assert.equal((await call('patch','/requests/:id',{params:{id:externalId},body:{status:'approved',version:1}})).code,200);
+   const external=body({departmentId:2,employeeId:null,effectiveDate:addDays(effective,27),email:'external@example.com'});
+   const rejected=await call('post','/submit',{body:external});assert.equal(rejected.code,400);assert.match(rejected.body.error,/4 semaines/);
+   const second=await call('post','/submit',{body:{...external,submissionKey:randomUUID(),effectiveDate:addDays(effective,28)}});assert.equal(second.code,201);
+   assert.equal((await call('patch','/requests/:id',{params:{id:second.body.id},body:{status:'approved',version:1}})).code,200);
+   assert.equal((await call('patch','/requests/:id',{params:{id:externalId},body:{status:'cancelled',version:2,note:'Ancienne version'}})).code,409);
+   assert.equal((await call('patch','/requests/:id',{params:{id:second.body.id},body:{status:'cancelled',version:2,note:'Correction'}})).code,200);
+   assert.deepEqual((await pool.query('SELECT * FROM schedule_employees ORDER BY id')).rows,before);assert.deepEqual((await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows,assignments);
+   const short=await call('post','/submit',{body:body({departmentId:3,employeeId:null,employeeName:'Autre Département',effectiveDate:effective})});assert.equal(short.code,201);
+   await pool.query('UPDATE schedule_availability_requests SET availability=$1::jsonb WHERE id=$2',[JSON.stringify({...grid(),0:[[480,645]]}),short.body.id]);
+   const blocked=await call('patch','/requests/:id',{params:{id:short.body.id},body:{status:'approved',version:1}});assert.equal(blocked.code,409);assert.match(blocked.body.error,/au moins 3 h/);
+  });
+  await t.test('courriels : bon département, copie direction, réponse et tests isolés',async()=>{
+   const fake=await call('post','/test-submit',{body:body({departmentId:2,employeeId:null,employeeName:'Test Boulangerie',effectiveDate:effective,email:'never-send@example.com'})});assert.equal(fake.code,201);
+   assert.equal((await call('patch','/requests/:id',{params:{id:fake.body.id},body:{status:'approved',version:1}})).code,200);
+   await pool.query("UPDATE schedule_availability_mail SET available_at=clock_timestamp()-interval '1 minute'");
+   const sent=[],worker=await installAvailabilityMail(pool,{autoStart:false,fetchImpl:async(_url,options)=>{sent.push(JSON.parse(options.body));return {ok:true,status:200,json:async()=>({id:'department-test-'+sent.length})};}});
+   process.env.RESEND_API_KEY='mock';try{await worker.run();}finally{process.env.RESEND_API_KEY='';}
+   const notification=sent.find(p=>p.to[0]==='bakery@example.com');assert.ok(notification);assert.match(notification.text,/Département : Boulangerie/);assert.match(notification.text,/Lundi : Indisponible/);assert.deepEqual(notification.cc,['changed@example.com']);assert.equal(notification.reply_to,'external@example.com');
+   const approval=sent.find(p=>p.to[0]==='external@example.com');assert.ok(approval);assert.equal(approval.cc,undefined);assert.equal(approval.reply_to,'bakery@example.com');
+   assert.ok(sent.some(p=>p.to[0]==='meat@example.com'));assert.equal(sent.some(p=>p.to[0]==='manager@example.com'),false);
+   for(const p of sent.filter(p=>p.subject.startsWith('[TEST]'))){assert.deepEqual(p.to,['test@example.com']);assert.equal(p.cc,undefined);assert.equal(p.reply_to,undefined);}
+   assert.equal(sent.some(p=>p.to[0]==='never-send@example.com'),false);
+  });
+  await t.test('migration conserve les demandes et les captures Annuler antérieures',async()=>{
+   await pool.query("UPDATE schedule_availability_requests SET department_id=NULL WHERE employee_id IS NOT NULL; UPDATE schedule_undo_rows SET before_row=before_row-'department_id'-'department_name'-'employee_name_key',after_row=after_row-'department_id'-'department_name'-'employee_name_key' WHERE table_name='schedule_availability_requests' AND (before_row->>'employee_id') IS NOT NULL");
+   const interval=globalThis.setInterval;globalThis.setInterval=()=>({unref(){}});
+   try{await installAvailability(app,pool,{requireManager:manager,sameOrigin:origin,requireStaff:()=>{}});}finally{globalThis.setInterval=interval;}
+   assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schedule_availability_requests WHERE department_id IS NULL')).rows[0].n,0);
+   const snapshots=(await pool.query("SELECT before_row FROM schedule_undo_rows WHERE table_name='schedule_availability_requests' AND (before_row->>'employee_id') IS NOT NULL")).rows;
+   assert.ok(snapshots.length);for(const s of snapshots){assert.equal(Number(s.before_row.department_id),1);assert.equal(s.before_row.department_name,'Service');}
   });
  }finally{if(previousKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=previousKey;await db.close();}
 });

@@ -1,6 +1,6 @@
 import {isDate,addDays} from './leave-rules.js';
 import {normalizeEmail} from './employee-contacts.js';
-export const OPEN=450,CLOSE=1290,EVENING=1020,RULE_VERSION='2026-10-v1';
+export const OPEN=450,CLOSE=1290,EVENING=1020,MIN_WINDOW=180,RULE_VERSION='2026-10-v2';
 export const localDate=(now=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));
 export const historyOf=row=>Array.isArray(row.availability_history)?row.availability_history:[];
 export const lastChange=row=>historyOf(row).filter(v=>v.source!=='baseline').at(-1)?.effectiveDate||null;
@@ -19,6 +19,7 @@ export function normalizeAvailability(body,{today,maxMinutes=3000}={}){
     const a=body.availability[d];
     if(!Array.isArray(a)||a.length>1)throw new Error('Choisissez une disponibilité pour chaque jour, du lundi au vendredi.');
     if(a.length){const w=a[0];if(!Array.isArray(w)||w.length!==2||w.some(n=>!Number.isInteger(n)||n%15)||w[0]<OPEN||w[1]>CLOSE||w[0]>=w[1])throw new Error('Les heures doivent être comprises entre 7 h 30 et 21 h 30, avec une fin après le début.');}
+    if(a.some(([a,b])=>b-a<MIN_WINDOW))throw new Error('Chaque plage de disponibilité doit permettre un quart d’au moins 3 h consécutives.');
     if(d>=5&&(a.length!==1||a[0][0]!==OPEN||a[0][1]!==CLOSE))throw new Error('Le samedi et le dimanche sont obligatoires, de 7 h 30 à 21 h 30.');
     availability[d]=a.map(w=>[...w]);
     if(d<5&&a.some(([a,b])=>a<=EVENING&&b>=CLOSE))evenings.push(d);
