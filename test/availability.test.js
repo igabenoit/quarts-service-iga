@@ -41,6 +41,14 @@ test('dates : 28 jours calendaires, changement d’année et d’heure, disponib
  const next={availability_history:[{source:'request',effectiveDate:'2026-10-18'}]};assert.equal(minimumEffectiveDate(next,'2026-10-19'),'2026-11-15');
 });
 
+test('heures souhaitées : 10 à 40 inclusivement, avec les limites plus basses de la fiche',()=>{
+ for(const targetMinutes of [15,585,2415,3000])assert.throws(()=>normalizeAvailability(body({targetMinutes}),{today:'2030-01-01',maxMinutes:3000}),/entre 10 et 40 h/);
+ for(const targetMinutes of [600,615,2385,2400])assert.equal(normalizeAvailability(body({targetMinutes}),{today:'2030-01-01',maxMinutes:3000}).targetMinutes,targetMinutes);
+ assert.throws(()=>normalizeAvailability(body({targetMinutes:1035}),{today:'2030-01-01',maxMinutes:1020}),/entre 10 et 17 h/);
+ assert.equal(normalizeAvailability(body({targetMinutes:600}),{today:'2030-01-01',maxMinutes:1020}).targetMinutes,600);
+ assert.throws(()=>normalizeAvailability(body({targetMinutes:600}),{today:'2030-01-01',maxMinutes:480}),/Contactez la gestion/);
+});
+
 test('chaque plage permet un quart de trois heures, y compris une journée facultative',()=>{
  for(const [start,end] of [[450,465],[480,645],[1110,1275],[1125,1290]]){
   const b=body();b.availability[0]=[[start,end]];
@@ -139,7 +147,7 @@ test('PostgreSQL : demandes, approbation future, délai, conflits conservés, an
    await pool.query("INSERT INTO schedule_leave_departments(id,code,name,recipient,mail_enabled,active) VALUES(2,'bakery','Boulangerie','bakery@example.com',TRUE,TRUE),(3,'meat','Boucherie','meat@example.com',TRUE,TRUE),(4,'old','Ancien','old@example.com',TRUE,FALSE)");
    const info=(await call('get','/form')).body;assert.equal(info.departments.length,3);assert.equal(info.departments.find(d=>d.id===2).isService,false);assert.equal(JSON.stringify(info).includes('bakery@example.com'),false);
    const external=body({departmentId:2,employeeId:null,effectiveDate:effective,email:'external@example.com'});
-   for(const change of [{departmentId:null},{departmentId:999},{departmentId:4},{employeeName:''},{employeeId:1},{departmentId:1},{availability:{...grid(),0:[[480,645]]}}]){
+   for(const change of [{departmentId:null},{departmentId:999},{departmentId:4},{employeeName:''},{employeeId:1},{departmentId:1},{availability:{...grid(),0:[[480,645]]}},{targetMinutes:585},{targetMinutes:2415}]){
     const rejected=await call('post','/submit',{body:{...external,...change}});assert.equal(rejected.code,400,JSON.stringify(change));
    }
    const before=await employee(),sent=await call('post','/submit',{body:external});assert.equal(sent.code,201,JSON.stringify(sent.body));externalId=sent.body.id;

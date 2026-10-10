@@ -1,14 +1,15 @@
 import {isDate,addDays} from './leave-rules.js';
 import {normalizeEmail} from './employee-contacts.js';
-export const OPEN=450,CLOSE=1290,EVENING=1020,MIN_WINDOW=180,RULE_VERSION='2026-10-v2';
+export const OPEN=450,CLOSE=1290,EVENING=1020,MIN_WINDOW=180,MIN_TARGET=600,MAX_TARGET=2400,RULE_VERSION='2026-10-v3';
 export const localDate=(now=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));
 export const historyOf=row=>Array.isArray(row.availability_history)?row.availability_history:[];
 export const lastChange=row=>historyOf(row).filter(v=>v.source!=='baseline').at(-1)?.effectiveDate||null;
 export function minimumEffectiveDate(row,today){const last=lastChange(row);return last&&addDays(last,28)>today?addDays(last,28):today;}
-export function normalizeAvailability(body,{today,maxMinutes=3000}={}){
+export function normalizeAvailability(body,{today,maxMinutes=MAX_TARGET}={}){
   if(!isDate(body.effectiveDate)||body.effectiveDate<today)throw new Error('Indiquez une date effective valide, aujourd’hui ou plus tard.');
-  const target=body.targetMinutes;
-  if(!Number.isInteger(target)||target<15||target%15||target>Math.min(3000,maxMinutes))throw new Error(`Indiquez les heures souhaitées, entre 0,25 et ${Math.min(3000,maxMinutes)/60} h, par quarts d’heure.`);
+  const target=body.targetMinutes,maximum=Math.min(MAX_TARGET,maxMinutes);
+  if(maximum<MIN_TARGET)throw new Error('Le maximum autorisé dans votre fiche est inférieur à 10 h. Contactez la gestion pour vérifier votre fiche.');
+  if(!Number.isInteger(target)||target<MIN_TARGET||target%15||target>maximum)throw new Error(`Indiquez les heures souhaitées, entre 10 et ${maximum/60} h, par quarts d’heure.`);
   if(body.acknowledged!==true)throw new Error('Vous devez cocher « J’ai lu et compris les exigences de disponibilité ».');
   const email=normalizeEmail(body.email);if(!email)throw new Error('Indiquez une adresse courriel valide pour la confirmation.');
   const employeeName=typeof body.employeeName==='string'?body.employeeName.trim():'';

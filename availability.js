@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {beginUndo} from './undo.js';
 import {addDays,isDate} from './leave-rules.js';
-import {normalizeAvailability,localDate,minimumEffectiveDate,historyOf,appendAvailability,profileAt,RULE_VERSION} from './availability-rules.js';
+import {normalizeAvailability,localDate,minimumEffectiveDate,historyOf,appendAvailability,profileAt,RULE_VERSION,MAX_TARGET} from './availability-rules.js';
 import {installAvailabilityMail} from './availability-mail.js';
 import {nameKey} from './employee-contacts.js';
 const stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
@@ -55,10 +55,10 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
   const base='/api/leave/availability';
   const info=test=>async(_req,res)=>{try{
     const today=localDate((await pool.query('SELECT clock_timestamp() AS now')).rows[0].now);
-    const staff=test?[{id:0,name:'Employé test',max_minutes:3000}]: (await pool.query('SELECT * FROM schedule_employees WHERE active=TRUE AND departed_at IS NULL ORDER BY name')).rows;
+    const staff=test?[{id:0,name:'Employé test',max_minutes:MAX_TARGET}]: (await pool.query('SELECT * FROM schedule_employees WHERE active=TRUE AND departed_at IS NULL ORDER BY name')).rows;
     const pending=test?[]:(await pool.query("SELECT employee_id FROM schedule_availability_requests WHERE status='pending' AND is_test=FALSE")).rows;
     const departments=(await pool.query('SELECT id,name,code FROM schedule_leave_departments WHERE active=TRUE ORDER BY name,id')).rows.map(d=>({id:Number(d.id),name:d.name,isService:d.code==='service'}));
-    res.json({today,isTest:test,ruleVersion:RULE_VERSION,departments,employees:staff.map(e=>({id:Number(e.id),name:e.name,maxHours:Math.min(e.max_minutes,e.is_minor?1020:3000)/60,minEffectiveDate:minimumEffectiveDate(e,today),pending:pending.some(p=>String(p.employee_id)===String(e.id))}))});
+    res.json({today,isTest:test,ruleVersion:RULE_VERSION,departments,employees:staff.map(e=>({id:Number(e.id),name:e.name,maxHours:Math.min(e.max_minutes,e.is_minor?1020:MAX_TARGET)/60,minEffectiveDate:minimumEffectiveDate(e,today),pending:pending.some(p=>String(p.employee_id)===String(e.id))}))});
   }catch{res.status(500).json({error:'Impossible de charger le formulaire de disponibilités.'});}};
   app.get(base+'/form',requireStaff,info(false));app.get(base+'/test-form',requireManager,info(true));
   const submit=test=>async(req,res)=>{
@@ -74,9 +74,9 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
       if(!department)throw new Error('Choisissez un département actif.');
       const service=department.code==='service';
       if(!service&&b.employeeId!=null)throw new Error('Inscrivez votre nom pour le département choisi, sans sélectionner une fiche du Service.');
-      const e=!service?{id:null,name:typeof b.employeeName==='string'?b.employeeName.trim():'',max_minutes:3000}:test?{id:null,name:'Employé test',max_minutes:3000}:(await client.query('SELECT * FROM schedule_employees WHERE id=$1 AND active=TRUE AND departed_at IS NULL FOR UPDATE',[Number.isSafeInteger(b.employeeId)?b.employeeId:null])).rows[0];
+      const e=!service?{id:null,name:typeof b.employeeName==='string'?b.employeeName.trim():'',max_minutes:MAX_TARGET}:test?{id:null,name:'Employé test',max_minutes:MAX_TARGET}:(await client.query('SELECT * FROM schedule_employees WHERE id=$1 AND active=TRUE AND departed_at IS NULL FOR UPDATE',[Number.isSafeInteger(b.employeeId)?b.employeeId:null])).rows[0];
       if(!e)throw new Error('Choisissez un employé actif dans la liste.');
-      const data=normalizeAvailability(b,{today:duplicate?localDate(duplicate.submitted_at):today,maxMinutes:Math.min(e.max_minutes,e.is_minor?1020:3000)});
+      const data=normalizeAvailability(b,{today:duplicate?localDate(duplicate.submitted_at):today,maxMinutes:Math.min(e.max_minutes,e.is_minor?1020:MAX_TARGET)});
       if(data.employeeName!==e.name)throw new Error('Le nom ne correspond plus à la fiche choisie. Actualisez la liste.');
       if(duplicate){
         if(String(duplicate.department_id)!==String(department.id)||duplicate.is_test!==test||String(duplicate.employee_id)!==String(e.id)||duplicate.employee_name!==data.employeeName||duplicate.email!==data.email||String(duplicate.effective_date instanceof Date?duplicate.effective_date.toISOString().slice(0,10):duplicate.effective_date)!==data.effectiveDate||duplicate.target_minutes!==data.targetMinutes||!same(duplicate.availability,data.availability)||duplicate.comments!==data.comments)throw new Error('Cette référence a déjà servi à une autre demande. Actualisez le formulaire.');
@@ -126,7 +126,7 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
         if(!e)throw new Error('Fiche employé introuvable.');
         if(b.status==='approved'){
           if(!e.active||e.departed_at)throw new Error('Cet employé n’est plus actif.');
-          normalizeAvailability({employeeName:r.employee_name,email:r.email,effectiveDate:r.effective_date,targetMinutes:r.target_minutes,availability:r.availability,acknowledged:r.acknowledged,comments:r.comments},{today:localDate(r.submitted_at),maxMinutes:Math.min(e.max_minutes,e.is_minor?1020:3000)});
+          normalizeAvailability({employeeName:r.employee_name,email:r.email,effectiveDate:r.effective_date,targetMinutes:r.target_minutes,availability:r.availability,acknowledged:r.acknowledged,comments:r.comments},{today:localDate(r.submitted_at),maxMinutes:Math.min(e.max_minutes,e.is_minor?1020:MAX_TARGET)});
           if(r.effective_date<minimumEffectiveDate(e,localDate(r.submitted_at)))throw new Error('Une autre modification impose maintenant une date effective au plus tôt le '+minimumEffectiveDate(e,localDate(r.submitted_at))+'.');
           const history=appendAvailability(e,{effectiveDate:r.effective_date,availability:r.availability,targetMinutes:r.target_minutes,source:'request',requestId:String(r.id)});
           await saveAvailabilityHistory(client,e.id,history);

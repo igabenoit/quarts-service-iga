@@ -8,7 +8,7 @@
 <fieldset><legend>1 · Tes informations</legend><p class="muted">Tous les champs de cette section sont obligatoires.</p>
 <label for="department">Ton département</label><select id="department" required><option value="">Choisir mon département</option></select><p id="departmentInfo" class="muted" role="status"></p>
 <div id="employeeSelectField" hidden><label for="employee">Ton nom complet</label><select id="employee" disabled><option value="">Choisir mon nom</option></select></div><div id="employeeNameField" hidden><label for="employeeName">Ton prénom et ton nom</label><input id="employeeName" type="text" autocomplete="name" minlength="2" maxlength="100" disabled></div><p id="employeeInfo" class="muted" role="status"></p>
-<div class="field-grid"><label>Date effective des changements<input id="effectiveDate" type="date" required></label><label>Heures souhaitées par semaine<input id="targetHours" type="number" inputmode="decimal" min="0.25" max="50" step="0.25" placeholder="Ex. : 17" required></label></div>
+<div class="field-grid"><label>Date effective des changements<input id="effectiveDate" type="date" required></label><label>Heures souhaitées par semaine<input id="targetHours" type="number" inputmode="decimal" min="10" max="40" step="0.25" placeholder="Ex. : 17" required><small>Entre 10 et 40 h par semaine.</small></label></div>
 <small>La nouvelle cible d’heures s’applique à la semaine contenant cette date. Les heures souhaitées ne sont pas des heures garanties.</small>
 <label for="email">Ton courriel</label><input id="email" type="email" autocomplete="email" maxlength="254" required placeholder="Pour recevoir la confirmation">
 </fieldset>

@@ -19,8 +19,9 @@ function validate(){
   if(dept&&!dept.isService&&(employeeName.length<2||employeeName.length>100))errors.push('Inscris ton prénom et ton nom.');
   if(p?.pending)errors.push('Une demande est déjà en attente. Contacte la gestion pour la corriger.');
   if(!$('#effectiveDate').value)errors.push('Indique la date effective.');else if($('#effectiveDate').value<(p?.minEffectiveDate||info?.today))errors.push('La première date possible est le '+dateText(p?.minEffectiveDate||info.today)+'.');
-  const target=Number($('#targetHours').value)*60,max=(p?.maxHours??50)*60;
-  if(!$('#targetHours').value||!Number.isInteger(target)||target%15||target<15||target>max)errors.push(`Indique les heures souhaitées entre 0,25 et ${max/60} h (par quarts d’heure).`);
+  const target=Number($('#targetHours').value)*60,max=Math.min(p?.maxHours??40,40)*60;
+  if(max<600)errors.push('Le maximum autorisé dans ta fiche est inférieur à 10 h. Contacte la gestion pour vérifier ta fiche.');
+  else if(!$('#targetHours').value||!Number.isInteger(target)||target%15||target<600||target>max)errors.push(`Indique les heures souhaitées entre 10 et ${max/60} h (par quarts d’heure).`);
   if(!$('#email').value.trim()||!$('#email').validity.valid)errors.push('Indique un courriel valide.');
   for(let d=0;d<5;d++){if(!a[d])errors.push('Complète le '+days[d].toLowerCase()+'.');else if(a[d].some(([a,b])=>b-a<180))errors.push('Prévois au moins 3 h consécutives le '+days[d].toLowerCase()+'.');}
   const evenings=Object.keys(a).map(Number).filter(d=>d<5&&a[d]?.some(([a,b])=>a<=1020&&b>=1290));
@@ -40,7 +41,7 @@ function updateDepartment(){
   updateEmployee();
 }
 $('#department').onchange=updateDepartment;
-function updateEmployee(){const p=person();$('#effectiveDate').min=p?.minEffectiveDate||info.today;$('#targetHours').max=p?.maxHours??50;$('#employeeInfo').textContent=p?(p.pending?'Une demande est déjà en attente. Contacte la gestion avant d’en soumettre une autre.':`Première date possible : ${dateText(p.minEffectiveDate)}. Maximum autorisé dans ta fiche : ${p.maxHours} h souhaitées.`):department()&&!department().isService?'Inscris ton nom complet comme sur ton horaire. Le délai de 4 semaines sera vérifié à l’envoi; ton responsable vérifie la demande.':'';validate();}
+function updateEmployee(){const p=person();$('#effectiveDate').min=p?.minEffectiveDate||info.today;$('#targetHours').max=Math.min(p?.maxHours??40,40);$('#employeeInfo').textContent=p?(p.pending?'Une demande est déjà en attente. Contacte la gestion avant d’en soumettre une autre.':`Première date possible : ${dateText(p.minEffectiveDate)}. Maximum autorisé dans ta fiche : ${p.maxHours} h souhaitées.`):department()&&!department().isService?'Inscris ton nom complet comme sur ton horaire. Le délai de 4 semaines sera vérifié à l’envoi; ton responsable vérifie la demande.':'';validate();}
 $('#employee').onchange=updateEmployee;
 function updateEnds(d){const start=$('#start-'+d),end=$('#end-'+d),minimum=(Number(start.value)||450)+180;for(const option of end.options)if(option.value)option.disabled=Number(option.value)<minimum;if(end.value&&Number(end.value)<minimum)end.value='';}
 for(let d=0;d<5;d++){
