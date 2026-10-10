@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js && node --check leave.js && node --check leave-rules.js && node --check public/conges-form.js && node --check public/conges-manager.js && node --check public/horaire.js && node --check leave-notifications.js && node --check leave-access.js && node --check leave-departments.js && node --check leave-schedule.js && node --check schedule-backup.js && node --check undo.js && node --check public/undo-control.js && node --check employee-status.js",
+    "check": "node --check server.js && node --check scheduler.js && node --check public/app.js && node --check leave.js && node --check leave-rules.js && node --check public/conges-form.js && node --check public/conges-manager.js && node --check public/horaire.js && node --check leave-notifications.js && node --check leave-access.js && node --check leave-departments.js && node --check leave-schedule.js && node --check schedule-backup.js && node --check undo.js && node --check public/undo-control.js && node --check employee-status.js && node --check employee-contacts.js && node --check leave-approval-mail.js && node --check public/courriels.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
