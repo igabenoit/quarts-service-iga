@@ -33,6 +33,12 @@ test('les quarts modifiés, les employés inactifs et les congés empêchent une
   assert.equal(restorationPreview(saved(),regenerated(),ctx).canRestore,false);
 });
 
+test('une restauration respecte les disponibilités datées et son jeton change avec la grille',()=>{
+  const before=restorationPreview(saved(),regenerated(),context());
+  const ctx=context();ctx.employees=people.map(e=>({...e,availability:{},target_minutes:900,availability_history:[{effectiveDate:'2026-10-01',availability:{},targetMinutes:900}]}));
+  const after=restorationPreview(saved(),regenerated(),ctx);assert.equal(after.canRestore,false);assert.notEqual(after.token,before.token);assert.match(after.issues.join(' '),/n’est plus disponible/);
+});
+
 async function fixture({backup=saved(),failInsert=false}={}){
   let current=regenerated(),rollback=null;
   const calls=[],routes=new Map(),otherWeek=[assignment(99,7)];
@@ -43,7 +49,7 @@ async function fixture({backup=saved(),failInsert=false}={}){
     if(sql.includes('SELECT * FROM schedule_regeneration_backups')){assert.equal(args[0],week);return {rows:backup?[backup]:[]};}
     if(sql.includes('FROM schedule_shifts WHERE week_start=$1 ORDER BY id'))return {rows:current.shifts};
     if(sql.includes('JOIN schedule_shifts s ON s.id=a.shift_id WHERE'))return {rows:current.assignments};
-    if(sql==='SELECT id,name,active FROM schedule_employees ORDER BY id')return {rows:people};
+    if(sql==='SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees ORDER BY id')return {rows:people};
     if(sql.startsWith('INSERT INTO schedule_regeneration_backups')){backup={...saved(),snapshot:JSON.parse(args[1])};}
     if(sql.startsWith('DELETE FROM schedule_assignments')){assert.equal(args[0],week);current.assignments=[];}
     if(sql.startsWith('INSERT INTO schedule_assignments')){

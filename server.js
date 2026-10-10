@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import {employeeAvailability,localDate} from "./availability-rules.js";
+import {availabilityRevision,recordManualAvailability,saveAvailabilityHistory} from "./availability.js";
 import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
@@ -295,19 +297,21 @@ async function reorderEmployees(client, role, column, movedId, requestedRank) {
     await client.query(`UPDATE schedule_employees SET ${column}=$1 WHERE id=$2`, [i + 1, ids[i]]);
   }
 }
-function mapEmployee(row) {
+function mapEmployee(row,weekStart=null) {
+  const profile=employeeAvailability(row,{weekStart:typeof weekStart==='string'&&validDate(weekStart)?weekStart:null});
   return { id: Number(row.id), name: row.name, role: row.role,
     roles: [...new Set([row.role, ...(Array.isArray(row.roles) ? row.roles : [])])], area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
     availability: row.availability, notes: row.notes, active: row.active && !row.departed_at, departedAt: row.departed_at,
     displayRank: row.display_rank, assignmentRank: row.assignment_rank,
-    isMinor: row.is_minor, allowExtraHours: row.allow_extra_hours };
+    isMinor: row.is_minor, allowExtraHours: row.allow_extra_hours, ...profile, availabilityRevision:availabilityRevision(row) };
 }
 
-app.get("/api/employees", requireManager, async (_request, response) => {
+app.get("/api/employees", requireManager, async (request, response) => {
   try {
+    if(request.query.weekStart&&!validDate(request.query.weekStart))return response.status(400).json({error:"Semaine invalide."});
     const result = await pool.query("SELECT * FROM schedule_employees ORDER BY role, display_rank, seniority, name");
-    response.json({ employees: result.rows.map(mapEmployee) });
+    response.json({ employees: result.rows.map(row=>mapEmployee(row,request.query.weekStart)) });
   } catch { response.status(500).json({ error: "Impossible de charger les employés." }); }
 });
 app.post("/api/employees/import", requireManager, sameOrigin, async (request, response) => {
@@ -370,9 +374,12 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
     if(before.rows[0].departed_at){await client.query('ROLLBACK');return response.status(409).json({error:'Cet employé a été retiré pour un départ définitif. Sa fiche ne peut plus être modifiée.'});}
+    const availabilityHistory=await recordManualAvailability(client,before.rows[0],e,request.body||{});
+    if(availabilityHistory.some(v=>v.effectiveDate>=localDate()&&v.targetMinutes>Math.min(e.maxMinutes,e.isMinor?1020:3000)))throw new Error("Une disponibilité approuvée demande plus d’heures que ce nouveau maximum. Révisez d’abord la demande.");
     await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,roles=$4,seniority=$5,target_minutes=$6,max_minutes=$7,
       availability=$8,notes=$9,active=$10,is_minor=$11,allow_extra_hours=$12 WHERE id=$13 RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
+    if(availabilityHistory.length)await saveAvailabilityHistory(client,Number(request.params.id),availabilityHistory);
     const id = Number(request.params.id), old = before.rows[0];
     if (old.role !== e.role) {
       await reorderEmployees(client,old.role,"display_rank",null,1);
@@ -482,7 +489,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     }
     const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
     if (!people.rowCount) throw new Error("Employé introuvable.");
-    const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0]);
+    const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0],s.weekStart);
     e.leavePeriods=(await approvedLeave(client,s.weekStart)).filter(r=>Number(r.employee_id)===employeeId).flatMap(r=>r.periods);
     if(conflictsWithLeave(s,e.leavePeriods)) throw new Error("Un congé approuvé chevauche ce quart.");
     e.allowSixOrSevenDays = !!(await client.query("SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [s.weekStart,employeeId])).rowCount;
@@ -508,7 +515,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     await beginUndo(client,request.body?.replaceAll===true?"Recréer selon les priorités":"Attribuer les quarts libres",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
-    const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(mapEmployee);
+    const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(row=>mapEmployee(row,request.params.weekStart));
     const approved=await approvedLeave(client,request.params.weekStart);
     for(const e of employees) e.leavePeriods=approved.filter(r=>Number(r.employee_id)===e.id).flatMap(r=>r.periods);
     const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart])).rows;

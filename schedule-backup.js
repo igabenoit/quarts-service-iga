@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {addDays, conflictsWithLeave, isDate} from './leave-rules.js';
+import {profileAt,historyOf} from './availability-rules.js';
 
 // The caller holds the scheduling advisory lock, inside the mutation transaction.
 export async function readSchedule(client, weekStart) {
@@ -37,6 +38,8 @@ export function restorationPreview(backup,current,{weekStart,employees,leaves,ti
     const s=shifts.get(String(a.shift_id));
     if(!employee?.active){issues.push(`${employee?.name||'Un employé'} n’est plus actif.`);continue;}
     if(!s){issues.push('Un quart sauvegardé est introuvable.');continue;}
+    if(historyOf(employee).length&&!profileAt(employee,addDays(weekStart,s.day_index)).availability[s.day_index]?.some(([a,b])=>a<=s.start_minute&&b>=s.end_minute))
+      issues.push(`${employee.name} n’est plus disponible pour ce quart le ${addDays(weekStart,s.day_index)}. Révisez cette disponibilité avant de restaurer son affectation.`);
     const periods=leaves.filter(r=>String(r.employee_id)===String(a.employee_id)).flatMap(r=>r.periods);
     if(conflictsWithLeave({weekStart,dayIndex:s.day_index,startMinute:s.start_minute,endMinute:s.end_minute},periods)
       ||timeOff.some(r=>String(r.employee_id)===String(a.employee_id)&&r.day_index===s.day_index))
@@ -76,7 +79,7 @@ export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}
         return restore?res.status(409).json({error:'Aucune recréation à annuler pour cette semaine.'}):res.json({backup:null});
       }
       const current=await readSchedule(client,weekStart);
-      const employees=(await client.query('SELECT id,name,active FROM schedule_employees ORDER BY id')).rows;
+      const employees=(await client.query('SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees ORDER BY id')).rows;
       const leaves=(await client.query(`SELECT employee_id,COALESCE(effective_periods,periods) AS periods FROM schedule_leave_requests
         WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 ORDER BY id`,[weekStart,addDays(weekStart,6)])).rows;
       const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1 ORDER BY employee_id,day_index',[weekStart])).rows;

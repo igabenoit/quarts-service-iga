@@ -161,3 +161,4 @@
 .plano-preview-pages .plano-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #cbd3d9; color: #66717b; font-size: 10px; }
 
 #undoStatus { display: block; flex-basis: 100%; font-size: .8rem; color: #5b6470; }
+#permanentAvailabilityWarnings:empty{display:none}#permanentAvailabilityWarnings:not(:empty){padding:16px;margin:16px 0;background:#fff0d5;border:1px solid #d2a854;border-radius:10px}#permanentAvailabilityWarnings li{margin:6px 0}#employeeAvailabilityStatus{font-size:.9rem;line-height:1.5;color:#5b655e}

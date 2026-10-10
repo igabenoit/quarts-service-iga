@@ -1,0 +1,21 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Mes disponibilités · IGA Famille Benoit</title><link rel="stylesheet" href="/conges.css"><link rel="stylesheet" href="/brand.css"><link rel="stylesheet" href="/disponibilites.css"></head><body><main class="shell availability-shell">
+<img class="brand-logo" src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit — Saint-Hyacinthe" width="1200" height="586"><p class="eyebrow">MON ÉQUIPE · CHAQUE SEMAINE</p><h1>Mes disponibilités permanentes</h1><p>Cette grille se répète d’une semaine à l’autre. Pour une absence ponctuelle, utilise plutôt la <a href="/conges">demande de congé</a>.</p>
+<p id="testBanner" class="notice" hidden>MODE TEST — aucune fiche employé ni aucun horaire ne sera modifié. Les courriels vont uniquement au destinataire de test.</p>
+<section class="notice requirements"><h2>Les règles à respecter</h2><ul><li><strong>Samedi et dimanche : 7 h 30 à 21 h 30.</strong> Ces deux journées sont obligatoires et fixes.</li><li><strong>Au moins 2 soirs du lundi au vendredi, de 17 h à 21 h 30.</strong> Tu peux commencer plus tôt.</li><li><strong>Au moins un de ces soirs doit être le jeudi ou le vendredi.</strong></li><li>Chaque disponibilité doit être maintenue pendant <strong>4 semaines minimum</strong> à partir de sa date effective.</li></ul></section>
+<form id="accessForm" hidden><h2>Accès employés</h2><label for="staffCode">Code commun des employés</label><input id="staffCode" type="password" inputmode="numeric" pattern="[0-9]{6,12}" autocomplete="off" required><button>Ouvrir le formulaire</button></form>
+<p id="message" role="status" tabindex="-1">Chargement…</p>
+<form id="availabilityForm" hidden>
+<fieldset><legend>1 · Tes informations</legend><p class="muted">Tous les champs de cette section sont obligatoires.</p>
+<label for="employee">Ton nom complet</label><select id="employee" required><option value="">Choisir mon nom</option></select><p id="employeeInfo" class="muted" role="status"></p>
+<div class="field-grid"><label>Date effective des changements<input id="effectiveDate" type="date" required></label><label>Heures souhaitées par semaine<input id="targetHours" type="number" inputmode="decimal" min="0.25" max="50" step="0.25" placeholder="Ex. : 17" required></label></div>
+<small>La nouvelle cible d’heures s’applique à la semaine contenant cette date. Les heures souhaitées ne sont pas des heures garanties.</small>
+<label for="email">Ton courriel</label><input id="email" type="email" autocomplete="email" maxlength="254" required placeholder="Pour recevoir la confirmation">
+</fieldset>
+<fieldset><legend>2 · Ta semaine habituelle</legend><p>Fais un choix pour <strong>chaque jour</strong> du lundi au vendredi.</p><div id="weekdays" class="weekday-grid"></div>
+<div class="fixed-days"><div><strong>Samedi</strong><span>7 h 30 à 21 h 30</span><small>Journée complète obligatoire</small></div><div><strong>Dimanche</strong><span>7 h 30 à 21 h 30</span><small>Journée complète obligatoire</small></div></div>
+<div id="ruleProgress" class="rule-progress" role="status" aria-live="polite"></div>
+<label for="comments">Commentaires (facultatif)</label><textarea id="comments" rows="3" maxlength="500" placeholder="Une précision utile pour la gestion"></textarea><small>Les commentaires ne remplacent pas la grille et ne modifient pas les exigences. Cette disponibilité sera la même chaque semaine.</small>
+</fieldset>
+<fieldset><legend>3 · Vérifie et confirme</legend><div id="summary" class="availability-summary"></div><label class="check"><input id="acknowledged" type="checkbox" required><span><strong>J’ai lu et compris les exigences de disponibilité.</strong> Je confirme que ma grille respecte ces règles et sera maintenue pendant au moins quatre semaines.</span></label><p>La gestion doit approuver cette demande. Tu recevras ensuite une confirmation par courriel.</p><div id="validation" role="status" aria-live="polite"></div><button id="send" type="submit" disabled>Envoyer ma disponibilité</button></fieldset>
+</form><section id="receipt" class="notice success" hidden></section><p><a href="/conges">Demander un congé ponctuel</a></p>
+</main><script type="module" src="/disponibilites.js"></script></body></html>

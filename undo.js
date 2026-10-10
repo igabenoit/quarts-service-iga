@@ -1,5 +1,5 @@
 // Parent tables precede children when rows are restored; deletions use reverse order.
-const keys={schedule_weeks:['week_start'],schedule_employees:['id'],schedule_leave_requests:['id'],
+const keys={schedule_weeks:['week_start'],schedule_employees:['id'],schedule_leave_requests:['id'],schedule_availability_requests:['id'],
   schedule_shifts:['id'],schedule_time_off:['week_start','employee_id','day_index'],
   schedule_day_exceptions:['week_start','employee_id'],schedule_assignments:['shift_id']};
 const tables=Object.keys(keys);
@@ -19,6 +19,10 @@ export async function installUndoSchema(pool){
   UPDATE schedule_undo_rows SET
     before_row=CASE WHEN before_row IS NOT NULL AND NOT before_row ? 'departed_at' THEN before_row||'{"departed_at":null}'::jsonb ELSE before_row END,
     after_row=CASE WHEN after_row IS NOT NULL AND NOT after_row ? 'departed_at' THEN after_row||'{"departed_at":null}'::jsonb ELSE after_row END
+    WHERE table_name='schedule_employees';
+  UPDATE schedule_undo_rows SET
+    before_row=CASE WHEN before_row IS NOT NULL AND NOT before_row ? 'availability_history' THEN before_row||'{"availability_history":[]}'::jsonb ELSE before_row END,
+    after_row=CASE WHEN after_row IS NOT NULL AND NOT after_row ? 'availability_history' THEN after_row||'{"availability_history":[]}'::jsonb ELSE after_row END
     WHERE table_name='schedule_employees';
   CREATE OR REPLACE FUNCTION schedule_record_undo() RETURNS trigger LANGUAGE plpgsql AS $$
   DECLARE action BIGINT; previous JSONB; following JSONB; identity JSONB='{}'; field TEXT;
@@ -65,7 +69,7 @@ export async function undoLast(client,expectedId){
       FROM ${change.table_name} t WHERE to_jsonb(t) @> $1::jsonb FOR UPDATE`,[JSON.stringify(change.row_key),change.after_row===null?null:JSON.stringify(change.after_row)])).rows[0];
     if(change.after_row===null?!!current:!current?.matches)
       throw new Error('Ces données ont changé depuis cette action. L’annulation est bloquée pour préserver les changements plus récents.');
-    if(change.table_name==='schedule_leave_requests'&&change.before_row)change.before_row.version=Number(current.row.version)+1;
+    if(['schedule_leave_requests','schedule_availability_requests'].includes(change.table_name)&&change.before_row)change.before_row.version=Number(current.row.version)+1;
   }
   // Recording stays disabled during an undo; the original history remains available.
   await client.query("SELECT set_config('schedule.undo_action','',true)");
@@ -82,6 +86,7 @@ export async function undoLast(client,expectedId){
     await client.query(`INSERT INTO ${table} (${columns.map(quote).join(',')})
       SELECT ${columns.map(quote).join(',')} FROM jsonb_populate_record(NULL::${table},$1::jsonb)
       ON CONFLICT (${keys[table].join(',')}) DO ${updates?'UPDATE SET '+updates:'NOTHING'}`,[JSON.stringify(c.before_row)]);
+    if(table==='schedule_availability_requests')await client.query('INSERT INTO schedule_availability_events(request_id,status,note) VALUES ($1,$2,$3)',[c.before_row.id,c.before_row.status,'Dernière action annulée : '+action.label+'.']);
     if(table==='schedule_leave_requests')await client.query('INSERT INTO schedule_leave_events(request_id,status,note) VALUES ($1,$2,$3)',
       [c.before_row.id,c.before_row.status,'Dernière action annulée : '+action.label+'. État précédent rétabli.']);
   }

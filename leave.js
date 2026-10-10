@@ -4,6 +4,7 @@ import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
 import {installApprovalMail} from './leave-approval-mail.js';
+import {installAvailability} from './availability.js';
 import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
 import {releaseLeaveConflicts} from './leave-schedule.js';
@@ -37,6 +38,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
   await installContacts(app,pool,{requireManager,sameOrigin});
+  await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
   async function staff(request,response,next) {
     try {
       if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({error:'Lien invalide.'});
