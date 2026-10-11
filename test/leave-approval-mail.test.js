@@ -103,13 +103,14 @@ test('PostgreSQL : file transactionnelle, décision, annulation avant envoi, rep
       const list=response();await routes.get('get /api/leave/requests').at(-1)({query:{}},list);
       const listed=list.body.requests.find(r=>Number(r.id)===10);assert.equal(listed.confirmation_status,'pending');assert.equal(listed.events[0].status,'late');
     });
-    await t.test('hors délai : refus motivé sans confirmation automatique ni changement d’horaire',async()=>{
+    await t.test('hors délai : refus motivé avec avis dédié, sans changement d’horaire',async()=>{
       await add(11,'late');await pool.query("INSERT INTO schedule_leave_events(request_id,status) VALUES(11,'late')");
       const before=(await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows;
       const decide=async body=>{const res=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:11},body,headers:{}},res);return res;};
       assert.equal((await decide({status:'refused',version:1})).code,400);
       assert.equal((await decide({status:'cancelled',version:1,note:'Annulation'})).code,400);
-      const refused=await decide({status:'refused',version:1,note:'Horaire déjà publié'});assert.equal(refused.code,200);assert.equal(refused.body.confirmationQueued,false);
+      const refused=await decide({status:'refused',version:1,note:'Horaire déjà publié'});assert.equal(refused.code,200);assert.equal(refused.body.confirmationQueued,true);
+      const refusal=(await pool.query("SELECT snapshot FROM schedule_leave_employee_notices WHERE request_id=11 AND kind='refused'")).rows[0];assert.equal(refusal.snapshot.decision_note,'Horaire déjà publié');
       assert.equal((await mails()).some(m=>Number(m.request_id)===11),false);
       assert.deepEqual((await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows,before);
       assert.deepEqual((await pool.query('SELECT status,note FROM schedule_leave_events WHERE request_id=11 ORDER BY id')).rows,[{status:'late',note:''},{status:'refused',note:'Horaire déjà publié'}]);

@@ -4,6 +4,7 @@ import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
 import {installApprovalMail} from './leave-approval-mail.js';
+import {installEmployeeNotices} from './leave-employee-notices.js';
 import {installAvailability} from './availability.js';
 import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
@@ -37,6 +38,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   const requireStoreStaff=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
+  const employeeNotices=await installEmployeeNotices(pool);
   await installContacts(app,pool,{requireManager,sameOrigin});
   await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
   async function staff(request,response,next) {
@@ -92,10 +94,12 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       }
       if(saved.rowCount) await client.query('INSERT INTO schedule_leave_events (request_id,status) VALUES ($1,$2)',[row.id,row.status]);
       if(saved.rowCount)await mail.queue(client,row.id);
+      if(saved.rowCount&&row.status==='late')await employeeNotices.queue(client,row.id,'late');
       await client.query('COMMIT');
       mail.run().catch(()=>{});
+      employeeNotices.run().catch(()=>{});
       res.set('Cache-Control','no-store').status(row.status==='late'?422:201).json({id:row.id,submittedAt:row.submitted_at,status:row.status,isTest,
-        message:row.status==='late'?LATE_MESSAGE:'Votre demande a été reçue. Elle doit être approuvée par votre gérante.'});
+        message:row.status==='late'?LATE_MESSAGE+' Un avis de retard est en attente d’envoi à votre adresse courriel.':'Votre demande a été reçue. Elle doit être approuvée par votre gérante.'});
     } catch(error) {
       await client.query('ROLLBACK').catch(()=>{}); console.error('Leave submission failed',error.code||'unknown');
       res.status(500).json({error:'L’envoi n’a pas pu être confirmé. Réessayez sans fermer le formulaire.'});
@@ -110,9 +114,12 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       const start=req.query.start||'2000-01-01',end=req.query.end||'2099-12-31';
       if(!isDate(start)||!isDate(end)||end<start)return res.status(400).json({error:'Période invalide.'});
       const rows=(await pool.query(`SELECT r.*,m.status AS notification_status,m.error AS notification_error,
-        a.status AS confirmation_status,a.error AS confirmation_error,a.last_attempt_at AS confirmation_attempt_at
+        a.status AS confirmation_status,a.error AS confirmation_error,a.last_attempt_at AS confirmation_attempt_at,
+        ln.status AS late_notice_status,ln.error AS late_notice_error,rn.status AS refusal_notice_status,rn.error AS refusal_notice_error
         FROM schedule_leave_requests r LEFT JOIN schedule_leave_mail m ON m.request_id=r.id
         LEFT JOIN LATERAL (SELECT status,error,last_attempt_at FROM schedule_leave_approval_mail WHERE request_id=r.id ORDER BY request_version DESC LIMIT 1) a ON TRUE
+        LEFT JOIN schedule_leave_employee_notices ln ON ln.request_id=r.id AND ln.kind='late'
+        LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='refused' ORDER BY request_version DESC LIMIT 1) rn ON TRUE
         WHERE is_test=$1 AND (r.archived_at IS NOT NULL)=$4
         AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
       const events=(await pool.query(`SELECT e.* FROM schedule_leave_events e JOIN schedule_leave_requests r ON r.id=e.request_id
@@ -157,10 +164,24 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
       const released=b.status==='approved'&&!row.is_test?await releaseLeaveConflicts(client,{requestId:row.id}):[];
       if(b.status==='approved')await approvalMail.queue(client,row.id);
+      if(b.status==='refused')await employeeNotices.queue(client,row.id,'refused');
       await client.query('COMMIT');
       approvalMail.run().catch(()=>{});
-      res.json({ok:true,releasedShifts:released.length,confirmationQueued:b.status==='approved'});
+      employeeNotices.run().catch(()=>{});
+      res.json({ok:true,releasedShifts:released.length,confirmationQueued:['approved','refused'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
+  });
+  app.post('/api/leave/requests/:id/late-notice',requireManager,sameOrigin,async(req,res)=>{
+    if(!Number.isSafeInteger(req.body?.version))return res.status(400).json({error:'Actualisez la demande.'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
+      if(!row||row.archived_at||row.status!=='late'||row.version!==req.body.version){await client.query('ROLLBACK');return res.status(409).json({error:'La demande a changé. Actualisez le suivi.'});}
+      const queued=await employeeNotices.queue(client,row.id,'late');
+      await client.query('COMMIT');employeeNotices.run().catch(()=>{});
+      res.json({ok:true,queued});
+    }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible de préparer l’avis de retard.'});}finally{client.release();}
   });
   app.post('/api/leave/week/:weekStart/apply',requireManager,sameOrigin,async(req,res)=>{
     const weekStart=req.params.weekStart;
