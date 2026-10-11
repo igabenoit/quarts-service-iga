@@ -54,7 +54,7 @@ export function conflictsWithLeave(shift, periods = []) {
   return periods.some(p=>p.date===date && p.startMinute<shift.endMinute && p.endMinute>shift.startMinute);
 }
 export function leaveStatistics(rows) {
-  const counts = {total:rows.length,pending:0,approved:0,refused:0,cancelled:0,late:0,fullDays:0,partialHours:0};
+  const counts = {total:rows.length,pending:0,conditional:0,approved:0,refused:0,cancelled:0,late:0,fullDays:0,partialHours:0};
   const employees = new Map(),departments = new Map(); let delay = 0, decided = 0;
   for (const r of rows) {
     counts[r.status]++;

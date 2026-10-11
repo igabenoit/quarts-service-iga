@@ -21,11 +21,17 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     employee_id BIGINT REFERENCES schedule_employees(id), employee_name TEXT NOT NULL,
     email TEXT NOT NULL, reason TEXT NOT NULL, periods JSONB NOT NULL,
     first_date DATE NOT NULL, last_date DATE NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending','approved','refused','cancelled','late')),
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','refused','cancelled','late','conditional')),
     is_test BOOLEAN NOT NULL DEFAULT FALSE,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     decided_at TIMESTAMPTZ, decision_note TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1
   );
+  DO $$ BEGIN
+    IF EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='schedule_leave_requests'::regclass AND conname='schedule_leave_requests_status_check' AND pg_get_constraintdef(oid) NOT LIKE '%conditional%') THEN
+      ALTER TABLE schedule_leave_requests DROP CONSTRAINT schedule_leave_requests_status_check;
+      ALTER TABLE schedule_leave_requests ADD CONSTRAINT schedule_leave_requests_status_check CHECK(status IN ('pending','approved','refused','cancelled','late','conditional'));
+    END IF;
+  END $$;
   ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS effective_periods JSONB;
   CREATE INDEX IF NOT EXISTS schedule_leave_dates_idx ON schedule_leave_requests(first_date,last_date);
   CREATE TABLE IF NOT EXISTS schedule_leave_events (
@@ -115,11 +121,12 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       if(!isDate(start)||!isDate(end)||end<start)return res.status(400).json({error:'Période invalide.'});
       const rows=(await pool.query(`SELECT r.*,m.status AS notification_status,m.error AS notification_error,
         a.status AS confirmation_status,a.error AS confirmation_error,a.last_attempt_at AS confirmation_attempt_at,
-        ln.status AS late_notice_status,ln.error AS late_notice_error,rn.status AS refusal_notice_status,rn.error AS refusal_notice_error
+        ln.status AS late_notice_status,ln.error AS late_notice_error,rn.status AS refusal_notice_status,rn.error AS refusal_notice_error,cn.status AS conditional_notice_status,cn.error AS conditional_notice_error
         FROM schedule_leave_requests r LEFT JOIN schedule_leave_mail m ON m.request_id=r.id
         LEFT JOIN LATERAL (SELECT status,error,last_attempt_at FROM schedule_leave_approval_mail WHERE request_id=r.id ORDER BY request_version DESC LIMIT 1) a ON TRUE
         LEFT JOIN schedule_leave_employee_notices ln ON ln.request_id=r.id AND ln.kind='late'
         LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='refused' ORDER BY request_version DESC LIMIT 1) rn ON TRUE
+        LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='conditional' ORDER BY request_version DESC LIMIT 1) cn ON TRUE
         WHERE is_test=$1 AND (r.archived_at IS NOT NULL)=$4
         AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
       const events=(await pool.query(`SELECT e.* FROM schedule_leave_events e JOIN schedule_leave_requests r ON r.id=e.request_id
@@ -135,15 +142,16 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     const client=await pool.connect();
     try {
       const b=req.body||{},note=typeof b.note==='string'?b.note.trim():'';
-      if(!['approved','refused','cancelled'].includes(b.status)||!Number.isSafeInteger(b.version)||note.length>1000) return res.status(400).json({error:'Décision invalide.'});
-      if(b.status!=='approved'&&!note)return res.status(400).json({error:'Précisez la raison de votre décision.'});
+      if(!['approved','refused','cancelled','conditional'].includes(b.status)||!Number.isSafeInteger(b.version)||note.length>1000) return res.status(400).json({error:'Décision invalide.'});
+      if(b.status!=='approved'&&!note)return res.status(400).json({error:b.status==='conditional'?'Précisez les conditions à transmettre à l’employé.':'Précisez la raison de votre décision.'});
       await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
-      await beginUndo(client,b.status==='approved'?'Approuver un congé':b.status==='cancelled'?'Annuler un congé':'Refuser un congé',null,req);
+      await beginUndo(client,b.status==='approved'?'Approuver un congé':b.status==='conditional'?'Accorder un congé sous conditions':b.status==='cancelled'?'Annuler un congé':'Refuser un congé',null,req);
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Demande introuvable.'});}
       if(row.archived_at){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande est archivée.'});}
       if(row.version!==b.version){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande a changé. Actualisez le suivi.'});}
-      if(!((row.status==='pending'&&['approved','refused','cancelled'].includes(b.status))||(row.status==='late'&&['approved','refused'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
+      if(!((['pending','conditional'].includes(row.status)&&['approved','refused','cancelled','conditional'].includes(b.status))||(row.status==='late'&&['approved','refused','conditional'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
+      if(row.status==='conditional'&&b.status==='approved'&&b.conditionsConfirmed!==true){await client.query('ROLLBACK');return res.status(400).json({error:'Confirmez que les conditions sont remplies ou levées avant de confirmer le congé.'});}
       if(b.status==='approved'&&!row.is_test){
         const dept=(await client.query('SELECT code FROM schedule_leave_departments WHERE id=$1',[row.department_id])).rows[0];
         if(!row.employee_id&&dept?.code==='service'){
@@ -162,13 +170,14 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       }
       await client.query(`UPDATE schedule_leave_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3`,[b.status,note,row.id]);
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
+      if(row.status==='conditional'&&b.status==='approved')await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,'approved','Validation finale : la gestion confirme que les conditions sont remplies ou levées.']);
       const released=b.status==='approved'&&!row.is_test?await releaseLeaveConflicts(client,{requestId:row.id}):[];
       if(b.status==='approved')await approvalMail.queue(client,row.id);
-      if(b.status==='refused')await employeeNotices.queue(client,row.id,'refused');
+      if(['refused','conditional'].includes(b.status))await employeeNotices.queue(client,row.id,b.status);
       await client.query('COMMIT');
       approvalMail.run().catch(()=>{});
       employeeNotices.run().catch(()=>{});
-      res.json({ok:true,releasedShifts:released.length,confirmationQueued:['approved','refused'].includes(b.status)});
+      res.json({ok:true,releasedShifts:released.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
   });
   app.post('/api/leave/requests/:id/late-notice',requireManager,sameOrigin,async(req,res)=>{

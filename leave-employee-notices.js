@@ -1,3 +1,4 @@
+import {conditionalPayload} from './leave-conditional-payload.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {deadlineForDate} from './public/leave-calendar.js';
 
@@ -8,6 +9,7 @@ const time=value=>String(Math.floor(value/60)).padStart(2,'0')+' h '+String(valu
 const rule='Toute demande doit être reçue avant 9 h le jeudi précédant la semaine du congé (du lundi au dimanche), à l’heure du Québec.';
 
 export function employeeNoticePayload(job,{testRecipient='',from='Quarts Service <onboarding@resend.dev>'}={}){
+  if(job.kind==='conditional')return conditionalPayload(job,{testRecipient,from});
   const s=job.snapshot,late=job.kind==='late';
   if(!['late','refused'].includes(job.kind))throw new Error('Type d’avis invalide.');
   const to=normalizeEmail(s.is_test?testRecipient:s.email);
@@ -45,27 +47,33 @@ ${late?`<tr><td style="padding:24px;background:#f7f5f2;border-top:1px solid #e7e
 export async function installEmployeeNoticeSchema(pool){
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_employee_notices (
     id BIGSERIAL PRIMARY KEY,request_id BIGINT NOT NULL REFERENCES schedule_leave_requests(id),request_version INTEGER NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('late','refused')),snapshot JSONB NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('late','refused','conditional')),snapshot JSONB NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',payload JSONB,attempts INTEGER NOT NULL DEFAULT 0,
     available_at TIMESTAMPTZ NOT NULL DEFAULT (clock_timestamp()+interval '15 seconds'),
     first_attempt_at TIMESTAMPTZ,last_attempt_at TIMESTAMPTZ,provider_id TEXT,error TEXT NOT NULL DEFAULT '',
     UNIQUE(request_id,kind,request_version)
   );
+  DO $$ BEGIN
+    IF EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='schedule_leave_employee_notices'::regclass AND conname='schedule_leave_employee_notices_kind_check' AND pg_get_constraintdef(oid) NOT LIKE '%conditional%') THEN
+      ALTER TABLE schedule_leave_employee_notices DROP CONSTRAINT schedule_leave_employee_notices_kind_check;
+      ALTER TABLE schedule_leave_employee_notices ADD CONSTRAINT schedule_leave_employee_notices_kind_check CHECK(kind IN ('late','refused','conditional'));
+    END IF;
+  END $$;
   CREATE UNIQUE INDEX IF NOT EXISTS schedule_leave_one_late_notice ON schedule_leave_employee_notices(request_id) WHERE kind='late';`);
 }
 
 export async function queueEmployeeNotice(client,id,kind){
-  if(!['late','refused'].includes(kind))throw new Error('Type d’avis invalide.');
+  if(!['late','refused','conditional'].includes(kind))throw new Error('Type d’avis invalide.');
   const row=(await client.query(`SELECT r.id,r.version,r.status,r.archived_at,r.employee_name,r.email,r.is_test,r.periods,r.submitted_at,r.department_name,r.decision_note,d.recipient,
     EXISTS(SELECT 1 FROM schedule_leave_events e WHERE e.request_id=r.id AND e.status='late') AS was_late
     FROM schedule_leave_requests r LEFT JOIN schedule_leave_departments d ON d.id=r.department_id WHERE r.id=$1`,[id])).rows[0];
   if(!row||row.status!==kind||row.archived_at)return false;
-  const snapshot={employee_name:row.employee_name,email:row.email,is_test:row.is_test,periods:row.periods,submitted_at:row.submitted_at,department_name:row.department_name,recipient:row.recipient,was_late:row.was_late,decision_note:kind==='refused'?row.decision_note:''};
+  const snapshot={employee_name:row.employee_name,email:row.email,is_test:row.is_test,periods:row.periods,submitted_at:row.submitted_at,department_name:row.department_name,recipient:row.recipient,was_late:row.was_late,decision_note:kind!=='late'?row.decision_note:''};
   const result=await client.query(`INSERT INTO schedule_leave_employee_notices(request_id,request_version,kind,snapshot) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING id`,[id,row.version,kind,JSON.stringify(snapshot)]);
   return result.rows.length>0;
 }
 
-// No historical backfill. Late notices state a submission fact; refusal notices follow the decision version.
+// No historical backfill. Late notices state a submission fact; other notices follow the decision version.
 export async function installEmployeeNotices(pool,{autoStart=true,fetchImpl=fetch}={}){
   await installEmployeeNoticeSchema(pool);
   let running=false;
@@ -75,7 +83,7 @@ export async function installEmployeeNotices(pool,{autoStart=true,fetchImpl=fetc
     try{
       await pool.query(`UPDATE schedule_leave_employee_notices m SET status='cancelled',error='Demande archivée ou décision modifiée avant confirmation de l’envoi.'
         FROM schedule_leave_requests r WHERE r.id=m.request_id AND m.status IN ('pending','sending','error')
-        AND (r.archived_at IS NOT NULL OR (m.kind='refused' AND (r.status<>'refused' OR r.version<>m.request_version)))`);
+        AND (r.archived_at IS NOT NULL OR (m.kind<>'late' AND (r.status<>m.kind OR r.version<>m.request_version)))`);
       await pool.query(`UPDATE schedule_leave_employee_notices SET status='review',error='Envoi à vérifier dans Resend avant toute relance.'
         WHERE status IN ('pending','sending','error') AND first_attempt_at<clock_timestamp()-interval '20 hours'`);
       const jobs=(await pool.query(`SELECT id FROM schedule_leave_employee_notices WHERE available_at<=clock_timestamp() AND
@@ -91,7 +99,7 @@ export async function installEmployeeNotices(pool,{autoStart=true,fetchImpl=fetc
             ((m.status IN ('pending','error') AND (m.last_attempt_at IS NULL OR m.last_attempt_at<clock_timestamp()-interval '1 minute'))
             OR (m.status='sending' AND m.last_attempt_at<clock_timestamp()-interval '2 minutes')) FOR UPDATE OF r,m SKIP LOCKED`,[job.id])).rows[0];
           if(!row){await client.query('ROLLBACK');continue;}
-          const obsolete=r=>!r||r.archived_at||(row.kind==='refused'&&(r.status!=='refused'||r.version!==row.request_version));
+          const obsolete=r=>!r||r.archived_at||(row.kind!=='late'&&(r.status!==row.kind||r.version!==row.request_version));
           if(obsolete({status:row.request_status,version:row.version,archived_at:row.archived_at})){
             await client.query("UPDATE schedule_leave_employee_notices SET status='cancelled' WHERE id=$1",[job.id]);await client.query('COMMIT');continue;
           }
