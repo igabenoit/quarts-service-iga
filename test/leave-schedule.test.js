@@ -145,3 +145,11 @@ test('application ciblée : semaine valide, contrôles gestionnaire et origine, 
   const res=response();await handlers.at(-1)({params:{weekStart:'2026-10-12'}},res);
   assert.equal(res.body.releasedShifts,1);assert.equal(client.calls.at(-1).sql,'COMMIT');
 });
+
+test('une approbation hors délai libère seulement les quarts chevauchés et met la confirmation en file',async()=>{
+  const client=clientFor([assignment(1,5),assignment(2,4)]);
+  const {routes}=await routesFor(client,{status:'late'});
+  const res=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:'20'},body:{status:'approved',version:1}},res);
+  assert.equal(res.code,200);assert.equal(res.body.releasedShifts,1);assert.equal(res.body.confirmationQueued,true);
+  assert.deepEqual([...client.remaining.keys()],['2']);assert.equal(client.calls.at(-1).sql,'COMMIT');
+});

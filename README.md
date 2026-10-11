@@ -20,6 +20,8 @@ de mineurs restent applicables. Un refus d’attribution indique la contrainte p
 - `SESSION_SECRET`
 - `MANAGER_CODE`
 
+Le champ du code gestionnaire utilise le clavier complet sur mobile, sans majuscules ni correction automatiques. Le code reste masqué et sa validation est inchangée.
+
 ## Développement
 
 ```bash
@@ -46,7 +48,7 @@ Décocher « Employé actif » correspond à une absence temporaire (par exemple
 
 - Gestion : lien **Demandes de congé** dans l’application, ou /conges-gestion après connexion gestionnaire.
 - Employés : ouvrir /conges avec le code commun, inscrire son prénom et son nom, puis choisir son département. Le bouton de l’horaire et public/conges-qr.svg pointent vers cette adresse permanente. Le code commun ne vérifie pas individuellement l’identité; le motif et le courriel restent réservés à la gestion.
-- Préavis : avant 9 h le jeudi précédant la première semaine du congé (lundi à dimanche), selon America/Toronto; à 9 h exactement, la demande est hors délai. La date et l’heure de remise proviennent de la base de données. Les tentatives hors délai sont conservées séparément avec le statut « Hors délai » pour le suivi et ne peuvent pas être approuvées par ce formulaire.
+- Préavis : avant 9 h le jeudi précédant la première semaine du congé (lundi à dimanche), selon America/Toronto; à 9 h exactement, la demande est hors délai. La date et l’heure de remise proviennent de la base de données. Les demandes hors délai sont conservées avec le statut « Hors délai » pour le suivi. La gestion peut les approuver exceptionnellement ou les refuser; le retard reste visible dans l’historique après la décision. L’approbation utilise les mêmes contrôles de liaison au Service, applique les périodes à l’horaire et met en file la confirmation habituelle. Un refus exige une note et ne modifie pas l’horaire. L’avertissement hors délai est affiché à l’employé à la soumission, sans courriel automatique de retard. Le suivi propose « Répondre par courriel » pour ouvrir la messagerie du gestionnaire, sans envoi automatique, notamment après un refus.
 - Dates inclusives : toutes les journées sont affichées automatiquement. Pour chacune, choisir journée complète ou heures d’absence avec des boutons aux 15 minutes. Un résumé précède l’envoi; aucun ajout manuel de période n’est nécessaire. La fin de journée est représentée par 24:00, autorisé seulement comme heure de fin.
 - Une demande peut couvrir plusieurs semaines : elle est comptée une seule fois et ses plages approuvées sont appliquées à toutes les semaines, y compris celles créées ultérieurement. Les demandes en attente ne bloquent pas les quarts.
 - L’approbation libère uniquement les affectations de l’employé qui chevauchent le congé, dans la même transaction que la décision. Les besoins de quarts et toutes les autres affectations sont conservés. Les quarts libérés restent « À couvrir » pour choisir un remplaçant. Les retraits sont consignés dans l’historique de la demande. Pour les congés déjà approuvés, « Appliquer les congés approuvés » effectue ce même ajustement sur la semaine affichée, sans recréer l’horaire. Une deuxième application sans nouveau conflit ne change rien. L’annulation conserve l’historique et ne rétablit pas automatiquement des affectations. Les journées bloquées manuellement restent indépendantes.

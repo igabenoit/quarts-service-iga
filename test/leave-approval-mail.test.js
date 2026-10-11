@@ -83,6 +83,38 @@ test('PostgreSQL : file transactionnelle, décision, annulation avant envoi, rep
       const duplicate=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:8},body:{status:'approved',version:1},headers:{}},duplicate);
       assert.equal(duplicate.code,409);assert.equal((await mails()).filter(r=>Number(r.request_id)===8).length,1);
     });
+    await t.test('hors délai : liaison obligatoire, approbation et confirmation unique, historique conservé',async()=>{
+      process.env.RESEND_API_KEY='';
+      const handlers=routes.get('patch /api/leave/requests/:id');
+      assert.deepEqual(handlers.slice(0,2),[manager,origin]);
+      await add(10,'late');
+      const latePeriod={...full,date:'2030-10-20'};
+      await pool.query("UPDATE schedule_leave_requests SET employee_id=NULL,periods=$1::jsonb,first_date='2030-10-20',last_date='2030-10-20' WHERE id=10",[JSON.stringify([latePeriod])]);
+      await pool.query("INSERT INTO schedule_leave_events(request_id,status) VALUES(10,'late')");
+      const decide=async body=>{const res=response();await handlers.at(-1)({params:{id:10},body,headers:{}},res);return res;};
+      const unlinked=await decide({status:'approved',version:1});assert.equal(unlinked.code,400);assert.match(unlinked.body.error,/reliez le nom/);
+      assert.equal((await mails()).some(m=>Number(m.request_id)===10),false);
+      const approved=await decide({status:'approved',version:1,employeeId:2});assert.equal(approved.code,200,JSON.stringify(approved.body));assert.equal(approved.body.confirmationQueued,true);
+      const row=(await pool.query('SELECT * FROM schedule_leave_requests WHERE id=10')).rows[0];
+      assert.equal(row.status,'approved');assert.equal(Number(row.employee_id),2);assert.deepEqual(row.effective_periods,[latePeriod]);
+      assert.deepEqual((await pool.query('SELECT status FROM schedule_leave_events WHERE request_id=10 ORDER BY id')).rows.map(e=>e.status),['late','approved']);
+      assert.equal((await mails()).filter(m=>Number(m.request_id)===10).length,1);
+      assert.equal((await decide({status:'approved',version:1,employeeId:2})).code,409);
+      const list=response();await routes.get('get /api/leave/requests').at(-1)({query:{}},list);
+      const listed=list.body.requests.find(r=>Number(r.id)===10);assert.equal(listed.confirmation_status,'pending');assert.equal(listed.events[0].status,'late');
+    });
+    await t.test('hors délai : refus motivé sans confirmation automatique ni changement d’horaire',async()=>{
+      await add(11,'late');await pool.query("INSERT INTO schedule_leave_events(request_id,status) VALUES(11,'late')");
+      const before=(await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows;
+      const decide=async body=>{const res=response();await routes.get('patch /api/leave/requests/:id').at(-1)({params:{id:11},body,headers:{}},res);return res;};
+      assert.equal((await decide({status:'refused',version:1})).code,400);
+      assert.equal((await decide({status:'cancelled',version:1,note:'Annulation'})).code,400);
+      const refused=await decide({status:'refused',version:1,note:'Horaire déjà publié'});assert.equal(refused.code,200);assert.equal(refused.body.confirmationQueued,false);
+      assert.equal((await mails()).some(m=>Number(m.request_id)===11),false);
+      assert.deepEqual((await pool.query('SELECT * FROM schedule_assignments ORDER BY shift_id')).rows,before);
+      assert.deepEqual((await pool.query('SELECT status,note FROM schedule_leave_events WHERE request_id=11 ORDER BY id')).rows,[{status:'late',note:''},{status:'refused',note:'Horaire déjà publié'}]);
+      assert.equal((await decide({status:'approved',version:2})).code,400);
+    });
     await t.test('API privée : préférence et rapprochement ne modifient ni demande ni horaire',async()=>{
       for(const [method,path] of [['get','/api/employee-contacts'],['put','/api/employee-contacts/:id'],['post','/api/employee-contacts/link']]){
         assert.equal(routes.get(method+' '+path)[0],manager);if(method!=='get')assert.equal(routes.get(method+' '+path)[1],origin);

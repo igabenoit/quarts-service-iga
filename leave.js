@@ -136,7 +136,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Demande introuvable.'});}
       if(row.archived_at){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande est archivée.'});}
       if(row.version!==b.version){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande a changé. Actualisez le suivi.'});}
-      if(!((row.status==='pending'&&['approved','refused','cancelled'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Les demandes hors délai doivent être traitées directement avec la gérante.'});}
+      if(!((row.status==='pending'&&['approved','refused','cancelled'].includes(b.status))||(row.status==='late'&&['approved','refused'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
       if(b.status==='approved'&&!row.is_test){
         const dept=(await client.query('SELECT code FROM schedule_leave_departments WHERE id=$1',[row.department_id])).rows[0];
         if(!row.employee_id&&dept?.code==='service'){
