@@ -114,7 +114,7 @@ summary{cursor:pointer;font-weight:700}
 #personForm label>small{font-weight:400;font-size:.75rem;color:#596451}
 .sheet-person{height:42pt}
 .sheet-name{text-align:left!important;font-size:8pt;font-weight:600}
-.sheet-person-label{height:41.45pt;padding:4pt;overflow:hidden;line-height:1.2}
+.sheet-person-label{height:41.45pt;padding:4pt;overflow:hidden;line-height:1.2;display:flex;flex-direction:column;justify-content:center;text-align:left}
 .sheet-seniority{font-size:6.5pt;padding:2pt!important}
 .sheet-day{position:relative}
 .sheet-work{height:30.45pt;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2pt;font-size:8pt;line-height:1.2;overflow:hidden}
