@@ -99,6 +99,16 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   });}
   app.get('/api/departments/:id/weeks/:week',requireManager,endpoint(async(req,res)=>{const current=await getWeek(integer(req.params.id),week(req.params.week));res.json({...current,warnings:await warningsFor(current)});}));
   app.put('/api/departments/:id/weeks/:week',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);return saveWeek(client,current,normalizeDraft(req.body.draft,current.people),'save');}))));
+  app.post('/api/departments/:id/weeks/:week/copy',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
+    const id=integer(req.params.id),targetWeek=week(req.params.week),sourceWeek=week(req.body.sourceWeek);
+    if(sourceWeek===targetWeek)fail('Choisissez une semaine différente de la semaine à copier.');
+    const source=await getWeek(id,sourceWeek,client);
+    if(!source.revision)fail('Enregistrez la semaine à copier avant de continuer.');
+    if(!Number.isInteger(req.body.sourceRevision)||source.revision!==req.body.sourceRevision)fail('La semaine à copier a changé. Rechargez-la avant de recommencer.',409);
+    const target=await getWeek(id,targetWeek,client);checkRevision(req.body,target);
+    if(target.revision&&req.body.replaceConfirmed!==true)fail('Confirmez le remplacement du brouillon de la semaine choisie.');
+    return saveWeek(client,target,normalizeDraft(source.draft,target.people),'copy');
+  }))));
   app.post('/api/departments/:id/weeks/:week/publish',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
     const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);
     const draft=normalizeDraft(current.draft,current.people);if(!draft.rows.length)fail('Ajoutez les employés et leurs heures avant de publier.');

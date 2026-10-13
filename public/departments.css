@@ -187,3 +187,7 @@ body{background:white}
 .sheet-notes p{font-size:6.5pt}
 .sheet-header h1{overflow-wrap:anywhere}
 
+
+.copy-week-summary{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.copy-week-summary span{background:var(--pale);border-radius:8px;padding:10px 14px;font-weight:700}
+#copyWeekDestination{margin:14px 0 0}

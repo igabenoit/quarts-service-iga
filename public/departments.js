@@ -1,5 +1,5 @@
 import {DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,quickTimeLabel,totalMinutes,sheetHTML,availabilityCode,PRINT_ROW_CAPACITY} from './departments-core.js';
-const $=s=>document.querySelector(s);let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,copiedShift=null,lastPaste=null;
+const $=s=>document.querySelector(s);let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous avec votre code gestionnaire depuis « Retour au Service », puis revenez ici.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
@@ -35,7 +35,7 @@ function openCell(personId,day){
   $('#cellKind').value=cell.kind==='blank'||cell.kind==='review'?'shift':cell.kind;$('#cellStart').value=cell.start===null?'':quickTimeLabel(cell.start);$('#cellEnd').value=cell.end===null?'':quickTimeLabel(cell.end);
   $('#cellBreak').value=cell.breakMinutes;$('#cellNote').value=cell.kind==='review'?'':cell.note;$('#cellError').textContent='';updateCellKind();$('#cellDialog').showModal();if($('#cellKind').value==='shift'){$('#cellStart').focus();$('#cellStart').select();}
 }
-function updateCellKind(){const shift=$('#cellKind').value==='shift';$('#shiftFields').hidden=!shift;$('#quickTimeInfo').hidden=!shift;$('#cellStart').required=shift;$('#cellEnd').required=shift;$('#copyShift').disabled=!shift;previewShift();}
+function updateCellKind(){const shift=$('#cellKind').value==='shift';$('#shiftFields').hidden=!shift;$('#quickTimeInfo').hidden=!shift;$('#cellStart').required=shift;$('#cellEnd').required=shift;$('#copyShift').disabled=false;previewShift();}
 $('#cellKind').onchange=updateCellKind;
 $('#cellForm').onsubmit=event=>{event.preventDefault();try{saveCellForm();}catch(err){$('#cellError').textContent=err.message;}};
 function cellFromForm(){
@@ -56,19 +56,19 @@ function saveCellForm(){
 }
 function renderCopyBar(){
   $('#copyBar').hidden=!copiedShift&&!lastPaste;$('#stopCopy').hidden=!copiedShift;$('#undoPaste').hidden=!lastPaste;
-  $('#copyDescription').textContent=copiedShift?`Quart à coller : ${timeLabel(copiedShift.cell.start)} → ${timeLabel(copiedShift.cell.end)}`:'Quart collé dans le brouillon';
-  $('#copyHelp').textContent=copiedShift?'Cliquez sur les journées où reproduire ce quart. Échap pour terminer.':'Vous pouvez annuler le dernier collage avant d’enregistrer le brouillon.';
+  $('#copyDescription').textContent=copiedShift?`Contenu à coller : ${copiedShift.cell.kind==='blank'?'Case vide':formatCell(copiedShift.cell)}`:'Contenu collé dans le brouillon';
+  $('#copyHelp').textContent=copiedShift?'Cliquez sur les journées où reproduire ce contenu. Échap pour terminer.':'Vous pouvez annuler le dernier collage avant d’enregistrer le brouillon.';
 }
 function stopCopy(){copiedShift=null;renderSchedule();}
 $('#stopCopy').onclick=stopCopy;
-$('#copyShift').onclick=()=>{try{const cell=cellFromForm();if(cell.kind!=='shift')return;saveCellForm();copiedShift={cell:{...cell}};renderSchedule();message('Quart copié. Cliquez sur une ou plusieurs journées pour le coller, puis enregistrez le brouillon.');}catch(err){$('#cellError').textContent=err.message;}};
+$('#copyShift').onclick=()=>{try{const cell=cellFromForm();saveCellForm();copiedShift={cell:{...cell}};renderSchedule();message('Case copiée. Cliquez sur une ou plusieurs journées pour la coller, puis enregistrez le brouillon.');}catch(err){$('#cellError').textContent=err.message;}};
 function pasteShift(personId,day){
   const row=current.draft.rows.find(r=>r.personId===personId),person=current.people.find(p=>p.id===personId);if(!row||!person||!copiedShift)return;
   const before=row.cells[day],after={...copiedShift.cell};
-  if(JSON.stringify(before)===JSON.stringify(after)){message('Cette journée contient déjà ce quart.');return;}
+  if(JSON.stringify(before)===JSON.stringify(after)){message('Cette journée contient déjà ce contenu.');return;}
   if(before.kind!=='blank'&&!confirm(`${person.name} · ${DAY_NAMES[day]} : remplacer « ${formatCell(before)} » par ${formatCell(after)}?`))return;
   row.cells[day]=after;lastPaste={personId,day,before:{...before},after:{...after}};
-  markDirty();renderSchedule();renderPrint();message(`Quart collé pour ${person.name}, ${DAY_NAMES[day].toLowerCase()}. Enregistrez le brouillon pour conserver vos changements.`);
+  markDirty();renderSchedule();renderPrint();message(`Contenu collé pour ${person.name}, ${DAY_NAMES[day].toLowerCase()}. Enregistrez le brouillon pour conserver vos changements.`);
 }
 $('#undoPaste').onclick=()=>{
   if(!lastPaste)return;const row=current.draft.rows.find(r=>r.personId===lastPaste.personId);
@@ -82,6 +82,47 @@ document.addEventListener('keydown',event=>{
 
 async function saveDraft(){const result=await api(route(),{method:'PUT',body:JSON.stringify({revision:current.revision,draft:current.draft})});current.revision=result.revision;dirty=false;await loadWeek();return result;}
 $('#saveDraft').onclick=async()=>{try{await saveDraft();message('Brouillon enregistré.');}catch(err){message(err.message);}};
+$('#copyWeek').onclick=async()=>{
+  const button=$('#copyWeek');button.disabled=true;
+  try{
+    if(dirty||!current.revision)await saveDraft();
+    weekCopySource={departmentId:selectedDepartment,weekStart:current.weekStart,revision:current.revision};
+    $('#copyWeekSource').textContent=`${current.department.name} · du ${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;
+    const counts={shift:0,off:0,vacation:0,note:0,review:0};for(const row of current.draft.rows)for(const cell of row.cells)if(cell.kind in counts)counts[cell.kind]++;
+    $('#copyWeekSummary').innerHTML=[`${current.draft.rows.length} employés`,`${counts.shift} quarts`,`${counts.off} congés (CH)`,`${counts.vacation} jours de vacances`,`${counts.note} autres mentions`,...(counts.review?[`${counts.review} cases à vérifier`]:[])].map(text=>`<span>${e(text)}</span>`).join('');
+    $('#copyWeekTarget').value=addDays(current.weekStart,7);$('#copyWeekError').textContent='';$('#copyWeekDialog').showModal();await previewWeekCopy();
+  }catch(err){message(err.message);}finally{button.disabled=false;}
+};
+async function previewWeekCopy(){
+  const sequence=++weekCopySequence;weekCopyTarget=null;$('#confirmCopyWeek').disabled=true;$('#copyWeekReplace').checked=false;$('#copyWeekReplaceLabel').hidden=true;$('#copyWeekError').textContent='';
+  const value=$('#copyWeekTarget').value;if(!value){$('#copyWeekDestination').textContent='Choisissez une semaine de destination.';return;}
+  const target=monday(value);$('#copyWeekTarget').value=target;
+  if(target===weekCopySource.weekStart){$('#copyWeekDestination').textContent='Choisissez une semaine différente de la source.';return;}
+  $('#copyWeekDestination').textContent='Vérification de la semaine…';
+  try{
+    const data=await api(`/api/departments/${weekCopySource.departmentId}/weeks/${target}`);if(sequence!==weekCopySequence)return;
+    weekCopyTarget={weekStart:target,revision:data.revision};
+    $('#copyWeekDestination').textContent=`Du ${dateLabel(target)} au ${dateLabel(addDays(target,6))}. `+(data.revision?'Un brouillon existe déjà : il sera remplacé par cette copie.':'Une nouvelle semaine sera créée en brouillon.')+(data.publishedAt?' L’horaire actuellement publié sera conservé.':'');
+    $('#copyWeekReplaceLabel').hidden=!data.revision;$('#confirmCopyWeek').disabled=!!data.revision;
+  }catch(err){if(sequence===weekCopySequence)$('#copyWeekDestination').textContent=err.message;}
+}
+$('#copyWeekTarget').onchange=previewWeekCopy;
+$('#copyWeekReplace').onchange=()=>{$('#confirmCopyWeek').disabled=!weekCopyTarget||(weekCopyTarget.revision>0&&!$('#copyWeekReplace').checked);};
+$('#copyWeekDialog').addEventListener('cancel',event=>{if(weekCopyBusy)event.preventDefault();});
+$('#copyWeekDialog').addEventListener('close',()=>{weekCopySequence++;weekCopyTarget=null;});
+$('#copyWeekForm').onsubmit=async event=>{
+  event.preventDefault();if(weekCopyBusy||!weekCopySource||!weekCopyTarget)return;
+  const source={...weekCopySource},target={...weekCopyTarget};
+  if(monday($('#copyWeekTarget').value)!==target.weekStart)return;
+  weekCopyBusy=true;$('#copyWeekFields').disabled=true;$('#confirmCopyWeek').disabled=true;$('#closeCopyWeek').disabled=true;$('#copyWeekError').textContent='';
+  try{
+    await post(`/api/departments/${source.departmentId}/weeks/${target.weekStart}/copy`,{sourceWeek:source.weekStart,sourceRevision:source.revision,revision:target.revision,replaceConfirmed:$('#copyWeekReplace').checked});
+    $('#copyWeekDialog').close();selectedDepartment=source.departmentId;$('#weekPicker').value=target.weekStart;copiedShift=null;activePhoto=null;$('#photoReview').hidden=true;
+    await loadWeek();message('Semaine copiée et enregistrée en brouillon. Ajustez les journées qui changent, puis publiez l’horaire.');
+  }catch(err){$('#copyWeekError').textContent=err.message;message(err.message);}
+  finally{weekCopyBusy=false;$('#copyWeekFields').disabled=false;$('#closeCopyWeek').disabled=false;$('#confirmCopyWeek').disabled=!weekCopyTarget||(weekCopyTarget.revision>0&&!$('#copyWeekReplace').checked);}
+};
+
 $('#sheetManager').oninput=()=>{current.draft.manager=$('#sheetManager').value;markDirty();};$('#sheetNotes').oninput=()=>{current.draft.notes=$('#sheetNotes').value;markDirty();};
 $('#syncRoster').onclick=async()=>{try{await loadMeta();const fresh=await api(route());current.people=fresh.people;for(const p of current.people.filter(p=>p.active))if(!current.draft.rows.some(r=>r.personId===p.id))current.draft.rows.push({personId:p.id,cells:Array.from({length:7},blankCell)});markDirty();renderSchedule();message('Les employés actifs ont été ajoutés au brouillon. Les heures déjà saisies sont conservées.');}catch(err){message(err.message);}};
 $('#publishWeek').onclick=async()=>{
