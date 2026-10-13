@@ -224,3 +224,10 @@ body{background:white}
 
 .sheet-department-totals .grand-total{border-top:.7pt solid #aab3a2;padding-top:4pt;font-size:9pt;color:#282e29}
 .department-hours .grand-total{border-top:1px solid #b9c3b4;padding-top:6px}
+
+.buffet-hours{display:block;color:#3b3f37;line-height:1.2;margin-top:4px;font-size:.8rem}
+.sheet-total .buffet-hours{font-size:5.5pt;white-space:nowrap;border-top:.5pt solid #c3d7ce;margin:3pt 1pt 0;padding-top:2pt;font-weight:600}
+.sheet-department-totals .department-buffet-total{font-size:8pt}
+.status-cut-fruit,.status-cut-fruit .day-button,.status-cut-fruit .day-detail span,.status-cut-fruit .sheet-work,.status-cut-fruit .sheet-day-detail span{background:#b8dfb0!important;color:#282e29!important}
+.sheet-work.has-detail{font-size:7.5pt;line-height:1.1;padding:1pt}
+.sheet-work .assignment-label{font-weight:600}

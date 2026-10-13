@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
-import {DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell} from './public/departments-core.js';
+import {DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
+import {incomingFor,assertTransferSlots} from './department-transfers.js';
 import {validatePhoto,transcribePhoto} from './department-photo.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -43,12 +44,18 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   const peopleFor=async(id,client=pool,weekStart)=>(await directory(client,weekStart)).filter(p=>p.departments.includes(Number(id))).sort((a,b)=>(a.group===b.group?0:a.group==='regular'?-1:1)||(a.seniorityDate||'9999').localeCompare(b.seniorityDate||'9999')||a.name.localeCompare(b.name,'fr-CA'));
   const emptyDraft=people=>({manager:'',notes:'',rows:people.filter(p=>p.active).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
+  const transferWeeks=async(start,client=pool)=>(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
   async function getWeek(id,start,client=pool){
-    const people=await peopleFor(id,client,start),row=(await client.query('SELECT * FROM schedule_department_weeks WHERE department_id=$1 AND week_start=$2',[id,start])).rows[0];
-    return {department:await department(id,client),weekStart:start,people,draft:row?.draft||emptyDraft(people),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
+    const members=await peopleFor(id,client,start),d=await department(id,client),weeks=await transferWeeks(start,client),row=weeks.find(w=>Number(w.department_id)===Number(id));
+    const incoming=incomingFor(weeks,d.key),guestIds=new Set(incoming.map(i=>i.personId)),people=[...members];
+    if(guestIds.size)for(const p of await directory(client,start))if(guestIds.has(p.id)&&!people.some(m=>m.id===p.id))people.push({...p,visiting:true});
+    return {department:d,weekStart:start,people,incoming,draft:row?.draft||emptyDraft(members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
   }
   async function transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
   async function saveWeek(client,current,draft,action,published=current.published){
+    for(const row of draft.rows)for(const cell of row.cells)validateAssignment(cell,current.department.key);
+    const weeks=await transferWeeks(current.weekStart,client),changed={department_id:current.department.id,key:current.department.key,draft,published};
+    assertTransferSlots([...weeks.filter(w=>Number(w.department_id)!==current.department.id),changed]);
     const revision=current.revision+1;
     if(current.revision)await client.query('INSERT INTO schedule_department_history(department_id,week_start,revision,draft,published,action) VALUES($1,$2,$3,$4,$5,$6)',[current.department.id,current.weekStart,current.revision,JSON.stringify(current.draft),JSON.stringify(current.published),action]);
     await client.query(`INSERT INTO schedule_department_weeks(department_id,week_start,draft,revision,published,published_at) VALUES($1,$2,$3,$4,$5,$6)
@@ -57,13 +64,15 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   const checkRevision=(body,current)=>{if(!Number.isInteger(body.revision)||body.revision!==current.revision)fail('La feuille a changé. Rechargez-la avant d’enregistrer pour conserver les modifications récentes.',409);};
   async function warningsFor(current,client=pool){
-    const warnings=draftWarnings(current.draft,current.people);
-    const others=(await client.query('SELECT d.name,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start=$1 AND department_id<>$2 AND published IS NOT NULL',[current.weekStart,current.department.id])).rows;
-    for(const row of current.draft.rows)for(const other of others){const match=other.published.rows.find(r=>r.personId===row.personId);if(match)for(let day=0;day<7;day++){const a=row.cells[day],b=match.cells[day];if(isTimedCell(a)&&isTimedCell(b)&&a.start<b.end&&b.start<a.end)warnings.push(`${current.people.find(p=>p.id===row.personId)?.name||'Employé retiré'} : chevauchement avec ${other.name}, le ${addDays(current.weekStart,day)}.`);}}
-    const leaves=(await client.query("SELECT employee_name,periods,effective_periods FROM schedule_leave_requests WHERE department_id=$1 AND status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$3 AND last_date>=$2",[current.department.id,current.weekStart,addDays(current.weekStart,6)])).rows;
-    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p)continue;for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)))for(let day=0;day<7;day++){const c=row.cells[day];if(isTimedCell(c)&&(leave.effective_periods||leave.periods).some(l=>l.date===addDays(current.weekStart,day)&&l.startMinute<c.end&&c.start<l.endMinute))warnings.push(`${p.name} : congé approuvé à vérifier le ${addDays(current.weekStart,day)}.`);}}
+    const display=mergeIncoming(current.draft,current.incoming);
+    const warnings=draftWarnings(display,current.people);
+    const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start=$1 AND department_id<>$2 AND published IS NOT NULL',[current.weekStart,current.department.id])).rows;
+    for(const row of display.rows)for(const other of others){const match=other.published.rows.find(r=>r.personId===row.personId);if(match)for(let day=0;day<7;day++){const a=row.cells[day],b=match.cells[day];if(isTimedCell(a)&&isTimedCell(b)&&(a.sourceDepartment||current.department.key)!==other.key&&a.start<b.end&&b.start<a.end)warnings.push(`${current.people.find(p=>p.id===row.personId)?.name||'Employé retiré'} : chevauchement avec ${other.name}, le ${addDays(current.weekStart,day)}.`);}}
+    const relevantKeys=[...new Set([current.department.key,...display.rows.flatMap(r=>r.cells.flatMap(c=>[c.workDepartment,c.sourceDepartment].filter(Boolean)))])];
+    const leaves=(await client.query("SELECT l.employee_name,l.periods,l.effective_periods,d.schedule_key AS key FROM schedule_leave_requests l JOIN schedule_leave_departments d ON d.id=l.department_id WHERE d.schedule_key=ANY($1::text[]) AND l.status='approved' AND l.is_test=FALSE AND l.archived_at IS NULL AND l.first_date<=$3 AND l.last_date>=$2",[relevantKeys,current.weekStart,addDays(current.weekStart,6)])).rows;
+    for(const row of display.rows){const p=current.people.find(p=>p.id===row.personId);if(!p)continue;for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)))for(let day=0;day<7;day++){const c=row.cells[day];if(isTimedCell(c)&&[current.department.key,c.workDepartment,c.sourceDepartment].includes(leave.key)&&(leave.effective_periods||leave.periods).some(l=>l.date===addDays(current.weekStart,day)&&l.startMinute<c.end&&c.start<l.endMinute))warnings.push(p.name+' : congé approuvé à vérifier le '+addDays(current.weekStart,day)+'.');}}
     const assignments=(await client.query('SELECT a.employee_id,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1',[current.weekStart])).rows;
-    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(isTimedCell(c)&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
+    for(const row of display.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(isTimedCell(c)&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
     return [...new Set(warnings)];
   }
   app.get('/api/departments/meta',requireManager,endpoint(async(_req,res)=>res.json({departments:await listDepartments(pool),people:await directory(),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements'})));
@@ -111,7 +120,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }))));
   app.post('/api/departments/:id/weeks/:week/publish',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
     const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);
-    const draft=normalizeDraft(current.draft,current.people);if(!draft.rows.length)fail('Ajoutez les employés et leurs heures avant de publier.');
+    const draft=normalizeDraft(current.draft,current.people);if(!draft.rows.length&&!current.incoming.length)fail('Ajoutez les employés et leurs heures avant de publier.');
     if(draft.rows.some(r=>r.cells.some(c=>c.kind==='review')))fail('Corrigez toutes les cases à vérifier avant de publier.');
     if(req.body.verified!==true)fail('Confirmez la vérification des noms, dates, heures et pauses.');
     const warnings=await warningsFor({...current,draft},client);if(warnings.length&&req.body.warningsReviewed!==true)fail('Vérifiez les disponibilités et les avertissements avant de publier.');
@@ -148,10 +157,20 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     return saveWeek(client,current,normalizeDraft({...current.draft,rows},current.people),'photo');
   }))));
   app.get('/api/leave/department-schedules',requireStaff,endpoint(async(_req,res)=>{
-    const rows=(await pool.query('SELECT d.name,d.schedule_key AS key,w.department_id,w.week_start,w.published_at FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.published IS NOT NULL ORDER BY w.week_start DESC,d.name LIMIT 100')).rows;
+    const rows=(await pool.query('SELECT d.name,d.schedule_key AS key,w.department_id,w.week_start,w.published_at,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.published IS NOT NULL ORDER BY w.week_start DESC,d.name LIMIT 100')).rows;
+    const departments=await listDepartments(pool),schedules=new Map();
+    for(const r of rows){
+      const keys=new Set([r.key,...r.published.rows.flatMap(row=>row.cells.filter(c=>isTimedCell(c)&&c.workDepartment).map(c=>c.workDepartment))]);
+      for(const key of keys){const d=departments.find(d=>d.key===key);if(!d)continue;const k=iso(r.week_start)+':'+d.id,previous=schedules.get(k);if(!previous||new Date(previous.publishedAt)<new Date(r.published_at))schedules.set(k,{departmentId:d.id,name:d.name,key,weekStart:iso(r.week_start),publishedAt:r.published_at});}
+    }
     const service=(await pool.query('SELECT week_start,token FROM schedule_public_links ORDER BY week_start DESC LIMIT 8')).rows;
-    res.json({schedules:rows.map(r=>({departmentId:Number(r.department_id),name:r.name,key:r.key,weekStart:iso(r.week_start),publishedAt:r.published_at})),service:service.map(r=>({weekStart:iso(r.week_start),path:'/h/'+r.token}))});
+    res.json({schedules:[...schedules.values()].sort((a,b)=>b.weekStart.localeCompare(a.weekStart)||a.name.localeCompare(b.name,'fr-CA')),service:service.map(r=>({weekStart:iso(r.week_start),path:'/h/'+r.token}))});
   }));
-  app.get('/api/leave/department-schedules/:id/:week',requireStaff,endpoint(async(req,res)=>{const d=await department(req.params.id),start=week(req.params.week);const row=(await pool.query('SELECT published,published_at FROM schedule_department_weeks WHERE department_id=$1 AND week_start=$2 AND published IS NOT NULL',[d.id,start])).rows[0];if(!row)fail('Cet horaire n’est pas publié.',404);res.json({department:d,weekStart:start,schedule:row.published,publishedAt:row.published_at});}));
+  app.get('/api/leave/department-schedules/:id/:week',requireStaff,endpoint(async(req,res)=>{
+    const d=await department(req.params.id),start=week(req.params.week),weeks=await transferWeeks(start),row=weeks.find(w=>Number(w.department_id)===d.id),incoming=incomingFor(weeks,d.key,{published:true});
+    if(!row?.published&&!incoming.length)fail('Cet horaire n’est pas publié.',404);
+    const schedule=mergeIncoming(row?.published||{rows:[],notes:''},incoming),dates=[row?.published_at,...incoming.map(i=>i.publishedAt)].filter(Boolean).map(v=>new Date(v).getTime());
+    res.json({department:d,weekStart:start,schedule,publishedAt:new Date(Math.max(...dates)).toISOString()});
+  }));
   return {directory,getWeek,warningsFor};
 }
