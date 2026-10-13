@@ -247,3 +247,15 @@ body{background:white}
 .sheet-department-totals .department-kitchen-total{font-size:8pt}
 
 .sheet-total:has(.kitchen-hours) small{margin-top:1pt;padding-top:1pt}
+
+/* Keep larger teams on legal paper without hiding employees or their totals. */
+.compact-sheet{padding:.3in}
+.compact-sheet .sheet-header{min-height:64pt;padding:5pt 0}
+.compact-sheet .sheet-header img{width:115pt}
+.compact-sheet .sheet-table{margin-top:8pt}
+.compact-sheet .sheet-group,.compact-sheet .sheet-subtotal{height:14pt}
+.compact-sheet .sheet-bottom{padding:6pt 0}
+.compact-sheet .sheet-department-totals{display:grid;grid-template-columns:repeat(2,auto);column-gap:10pt;row-gap:3pt;flex-shrink:0}
+.compact-sheet .sheet-department-totals .grand-total{grid-column:1/-1}
+.compact-sheet .sheet-notes{min-height:35pt}
+.compact-sheet .sheet-notes p{min-height:20pt}

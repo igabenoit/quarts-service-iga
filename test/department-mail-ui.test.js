@@ -17,7 +17,7 @@ function fixture(){
   const context=vm.createContext({$,document:{querySelectorAll:s=>s==='[data-close]'?[close]:[]},view:'',selectedDepartment:1,current:{weekStart:'2026-10-12'},PRINT_ROW_CAPACITY:14,e:String,
     api:async()=>({recipients:['test@example.com'],configured:true,version:1,history:[]}),
     post:()=>{calls++;return new Promise((resolve,reject)=>{resolveSend=resolve;rejectSend=reject;});},
-    renderPrint(){},message(){},getComputedStyle:()=>({paddingBottom:'0'}),schedulePDF:async()=>({}),
+    renderPrint(){},message(){},sheetOverflowMessage:()=>'',getComputedStyle:()=>({paddingBottom:'0'}),schedulePDF:async()=>({}),
     FileReader:class{readAsDataURL(){this.result='data:application/pdf;base64,JVBERi0=';this.onload();}},
     crypto:{randomUUID:()=> 'test-id'},URL:{createObjectURL:()=> 'blob:test',revokeObjectURL(){}}
   });
