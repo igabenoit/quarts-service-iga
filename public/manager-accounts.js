@@ -1,4 +1,6 @@
+import {accountValidation} from './manager-account-fields.js';
 const $=s=>document.querySelector(s);let data,editing=null;
+function feedback(text){const status=$('#accountFormStatus');status.textContent=text;status.focus();status.scrollIntoView({block:'nearest'});}
 const node=(tag,text)=>{const el=document.createElement(tag);el.textContent=text;return el;};
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json'}});const body=await response.json();if(!response.ok)throw Error(body.error);return body;}
 function edit(account){
@@ -15,9 +17,12 @@ function render(){
 $('#managerLink').textContent=location.origin+'/connexion';
 $('#newAccount').onclick=()=>edit(null);
 $('#accountForm').onsubmit=async event=>{
-  event.preventDefault();$('#saveAccount').disabled=true;$('#accessMessage').textContent='Enregistrement…';
-  try{data=await api('/api/manager-accounts'+(editing?'/'+editing.id:''),{method:editing?'PUT':'POST',body:JSON.stringify({name:$('#managerName').value,login:$('#managerLogin').value,password:$('#managerPassword').value,active:$('#managerActive').checked,departments:[...$('#accountDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),version:editing?.version})});render();edit(null);$('#accessMessage').textContent='Compte enregistré. Les accès sont à jour.';}
-  catch(error){$('#accessMessage').textContent=error.message;}
+  event.preventDefault();if($('#saveAccount').disabled)return;
+  const values={name:$('#managerName').value,login:$('#managerLogin').value,password:$('#managerPassword').value,active:$('#managerActive').checked,departments:[...$('#accountDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),version:editing?.version};
+  const error=accountValidation(values,!!editing);if(error){feedback(error);return;}
+  $('#saveAccount').disabled=true;feedback('Enregistrement…');
+  try{data=await api('/api/manager-accounts'+(editing?'/'+editing.id:''),{method:editing?'PUT':'POST',body:JSON.stringify(values)});render();edit(null);feedback('Compte enregistré : '+values.login.trim().toLowerCase()+'. Il apparaît dans la liste des gérants. Utilisez cet identifiant et le mot de passe choisi sur la page Connexion des gérants.');$('#accessMessage').textContent='Compte enregistré. Les accès sont à jour.';}
+  catch(error){feedback('Compte non enregistré : '+error.message);}
   finally{$('#saveAccount').disabled=false;}
 };
 try{data=await api('/api/manager-accounts');$('#accessContent').hidden=false;render();edit(null);}catch(error){$('#accessMessage').textContent=error.message+' Utilisez votre accès administrateur depuis la page d’accueil.';}
