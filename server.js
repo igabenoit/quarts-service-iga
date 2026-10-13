@@ -148,6 +148,7 @@ await pool.query(`
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use('/api/departments/photos',requireManager,sameOrigin,express.json({limit:'12mb'}));
+app.use('/api/departments/document-mail',requireManager,sameOrigin,express.json({limit:'13mb'}));
 app.use(express.json({ limit: "250kb" }));
 app.use((_request, response, next) => {
   response.set({

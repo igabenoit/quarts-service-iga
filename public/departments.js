@@ -20,7 +20,7 @@ async function loadWeek(){
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
   $('#sheetManager').value=current.draft.manager;$('#sheetNotes').value=current.draft.notes;
   $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
-  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();message('');}finally{if(sequence===loadSequence)$('#managerContent').inert=false;}
+  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();message('');}finally{if(sequence===loadSequence)$('#managerContent').inert=false;}
 }
 function renderWarnings(){const warnings=current.warnings||[];$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
 function renderSchedule(){
@@ -204,9 +204,44 @@ function renderCandidate(){
   $('#candidate').innerHTML=`<h3>Lecture proposée</h3><p>Département lu : ${e(candidate.departmentText||'Non lisible')}<br>Semaine lue : ${e(candidate.weekText||'Non lisible')}</p>${candidate.warnings.length?'<ul class="notice">'+candidate.warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>':''}${candidate.rows.map((r,i)=>{const matches=current.people.filter(p=>nameKey(p.name)===nameKey(r.name));return `<article class="candidate-row"><strong>${e(r.name||'Nom illisible')}</strong><label>Relier à la fiche<select data-map="${i}"><option value="">Choisir l’employé après vérification</option>${current.people.map(p=>`<option value="${p.id}" ${matches.length===1&&p.id===matches[0].id?'selected':''}>${e(p.name)}</option>`).join('')}</select></label><p>${r.days.map((c,d)=>`${DAY_NAMES[d].slice(0,3)} : ${e(formatCell(c))}`).join('<br>')}</p><p>Total manuscrit : ${e(r.writtenTotal||'Non lisible')} · Régulier : ${hoursLabel(totalMinutes({cells:r.days}))} h${trainingMinutes({cells:r.days})>0?` · Formation : ${hoursLabel(trainingMinutes({cells:r.days}))} h`:''}${buffetMinutes({cells:r.days})>0?` · Buffet : ${hoursLabel(buffetMinutes({cells:r.days}))} h`:''}</p></article>`;}).join('')}<label class="check"><input id="photoWeekConfirmed" type="checkbox"> La photo correspond au département et à la semaine sélectionnés.</label><label class="check"><input id="photoReplaceConfirmed" type="checkbox"> Remplacer les journées de ces employés dans le brouillon par cette proposition.</label><button id="applyCandidate">Reporter dans le brouillon</button><p class="muted">Les cases « À vérifier » devront être corrigées. La publication exigera ensuite votre validation de toute la feuille.</p>`;
   $('#applyCandidate').onclick=async()=>{try{if(dirty)await saveDraft();const mapping=[...$('#candidate').querySelectorAll('[data-map]')].map(s=>Number(s.value));await post(`/api/departments/photos/${activePhoto.id}/apply`,{revision:current.revision,mapping,weekConfirmed:$('#photoWeekConfirmed').checked,replaceConfirmed:$('#photoReplaceConfirmed').checked});await loadWeek();await switchView('schedule');message('Transcription reportée en brouillon. Corrigez les cases « À vérifier », puis validez toute la feuille avant publication.');}catch(err){$('#photoStatus').textContent=err.message;}};
 }
-async function switchView(next){view=next;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+next);document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===next)));if(next==='print')renderPrint();if(next==='people'){await loadMeta();renderPeople();}if(next==='photos')await loadPhotos();}
+async function switchView(next){view=next;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+next);let departmentMailSettings,preparedMail,mailPdfUrl,mailBusy=false;
+const mailLabels={draft:'ÉBAUCHE — DOCUMENT DE TRAVAIL',blank:'GABARIT VIERGE',filled:'HORAIRE HEBDOMADAIRE'};
+async function loadMailSettings(){
+  departmentMailSettings=await api(`/api/departments/${selectedDepartment}/mail`);
+  $('#departmentRecipients').value=departmentMailSettings.recipients.join('\n');
+  $('#mailSettingsStatus').textContent=departmentMailSettings.configured?'Les adresses sont propres à ce département.':'Vous pouvez enregistrer les adresses. L’envoi attend la configuration du service courriel sur le serveur.';
+  $('#mailHistory').innerHTML=departmentMailSettings.history.map(h=>`<p>${e(String(h.week_start).slice(0,10))} · ${e({draft:'Ébauche',blank:'Gabarit vierge',filled:'Horaire rempli'}[h.kind])} · ${e(h.recipients.join(', '))} — ${h.status==='sent'?'Transmis au service courriel':h.status==='error'?'Envoi non confirmé': 'En cours / à vérifier'}</p>`).join('')||'<p>Aucun envoi pour ce département.</p>';
+}
+$('#mailSettingsForm').onsubmit=async event=>{event.preventDefault();try{
+  const list=$('#departmentRecipients').value.split(/[\n,;]+/).map(v=>v.trim()).filter(Boolean);
+  const result=await api(`/api/departments/${selectedDepartment}/mail`,{method:'PUT',body:JSON.stringify({recipients:list,version:departmentMailSettings.version})});
+  departmentMailSettings={...departmentMailSettings,...result};$('#mailSettingsStatus').textContent='Destinataires enregistrés pour ce département.';
+}catch(error){$('#mailSettingsStatus').textContent=error.message;}};
+function invalidateMail(){preparedMail=null;$('#sendDocumentMail').disabled=true;$('#mailPdfPreview').hidden=true;$('#documentMailStatus').textContent='';}
+$('#mailDocumentKind').onchange=invalidateMail;$('#mailDocumentNote').oninput=invalidateMail;
+$('#emailDocument').onclick=async()=>{try{await loadMailSettings();invalidateMail();$('#mailDocumentNote').value='';$('#mailDocumentKind').value=$('#printKind').value==='blank'?'blank':'draft';$('#mailDestination').textContent='Destinataires : '+(departmentMailSettings.recipients.join(', ')||'aucun — ajoutez-les dans Courriels');$('#prepareMailPdf').disabled=!departmentMailSettings.configured||!departmentMailSettings.recipients.length;if(!departmentMailSettings.configured)$('#documentMailStatus').textContent='Le service courriel doit être configuré avant l’envoi.';$('#documentMailDialog').showModal();}catch(error){message(error.message);}};
+$('#prepareMailPdf').onclick=async()=>{
+  invalidateMail();mailBusy=true;$('#mailDocumentKind').disabled=true;$('#mailDocumentNote').disabled=true;$('#prepareMailPdf').disabled=true;$('#documentMailStatus').textContent='Préparation de la pièce jointe…';
+  const previousKind=$('#printKind').value;
+  try{
+    const kind=$('#mailDocumentKind').value,note=$('#mailDocumentNote').value;
+    $('#printKind').value=kind==='blank'?'blank':'filled';renderPrint();const sheet=$('#printPreview .department-sheet');
+    const bottom=sheet.getBoundingClientRect().bottom-parseFloat(getComputedStyle(sheet).paddingBottom);
+    if(sheet.querySelectorAll('.sheet-person').length>PRINT_ROW_CAPACITY||sheet.scrollHeight>sheet.clientHeight+2||sheet.querySelector('.sheet-notes').getBoundingClientRect().bottom>bottom+2||[...sheet.querySelectorAll('.sheet-work,.sheet-person-label,.sheet-day-detail span')].some(el=>el.scrollHeight>el.clientHeight+2))throw Error('Un texte dépasse une case ou la page. Corrigez la feuille avant l’envoi.');
+    const blob=await schedulePDF(sheet,{label:mailLabels[kind]});
+    const pdf=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(blob);});
+    preparedMail={requestId:crypto.randomUUID(),weekStart:current.weekStart,kind,note,pdf,recipientsVersion:departmentMailSettings.version};
+    if(mailPdfUrl)URL.revokeObjectURL(mailPdfUrl);mailPdfUrl=URL.createObjectURL(blob);$('#mailPdfPreview').href=mailPdfUrl;$('#mailPdfPreview').hidden=false;$('#sendDocumentMail').disabled=false;
+    $('#documentMailStatus').textContent='Pièce jointe prête. Vérifiez le PDF et les destinataires, puis cliquez sur Envoyer le courriel.';
+  }catch(error){$('#documentMailStatus').textContent=error.message;}finally{$('#printKind').value=previousKind;renderPrint();mailBusy=false;$('#mailDocumentKind').disabled=false;$('#mailDocumentNote').disabled=false;$('#prepareMailPdf').disabled=false;}
+};
+$('#sendDocumentMail').onclick=async()=>{if(!preparedMail||mailBusy)return;mailBusy=true;$('#mailDocumentKind').disabled=true;$('#mailDocumentNote').disabled=true;$('#sendDocumentMail').disabled=true;$('#prepareMailPdf').disabled=true;$('#documentMailStatus').textContent='Envoi en cours…';try{
+  await post(`/api/departments/document-mail/${selectedDepartment}`,preparedMail);preparedMail=null;$('#documentMailStatus').textContent='Courriel et PDF transmis au service d’envoi. Consultez les derniers envois dans Courriels.';
+}catch(error){$('#documentMailStatus').textContent=error.message;}finally{mailBusy=false;$('#mailDocumentKind').disabled=false;$('#mailDocumentNote').disabled=false;$('#sendDocumentMail').disabled=!preparedMail;$('#prepareMailPdf').disabled=false;}};
+$('#documentMailDialog').addEventListener('cancel',event=>{if(mailBusy)event.preventDefault();});
+document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===next)));if(next==='print')renderPrint();if(next==='people'){await loadMeta();renderPeople();}if(next==='photos')await loadPhotos();if(next==='mail')await loadMailSettings();}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view).catch(err=>message(err.message)));
-document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{if(b.dataset.close==='documentMailDialog'&&mailBusy)return;$('#'+b.dataset.close).close();});
 $('#weekPicker').value=monday(today());$('#weekPicker').onchange=async()=>{if(!mayLeave()){$('#weekPicker').value=current.weekStart;return;}if(!$('#weekPicker').value)return;$('#weekPicker').value=monday($('#weekPicker').value);dirty=false;$('#photoReview').hidden=true;try{await loadWeek();}catch(err){message(err.message);}};
 $('#refreshWeek').onclick=async()=>{if(!mayLeave())return;try{await loadMeta();await loadWeek();}catch(err){message(err.message);}};
 try{await loadMeta();await loadWeek();$('#managerContent').hidden=false;}catch(err){message(err.message);}
