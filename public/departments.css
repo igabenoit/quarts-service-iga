@@ -231,3 +231,13 @@ body{background:white}
 .status-cut-fruit,.status-cut-fruit .day-button,.status-cut-fruit .day-detail span,.status-cut-fruit .sheet-work,.status-cut-fruit .sheet-day-detail span{background:#b8dfb0!important;color:#282e29!important}
 .sheet-work.has-detail{font-size:7.5pt;line-height:1.1;padding:1pt}
 .sheet-work .assignment-label{font-weight:600}
+
+/* Availability entry and the employee's optional specification. */
+.availability-day{padding:12px;border:1px solid #d6ddd3;border-radius:10px;background:#f8faf7}
+.availability-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.availability-actions button{padding:8px;font-size:.75rem;min-height:40px;flex:1}
+.availability-actions button[aria-pressed=true]{background:#e2eee3;border-color:#597f60;color:#234e2d}
+.availability-preview{display:block;min-height:2.6em;line-height:1.4;margin-top:8px;color:#38543d;font-weight:500}
+.availability-preview[data-invalid=true]{color:#a32323}
+.person-specification{display:block;color:#69522c;font-size:.8em;font-weight:500;line-height:1.3;margin:3px 0 7px;overflow-wrap:anywhere}
+.sheet-specification{display:block;font-size:6pt;font-weight:400;line-height:1.1;margin-top:1pt;overflow-wrap:anywhere;color:#40392b}

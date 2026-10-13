@@ -9,7 +9,7 @@ export function incomingFor(weeks,key,{published=false}={}){
     for(const row of schedule?.rows||[])row.cells.forEach((cell,day)=>{
       if(!isTimedCell(cell)||cell.workDepartment!==key)return;
       incoming.push({personId:row.personId,day,cell,sourceDepartment:week.key,sourceDepartmentId:Number(week.department_id),sourceRevision:week.revision,publishedAt:week.published_at,
-        ...(published?{person:{name:row.name,jobTitle:row.jobTitle||'',group:row.group}}:{})});
+        ...(published?{person:{name:row.name,jobTitle:row.jobTitle||'',specification:row.specification||'',group:row.group}}:{})});
     });
   }
   return incoming;
