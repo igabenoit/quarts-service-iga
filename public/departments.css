@@ -90,7 +90,7 @@ summary{cursor:pointer;font-weight:700}
 .sheet-header h1{font-size:21pt;text-transform:uppercase;margin:0 0 5pt;line-height:1.1;max-width:300pt}
 .sheet-header p{font-size:6.7pt;letter-spacing:1pt;margin:0 0 8pt}
 .sheet-header strong{font-size:8.5pt}
-.sheet-table{width:100%;border-collapse:collapse;table-layout:fixed;height:10.5in;font-size:8pt;margin-top:14pt}
+.sheet-table{width:100%;border-collapse:collapse;table-layout:fixed;height:auto;flex:none;font-size:8pt;margin-top:14pt}
 .sheet-table td,.sheet-table th{border:.55pt solid #aab3a2;padding:0;text-align:center;overflow-wrap:anywhere}
 .col-name{width:23%}
 .col-seniority{width:11.5%}
@@ -105,13 +105,14 @@ summary{cursor:pointer;font-weight:700}
 .person-job-title{display:block;font-size:.85em;font-weight:500;line-height:1.3;margin:4px 0;color:#4c5548;overflow-wrap:anywhere}
 .sheet-job-title{display:block;font-size:.8em;font-weight:400;line-height:1.15;margin-top:2pt;overflow-wrap:anywhere}
 #personForm label>small{font-weight:400;font-size:.75rem;color:#596451}
-.density-small .sheet-job-title{font-size:4.5pt;margin-top:1pt}
-.sheet-name{text-align:left!important;font-size:8pt;padding:4pt!important;font-weight:600}
+.sheet-person{height:42pt}
+.sheet-name{text-align:left!important;font-size:8pt;font-weight:600}
+.sheet-person-label{height:41.45pt;padding:4pt;overflow:hidden;line-height:1.2}
 .sheet-seniority{font-size:6.5pt;padding:2pt!important}
 .sheet-day{position:relative}
-.sheet-work{height:calc(100% - 10pt);min-height:24pt;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2pt;font-size:8pt;line-height:1.2}
+.sheet-work{height:30.45pt;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2pt;font-size:8pt;line-height:1.2;overflow:hidden}
 .sheet-work small{font-size:5.5pt;line-height:1.1}
-.sheet-day-detail{display:grid;grid-template-columns:1fr 1fr;min-height:10pt;height:10pt;border-top:.5pt solid #aab3a2;font-size:5pt;line-height:1.1}
+.sheet-day-detail{display:grid;grid-template-columns:1fr 1fr;min-height:11pt;height:11pt;border-top:.5pt solid #aab3a2;font-size:5pt;line-height:1.1}
 .sheet-day-detail span{display:flex;justify-content:center;align-items:center;overflow-wrap:anywhere;padding:0 1pt}
 .sheet-day-detail span+span{background:var(--pale);border-left:.5pt solid #aab3a2}
 .sheet-total{font-weight:700;font-size:8pt}
@@ -120,13 +121,6 @@ summary{cursor:pointer;font-weight:700}
 .sheet-notes{font-size:7pt;min-height:49pt;max-height:59pt}
 .sheet-notes strong{text-transform:uppercase;font-size:7pt}
 .sheet-notes p{margin:5pt 0 0;white-space:pre-wrap;line-height:1.4;border-bottom:.5pt solid #aab3a2;min-height:30pt;color:#28302a}
-.density-medium .sheet-work{font-size:7pt;min-height:19pt}
-.density-medium .sheet-name{font-size:7pt}
-.density-small .sheet-work{font-size:6.4pt;min-height:15pt;line-height:1.05;padding:0}
-.density-small .sheet-day-detail{font-size:4pt;height:7pt;min-height:7pt}
-.density-small .sheet-name{font-size:6pt}
-.density-small .sheet-seniority{font-size:5pt}
-.density-small .sheet-work small{font-size:4pt}
 #printRoot{display:none}
 .theme-fruits{--accent:#34824d;--pale:#e9f4e7}
 .theme-boulangerie{--accent:#b88a00;--pale:#fff4c6}
@@ -169,10 +163,6 @@ body{background:white}
 #largePhoto{display:block;width:100%;height:auto;margin-top:15px}
 .sheet-work{overflow:hidden}
 .sheet-notes p{overflow-wrap:anywhere}
-.density-small .sheet-name{padding:1pt!important}
-.density-small .sheet-work{min-height:13pt;font-size:5.5pt}
-.density-small .sheet-day-detail{height:6pt;min-height:6pt}
-.density-small .sheet-work small{font-size:3.5pt}
 
 .staff-workspace{max-width:1100px}
 #accessForm{max-width:480px;margin:30px auto}
@@ -187,13 +177,6 @@ body{background:white}
 .staff-workspace .notice p{white-space:pre-wrap}
 
 
-.sheet-work{overflow:visible}
-.sheet-day-detail{height:11pt;min-height:11pt}
-.sheet-work{height:calc(100% - 11pt)}
-.density-small .sheet-work{height:auto;min-height:9pt;display:grid;grid-template-columns:1fr 1fr;align-content:center;line-height:1.05}
-.density-small .sheet-work small{grid-column:1/-1;font-size:4pt}
-.density-small .sheet-work b:first-child::after{content:"–"}
-.density-small .sheet-day-detail{height:9pt;min-height:9pt;font-size:4pt}
 .sheet-notes p{font-size:6.5pt}
 .sheet-header h1{overflow-wrap:anywhere}
 
