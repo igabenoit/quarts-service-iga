@@ -218,8 +218,9 @@ body{background:white}
 .sheet-total .regular-hours{display:block;min-height:10pt}
 .sheet-total .training-hours{font-size:5.5pt;white-space:nowrap;border-top:.5pt solid #c3d7ce;margin:3pt 1pt 0;padding-top:2pt;font-weight:600}
 .sheet-department-totals{text-align:right;display:flex;flex-direction:column;gap:4pt}
-.sheet-department-totals strong+strong{color:#176354;font-size:8pt}
-.sheet-legend{display:flex;flex-wrap:wrap;gap:3pt;margin-top:5pt}
-.sheet-legend span{padding:2pt 3pt;border:.4pt solid #cbd0c8;border-radius:2pt;font-size:5.5pt}
+.sheet-department-totals .department-training-total{color:#176354;font-size:8pt}
 .sheet-work.status-training{padding:1pt;font-size:7.5pt;line-height:1.12}
 .sheet-work .training-label{font-weight:700}
+
+.sheet-department-totals .grand-total{border-top:.7pt solid #aab3a2;padding-top:4pt;font-size:9pt;color:#282e29}
+.department-hours .grand-total{border-top:1px solid #b9c3b4;padding-top:6px}
