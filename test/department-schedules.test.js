@@ -15,7 +15,7 @@ test('heures nettes, ancienneté calculée et cases quotidiennes séparées',()=
   assert.equal(draftWarnings({rows:[{personId:1,cells:cells()}]},[{id:1,name:'Camille',active:true,availability:{0:'J'}}]).length,0);
   assert.match(draftWarnings({rows:[{personId:1,cells:cells()}]},[{id:1,name:'Camille',active:true,availability:{0:'0'}}])[0],/en dehors/);
   const html=sheetHTML({department:DEPARTMENT_STYLES[1],weekStart:start,people:[{id:1,name:'<Camille>',jobTitle:'Gérante <équipe>',group:'regular',seniorityDate:'2020-01-01',availability:{0:'LIBRE'}}],draft:{rows:[{personId:1,cells:cells()}],notes:'',manager:''}});
-  assert.match(html,/sheet-daily-hours">7,5/);assert.match(html,/sheet-availability">J/);assert.match(html,/&lt;Camille&gt;/);assert.match(html,/sheet-job-title">Gérante &lt;équipe&gt;/);
+  assert.match(html,/sheet-daily-hours">7,5/);assert.doesNotMatch(html,/Pause 30 min/);assert.match(html,/sheet-availability">J/);assert.match(html,/&lt;Camille&gt;/);assert.match(html,/sheet-job-title">Gérante &lt;équipe&gt;/);
   const paper=sheetHTML({department:DEPARTMENT_STYLES[1],weekStart:start,blank:true,people:[{id:2,name:'Nouvelle employée',seniorityDate:'2021-03-04',group:'regular',active:true,availability:{0:'J'}}],draft:{rows:[],notes:'',manager:''}});
   assert.match(paper,/Nouvelle employée/);assert.match(paper,/4 mars 2021/);assert.doesNotMatch(paper,/Responsable|Heures prévues|Date reconnue|<footer>/);
 });
