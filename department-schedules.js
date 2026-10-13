@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
-import {DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
+import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots} from './department-transfers.js';
 import {validatePhoto,transcribePhoto} from './department-photo.js';
 
@@ -17,6 +17,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS job_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS specification TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS schedule_store_memberships(person_id BIGINT REFERENCES schedule_store_people(id),department_id BIGINT REFERENCES schedule_leave_departments(id),PRIMARY KEY(person_id,department_id));
+    ALTER TABLE schedule_store_memberships ADD COLUMN IF NOT EXISTS display_order INTEGER;
     CREATE TABLE IF NOT EXISTS schedule_department_weeks(department_id BIGINT REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,draft JSONB NOT NULL,revision INTEGER NOT NULL DEFAULT 1,published JSONB,published_at TIMESTAMPTZ,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(department_id,week_start));
     CREATE TABLE IF NOT EXISTS schedule_department_history(id BIGSERIAL PRIMARY KEY,department_id BIGINT NOT NULL,week_start DATE NOT NULL,revision INTEGER NOT NULL,draft JSONB NOT NULL,published JSONB,action TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     CREATE TABLE IF NOT EXISTS schedule_department_photos(id BIGSERIAL PRIMARY KEY,department_id BIGINT NOT NULL REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,name TEXT NOT NULL,data_url TEXT NOT NULL,candidate JSONB,state TEXT NOT NULL DEFAULT 'saved',attempts INTEGER NOT NULL DEFAULT 0,operation_id TEXT,started_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
@@ -37,13 +38,20 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const records=(await client.query('SELECT p.*,e.name AS service_name,e.seniority AS service_seniority,e.active AS service_active,e.departed_at,e.availability AS service_availability,e.availability_history,e.target_minutes FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id ORDER BY p.id')).rows;
     const memberships=(await client.query('SELECT * FROM schedule_store_memberships')).rows;
     const contacts=records.some(r=>r.service_employee_id)?await loadContactDirectory(client):{employees:[]};
-    return records.map(r=>{
+    const people=records.map(r=>{
       const service=!!r.service_employee_id;
       const a=service?employeeAvailability({availability:r.service_availability,availability_history:r.availability_history,target_minutes:r.target_minutes},weekStart).availability:null;
-      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
+      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
     });
+    // Compact the visible ranks, including changes inherited from Service.
+    for(const departmentId of new Set(memberships.map(m=>Number(m.department_id))))for(const group of ['regular','part_time']){
+      const members=people.filter(p=>p.active&&p.group===group&&p.departments.includes(departmentId)).sort((a,b)=>comparePeople(a,b,departmentId));
+      for(const p of people.filter(p=>!p.active))delete p.displayPriorities[departmentId];
+      members.forEach((p,i)=>p.displayPriorities[departmentId]=i+1);
+    }
+    return people;
   }
-  const peopleFor=async(id,client=pool,weekStart)=>(await directory(client,weekStart)).filter(p=>p.departments.includes(Number(id))).sort((a,b)=>(a.group===b.group?0:a.group==='regular'?-1:1)||(a.seniorityDate||'9999').localeCompare(b.seniorityDate||'9999')||a.name.localeCompare(b.name,'fr-CA'));
+  const peopleFor=async(id,client=pool,weekStart)=>(await directory(client,weekStart)).filter(p=>p.departments.includes(Number(id))).sort((a,b)=>comparePeople(a,b,id));
   const emptyDraft=people=>({manager:'',notes:'',rows:people.filter(p=>p.active).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
   const transferWeeks=async(start,client=pool)=>(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
   async function getWeek(id,start,client=pool){
@@ -108,7 +116,30 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     else{if(list.some(p=>nameKey(p.name)===nameKey(name))&&body.distinctPerson!==true)fail('Un nom identique existe déjà. Utilisez sa fiche pour ajouter un département, ou confirmez qu’il s’agit d’une autre personne.',409);saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id',args)).rows[0];}
     if(previous?.serviceEmployeeId&&!(await client.query('SELECT 1 FROM schedule_employees WHERE id=$1',[previous.serviceEmployeeId])).rows.length)fail('La fiche Service a été annulée. Réactualisez le répertoire.',409);
     if(previous?.serviceEmployeeId)await client.query('INSERT INTO schedule_employee_contacts(employee_id,email) VALUES($1,$2) ON CONFLICT(employee_id) DO UPDATE SET email=EXCLUDED.email,updated_at=clock_timestamp()',[previous.serviceEmployeeId,email]);
-    await client.query('DELETE FROM schedule_store_memberships WHERE person_id=$1',[saved.id]);for(const departmentId of ids)await client.query('INSERT INTO schedule_store_memberships(person_id,department_id) VALUES($1,$2)',[saved.id,departmentId]);
+    const priorities=body.displayPriorities??{};
+    if(typeof priorities!=='object'||Array.isArray(priorities)||Object.entries(priorities).some(([key,value])=>!ids.includes(Number(key))||!Number.isSafeInteger(value)||value<1))fail('La priorité doit être un rang entier à partir de 1 dans un département sélectionné.');
+    await client.query('DELETE FROM schedule_store_memberships WHERE person_id=$1 AND NOT (department_id=ANY($2::bigint[]))',[saved.id,ids]);
+    for(const departmentId of ids)await client.query('INSERT INTO schedule_store_memberships(person_id,department_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[saved.id,departmentId]);
+    const personId=Number(saved.id),active=previous?.serviceEmployeeId?previous.active:body.active;
+    const changed=new Set();
+    for(const departmentId of new Set([...(previous?.departments||[]),...ids])){
+      if(departments.find(d=>d.id===departmentId)?.key==='service')continue;
+      for(const group of ['regular','part_time']){
+        const members=list.filter(p=>p.id!==personId&&p.active&&p.group===group&&p.departments.includes(departmentId)).sort((a,b)=>comparePeople(a,b,departmentId));
+        if(active&&body.group===group&&ids.includes(departmentId)){
+          const retained=previous?.active&&previous.group===group&&previous.departments.includes(departmentId);
+          const rank=priorities[departmentId]??(retained?previous.displayPriorities[departmentId]:members.length+1);
+          members.splice(Math.min(rank-1,members.length),0,{id:personId});
+        }
+        for(const [index,p] of members.entries()){
+          await client.query('UPDATE schedule_store_memberships SET display_order=$3 WHERE person_id=$1 AND department_id=$2',[p.id,departmentId,index+1]);
+          if(p.id!==personId&&p.displayPriorities[departmentId]!==index+1)changed.add(p.id);
+        }
+      }
+      if(!active)await client.query('UPDATE schedule_store_memberships SET display_order=NULL WHERE person_id=$1 AND department_id=$2',[personId,departmentId]);
+    }
+    // A stale employee form must not silently undo another manager's move.
+    if(changed.size)await client.query('UPDATE schedule_store_people SET version=version+1,updated_at=clock_timestamp() WHERE id=ANY($1::bigint[])',[[...changed]]);
     return {ok:true,id:Number(saved.id)};
   });}
   app.get('/api/departments/:id/weeks/:week',requireManager,endpoint(async(req,res)=>{const current=await getWeek(integer(req.params.id),week(req.params.week));res.json({...current,warnings:await warningsFor(current)});}));
@@ -129,7 +160,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(draft.rows.some(r=>r.cells.some(c=>c.kind==='review')))fail('Corrigez toutes les cases à vérifier avant de publier.');
     if(req.body.verified!==true)fail('Confirmez la vérification des noms, dates, heures et pauses.');
     const warnings=await warningsFor({...current,draft},client);if(warnings.length&&req.body.warningsReviewed!==true)fail('Vérifiez les disponibilités et les avertissements avant de publier.');
-    return saveWeek(client,current,draft,'publish',publicSnapshot(draft,current.people));
+    return saveWeek(client,current,draft,'publish',publicSnapshot(draft,current.people,current.department.id));
   }))));
   app.post('/api/departments/:id/weeks/:week/unpublish',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);return saveWeek(client,current,current.draft,'unpublish',null);}))));
   app.get('/api/departments/:id/weeks/:week/history',requireManager,endpoint(async(req,res)=>res.json({history:(await pool.query('SELECT id,revision,action,created_at FROM schedule_department_history WHERE department_id=$1 AND week_start=$2 ORDER BY id DESC LIMIT 30',[integer(req.params.id),week(req.params.week)])).rows})));
