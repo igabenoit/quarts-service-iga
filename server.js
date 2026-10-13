@@ -1,4 +1,5 @@
 import {installPdfAssets} from './pdf-assets.js';
+import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
 import {employeeAvailability,localDate} from "./availability-rules.js";
 import {availabilityRevision,recordManualAvailability,saveAvailabilityHistory} from "./availability.js";
@@ -168,8 +169,8 @@ function parseCookies(header = "") {
   }));
 }
 function sign(value) { return crypto.createHmac("sha256", sessionSecret).update(value).digest("base64url"); }
-function issueSession() {
-  const payload = Buffer.from(JSON.stringify({ role: "manager", expiresAt: Date.now() + 12 * 60 * 60 * 1000 })).toString("base64url");
+function issueSession(identity = {}) {
+  const payload = Buffer.from(JSON.stringify({ ...identity, role: "manager", expiresAt: Date.now() + 12 * 60 * 60 * 1000 })).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 function readSession(request) {
@@ -200,10 +201,11 @@ function hasStaffAccess(request, token, codeHash) {
   return issuedToken === token && /^\d{13}$/.test(expires || "") && Number(expires) > Date.now()
     && typeof signature === "string" && secureEqual(signature, sign(`staff-access:${token}:${codeHash}:${expires}`));
 }
-function requireManager(request, response, next) {
-  if (!readSession(request)) return response.status(401).json({ error: "Accès gestionnaire requis." });
-  next();
+async function requireManager(request, response, next) {
+  try { await managerAccess.authorize(request); next(); }
+  catch(error) { response.status(error.status||500).json({error:error.status?error.message:'Impossible de vérifier l’accès.'}); }
 }
+const managerAccess=await installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production});
 function sameOrigin(request, response, next) {
   const origin = request.get("origin");
   if (origin && new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Requête refusée." });
@@ -571,7 +573,10 @@ app.post("/api/logout", sameOrigin, (_request, response) => {
   response.setHeader("Set-Cookie", `schedule_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${production ? "; Secure" : ""}`);
   response.json({ ok: true });
 });
-app.get("/api/session", (request, response) => response.json({ role: readSession(request)?.role || null }));
+app.get("/api/session", async (request, response) => {
+  try { const user=await managerAccess.identity(request);const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];if(user)user.serviceAccess=user.kind==='admin'||user.departments.includes(Number(service?.id));response.set('Cache-Control','no-store').json({role:user?'manager':null,user}); }
+  catch { response.status(500).json({error:'Impossible de vérifier la connexion.'}); }
+});
 
 app.get("/api/weeks/:weekStart/share-link", requireManager, async (request, response) => {
   try {

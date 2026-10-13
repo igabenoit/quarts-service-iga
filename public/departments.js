@@ -2,7 +2,7 @@ import {schedulePDF} from './department-pdf.js';
 import {comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,grandMinutes,mergeIncoming,validateAssignment,cellDetail,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
 const $=s=>document.querySelector(s);let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
-async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous avec votre code gestionnaire depuis « Retour au Service », puis revenez ici.':data.error||'Opération indisponible.');return data;}
+async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous depuis le lien « Connexion » en haut de la page.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
 const displayDraft=()=>orderDraft(mergeIncoming(current.draft,current.incoming||[]),current.people,selectedDepartment);
 const route=()=>`/api/departments/${selectedDepartment}/weeks/${$('#weekPicker').value}`;
@@ -14,7 +14,7 @@ function renderNavigation(){
   $('#departmentNav').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<button class="theme-${e(d.key)}" data-department="${d.id}" aria-current="${d.id===selectedDepartment}">${e(d.name)}</button>`).join('');
   $('#departmentNav').querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(!mayLeave())return;selectedDepartment=Number(b.dataset.department);dirty=false;activePhoto=null;$('#photoReview').hidden=true;try{await loadWeek();}catch(err){message(err.message);}});
 }
-async function loadMeta(){meta=await api('/api/departments/meta');if(!selectedDepartment)selectedDepartment=meta.departments.find(d=>d.key==='boulangerie')?.id||meta.departments.find(d=>d.key!=='service')?.id;renderNavigation();}
+async function loadMeta(){meta=await api('/api/departments/meta');if(!meta.departments.some(d=>d.id===selectedDepartment))selectedDepartment=meta.departments.find(d=>d.key==='boulangerie')?.id||meta.departments.find(d=>d.key!=='service')?.id;renderNavigation();}
 async function loadWeek(){
   const sequence=++loadSequence;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(route());if(sequence!==loadSequence)return;current=loaded;dirty=false;lastPaste=null;document.body.className='theme-'+current.department.key;
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
@@ -149,6 +149,7 @@ function renderPeople(){
   $('#peopleList').querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>openPerson(meta.people.find(p=>p.id===Number(b.dataset.person))));
 }
 function openPerson(person){
+  if(person&&meta.account?.kind==='account'&&person.departments.some(id=>!meta.departments.some(d=>d.id===id))){message('Cette fiche est partagée avec un autre département. Demandez à l’administration de modifier les renseignements communs. Vous pouvez gérer les quarts dans votre horaire.');return;}
   editingPerson=person||null;$('#personForm').reset();$('#personError').textContent='';$('#personTitle').textContent=person?'Modifier la fiche':'Ajouter un employé';
   $('#personName').value=person?.name||'';$('#personJobTitle').value=person?.jobTitle||'';$('#personSpecification').value=person?.specification||'';$('#personSeniority').value=person?.seniorityDate||'';$('#personBirthday').value=person?.birthday||'';$('#personEmail').value=person?.email||'';$('#personGroup').value=person?.group||'regular';$('#personSource').value=person?.sourceNote||'';$('#personVerified').checked=!!person?.verifiedAt;$('#personActive').checked=person?.active??true;
   const linked=!!person?.serviceEmployeeId;$('#serviceSource').hidden=!linked;$('#personName').readOnly=linked;$('#personSeniority').readOnly=linked;$('#personActive').disabled=linked;$('#availabilityEditor').disabled=linked;

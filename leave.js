@@ -1,3 +1,4 @@
+import {ownsDepartment,isScoped} from './manager-access.js';
 import {beginUndo} from "./undo.js";
 import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
@@ -12,7 +13,7 @@ import {releaseLeaveConflicts} from './leave-schedule.js';
 
 export async function approvedLeave(pool, weekStart) {
   const result = await pool.query(`SELECT employee_id, COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests
-    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1`, [weekStart,addDays(weekStart,6)]);
+    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`, [weekStart,addDays(weekStart,6)]);
   return result.rows;
 }
 export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaffAccess}) {
@@ -128,7 +129,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
         LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='refused' ORDER BY request_version DESC LIMIT 1) rn ON TRUE
         LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='conditional' ORDER BY request_version DESC LIMIT 1) cn ON TRUE
         WHERE is_test=$1 AND (r.archived_at IS NOT NULL)=$4
-        AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
+        AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>ownsDepartment(req,r.department_id)&&r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
       const events=(await pool.query(`SELECT e.* FROM schedule_leave_events e JOIN schedule_leave_requests r ON r.id=e.request_id
         WHERE r.is_test=$1 AND r.first_date<=$3 AND r.last_date>=$2 ORDER BY e.created_at,e.id`,[test,start,end])).rows;
       res.json({requests:rows.map(r=>({...r,submission_key:undefined,events:events.filter(e=>e.request_id===r.id)})),statistics:leaveStatistics(rows)});

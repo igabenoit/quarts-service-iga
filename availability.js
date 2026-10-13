@@ -1,3 +1,4 @@
+import {ownsDepartment,isScoped} from './manager-access.js';
 import {createHash} from 'node:crypto';
 import {beginUndo} from './undo.js';
 import {addDays,isDate} from './leave-rules.js';
@@ -107,10 +108,11 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
       LEFT JOIN schedule_leave_departments d ON d.id=r.department_id
       LEFT JOIN LATERAL(SELECT status,error FROM schedule_availability_mail WHERE request_id=r.id AND kind='submitted' ORDER BY id DESC LIMIT 1)s ON TRUE
       LEFT JOIN LATERAL(SELECT status,error FROM schedule_availability_mail WHERE request_id=r.id AND kind='approved' ORDER BY id DESC LIMIT 1)a ON TRUE
-      WHERE r.is_test=$1 ORDER BY r.submitted_at DESC,r.id DESC`,[req.query.test==='true'])).rows;
+      WHERE r.is_test=$1 ORDER BY r.submitted_at DESC,r.id DESC`,[req.query.test==='true'])).rows.filter(r=>ownsDepartment(req,r.department_id));
     const events=(await pool.query('SELECT e.* FROM schedule_availability_events e JOIN schedule_availability_requests r ON r.id=e.request_id WHERE r.is_test=$1 ORDER BY e.created_at,e.id',[req.query.test==='true'])).rows;
     const employees=(await pool.query('SELECT id,availability,target_minutes,availability_history FROM schedule_employees')).rows;
-    res.json({today,requests:rows.map(r=>({...r,submission_key:undefined,currentProfile:employees.find(e=>String(e.id)===String(r.employee_id))?profileAt(employees.find(e=>String(e.id)===String(r.employee_id)),today):null,events:events.filter(e=>String(e.request_id)===String(r.id))})),conflicts:req.query.test==='true'?[]:await availabilityConflicts(pool,today)});
+    const canViewService=!isScoped(req)||(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows.some(d=>ownsDepartment(req,d.id));
+    res.json({today,requests:rows.map(r=>({...r,submission_key:undefined,currentProfile:employees.find(e=>String(e.id)===String(r.employee_id))?profileAt(employees.find(e=>String(e.id)===String(r.employee_id)),today):null,events:events.filter(e=>String(e.request_id)===String(r.id))})),conflicts:req.query.test==='true'||!canViewService?[]:await availabilityConflicts(pool,today)});
   }catch{res.status(500).json({error:'Impossible de charger le suivi des disponibilités.'});}});
   app.patch(base+'/requests/:id',requireManager,sameOrigin,async(req,res)=>{
     const client=await pool.connect();try{
