@@ -200,7 +200,7 @@ $('#openPhoto').onclick=()=>$('#photoDialog').showModal();
 $('#analyzePhoto').onclick=async()=>{
   if(!activePhoto||analyzingPhotoId!==null)return;
   const b=$('#analyzePhoto'),photoId=activePhoto.id;analyzingPhotoId=photoId;b.disabled=true;
-  $('#photoStatus').textContent='Lecture détaillée et seconde vérification en cours… Cela peut prendre deux à trois minutes.';
+  $('#photoStatus').textContent='Lecture détaillée et seconde vérification en cours… Une feuille complète peut demander quelques minutes.';
   try{
     const result=await post(`/api/departments/photos/${photoId}/analyze`,{});
     if(activePhoto?.id!==photoId)return;

@@ -11,6 +11,7 @@ export function validatePhoto(data){
   return data;
 }
 export const DEFAULT_VISION_MODEL='gpt-6-astra';
+export const PHOTO_ANALYSIS_TIMEOUT_MS=260000;
 const text={type:'string'};
 const cellSchema={type:'object',additionalProperties:false,properties:{
   day:{type:'string',enum:DAY_NAMES},rawText:text,
@@ -77,14 +78,14 @@ Reprends seulement les personnes présentes. Les noms connus aident à déchiffr
 
 function modelOptions(model){
   const original=/^gpt-(?:6(?:[.-]|$)|5\.[456](?:[.-]|$))/.test(model);
-  const reasoning=/^gpt-[56](?:[.-]|$)/.test(model)?{reasoning:{effort:'high'}}:{};
+  const reasoning=/^gpt-[56](?:[.-]|$)/.test(model)?{reasoning:{effort:'medium'}}:{};
   return {detail:original?'original':'high',...reasoning};
 }
 
 export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{fetchImpl=fetch,key=process.env.OPENAI_API_KEY,model=process.env.SCHEDULE_VISION_MODEL||DEFAULT_VISION_MODEL}={}){
   if(!key)throw Object.assign(Error('La lecture automatique attend la configuration de la connexion IA. La photo reste disponible pour la saisie et la vérification manuelles.'),{status:503});
   validatePhoto(dataUrl);
-  const {detail,...options}=modelOptions(model),signal=AbortSignal.timeout(160000);
+  const {detail,...options}=modelOptions(model),signal=AbortSignal.timeout(PHOTO_ANALYSIS_TIMEOUT_MS);
   const context={department,selectedWeek:weekStart,knownNames:names};
   async function read(previous){
     const task=previous?`Relis la photo case par case pour vérifier cette première proposition (qui peut être fausse). Vérifie spécialement les colonnes jeudi/vendredi/samedi/dimanche, les sections Temps partiels, les 3/5/8/9 manuscrits et matin/après-midi. Corrige seulement ce que la photo permet de déterminer. Retourne la feuille complète, en conservant toutes les personnes visibles. Si un doute subsiste, indique review. Ne prends pas la première lecture pour une preuve. Première proposition : ${JSON.stringify(previous)}`:'Lis toute la feuille, y compris les temps partiels. Préserve les cases vides et les jours de congé à leur emplacement exact.';
@@ -113,5 +114,5 @@ export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{f
   }catch{
     selected={...first.candidate,warnings:['La seconde vérification n’a pas abouti. Cette proposition provient de la première lecture : vérifiez chaque case sur la photo.',...first.candidate.warnings]};
   }
-  return {...auditCandidate(selected),analysis:{version:2,model,verification}};
+  return {...auditCandidate(selected),analysis:{version:3,model,verification}};
 }
