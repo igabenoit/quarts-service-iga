@@ -79,6 +79,9 @@ legend{font-weight:700;padding:0 6px}
 .photo-tools{display:flex;gap:10px;margin-top:22px}
 .candidate-row{padding:15px;background:#f5f6f1;border:1px solid #dbe0d5;border-radius:7px;margin:12px 0}
 .candidate-row p{font-size:.8rem;margin:8px 0}
+.candidate-row select[aria-invalid="true"]{border:2px solid #a1262d}
+.photo-apply-feedback{white-space:pre-line;border-color:#a1262d;color:#701b20}
+.photo-apply-feedback:empty{display:none}
 .upload-button{white-space:nowrap}
 dialog{border:1px solid #d3dacd;border-radius:12px;width:min(720px,95vw);max-height:92vh;padding:26px;color:#28302a}
 dialog::backdrop{background:#17221788}

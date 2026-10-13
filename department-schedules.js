@@ -203,9 +203,13 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }));
   app.post('/api/departments/photos/:id/apply',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
     const p=(await client.query('SELECT * FROM schedule_department_photos WHERE id=$1',[integer(req.params.id)])).rows[0];if(!p?.candidate)fail('Aucune transcription à appliquer.');
+    if(photoState(p).busy)fail('Une lecture de cette photo est encore en cours. Actualisez la lecture lorsqu’elle est terminée avant de reporter la proposition.',409);
+    if(req.body.departmentId!==undefined&&Number(req.body.departmentId)!==Number(p.department_id)||req.body.weekStart!==undefined&&req.body.weekStart!==iso(p.week_start))fail('Cette photo appartient à un autre département ou à une autre semaine. Rouvrez-la depuis sa feuille avant de reporter.',409);
     const current=await getWeek(Number(p.department_id),iso(p.week_start),client);checkRevision(req.body,current);
     if(req.body.weekConfirmed!==true||req.body.replaceConfirmed!==true)fail('Vérifiez la semaine et confirmez le remplacement des journées des employés sélectionnés.');
     const mapping=req.body.mapping;if(!Array.isArray(mapping)||mapping.length!==p.candidate.rows.length||!mapping.length)fail('Reliez chaque ligne à un employé du répertoire.');
+    const missing=p.candidate.rows.filter((_row,i)=>!current.people.some(person=>person.id===Number(mapping[i])));if(missing.length)fail('Choisissez la fiche employé pour : '+missing.map(row=>row.name||'Nom illisible').join(', ')+'.');
+    const ids=mapping.map(Number),duplicate=ids.find((id,i)=>ids.indexOf(id)!==i);if(duplicate)fail('La fiche de '+current.people.find(person=>person.id===duplicate).name+' est sélectionnée sur plusieurs lignes. Chaque ligne doit correspondre à un employé différent.');
     const incoming=p.candidate.rows.map((row,i)=>({personId:integer(mapping[i]),cells:row.days}));
     const normalized=normalizeDraft({...current.draft,rows:incoming},current.people);
     const rows=current.draft.rows.filter(r=>!normalized.rows.some(n=>n.personId===r.personId)).concat(normalized.rows);
