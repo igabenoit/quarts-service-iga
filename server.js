@@ -1,3 +1,4 @@
+import {installClothing} from './clothing.js';
 import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
@@ -550,6 +551,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
 await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
+await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 await installUndo(app,pool,{requireManager,sameOrigin});
 app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));

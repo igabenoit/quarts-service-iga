@@ -189,3 +189,11 @@ Validation : tests HTTP avec PostgreSQL embarqué couvrant administration, mots 
 
 Le PAM propose Cuisine, Sandwichs, BBQ, RS-SS, Mets Cuisinés et Pizza + Sandwichs. Cuisine utilise une catégorie horaire distincte, comme Formation : ses heures nettes sont exclues du régulier, affichées séparément et incluses au grand total. Les cinq autres postes restent des heures régulières. Le libellé figure sous les heures dans la cellule, sur la feuille PDF et au portail. Les copies, transferts vers le PAM, publications et propositions de transcription conservent ces affectations.
 
+
+### Commandes saisonnières de chandails
+
+Le formulaire `/chandails`, protégé par le code commun des employés, propose trois modèles (3320, 3331, 3340), noir et vert forêt, S à XXL, à 40 $ chacun. La campagne initiale est fermée. Dans `/chandails-gestion`, l’administration renseigne les destinataires des bons de commande, une date limite facultative et ouvre la campagne. Les campagnes suivantes gardent leur historique séparé. Aucun paiement en ligne, aucune déduction de paie. Les noms et départements sont déclarés par l’employé, comme les demandes de congé; le code commun ne constitue pas une identité personnelle vérifiée.
+
+La commande est persistée avant l’envoi via Resend. La référence idempotente est conservée dans la session du navigateur pour retrouver une confirmation après un incident réseau; les tentatives avec le même contenu ne créent pas de doublon. Les courriels ont leur propre état et une clé d’idempotence, avec une limite de reprise automatique de 20 heures. Les annulations réversibles excluent la commande des quantités fournisseur. Les totaux sont calculés côté serveur, sans accepter de prix du navigateur.
+
+La gestion et les exports sont réservés à l’administration. Les exports PDF et XLSX contiennent uniquement modèle, référence, couleur, grandeur, quantité et nom de campagne. Aucun nom, département ou courriel d’employé n’est inclus. Aucun envoi automatique au fournisseur. Les photos sont les visuels fournis pour cette collection, sans transformation.
