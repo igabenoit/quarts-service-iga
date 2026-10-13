@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {normalizeEmail} from './employee-contacts.js';
 import {MODELS,COLORS,SIZES,PRICE,normalizeItems,orderTotal,supplierRows,money} from './public/clothing-core.js';
-import {supplierWorkbook} from './clothing-xlsx.js';
+import {supplierWorkbook,internalWorkbook} from './clothing-xlsx.js';
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto'});
@@ -12,8 +12,9 @@ export async function installClothing(app,pool,{requireStaff,requireManager,same
   CREATE TABLE IF NOT EXISTS schedule_clothing_orders(id UUID PRIMARY KEY,campaign_id BIGINT NOT NULL REFERENCES schedule_clothing_campaigns(id),campaign_title TEXT NOT NULL,employee_name TEXT NOT NULL,department_name TEXT NOT NULL,items JSONB NOT NULL,total_cents INTEGER NOT NULL,digest TEXT NOT NULL,recipients JSONB NOT NULL,cancelled BOOLEAN NOT NULL DEFAULT FALSE,version INTEGER NOT NULL DEFAULT 1,mail_status TEXT NOT NULL DEFAULT 'pending',mail_attempt TIMESTAMPTZ,provider_id TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
   INSERT INTO schedule_clothing_campaigns(title) SELECT 'Chandails 2026 — noir et vert forêt' WHERE NOT EXISTS(SELECT 1 FROM schedule_clothing_campaigns);`);
   async function transaction(fn){const c=await pool.connect();try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(734882)');const out=await fn(c);await c.query('COMMIT');return out;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
+  await pool.query(`ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ; ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ;`);
   const campaign=async(id,db=pool)=>(await db.query('SELECT * FROM schedule_clothing_campaigns WHERE id=$1',[id])).rows[0];
-  const orders=async id=>(await pool.query('SELECT id,campaign_id,employee_name,department_name,items,total_cents,cancelled,version,mail_status,created_at FROM schedule_clothing_orders WHERE campaign_id=$1 ORDER BY created_at,id',[id])).rows;
+  const orders=async id=>(await pool.query('SELECT id,campaign_id,employee_name,department_name,items,total_cents,cancelled,version,mail_status,created_at,paid_at,collected_at FROM schedule_clothing_orders WHERE campaign_id=$1 ORDER BY created_at,id',[id])).rows;
   async function deliver(id){
     if(!process.env.RESEND_API_KEY)return 'error';
     const job=(await pool.query(`UPDATE schedule_clothing_orders SET mail_status='sending',mail_attempt=clock_timestamp() WHERE id=$1 AND cancelled=FALSE AND created_at>clock_timestamp()-interval '20 hours' AND (mail_status IN ('pending','error') OR (mail_status='sending' AND mail_attempt<clock_timestamp()-interval '1 minute')) RETURNING *`,[id])).rows[0];
@@ -69,6 +70,13 @@ export async function installClothing(app,pool,{requireStaff,requireManager,same
     if(!uuid(req.params.id)||typeof req.body.cancelled!=='boolean'||!Number.isInteger(req.body.version))fail('Commande invalide.');
     const r=await pool.query('UPDATE schedule_clothing_orders SET cancelled=$1,version=version+1 WHERE id=$2 AND version=$3 RETURNING id',[req.body.cancelled,req.params.id,req.body.version]);if(!r.rowCount)fail('Commande modifiée entre-temps. Actualisez.',409);res.json({ok:true});
   }));
-  app.post('/api/clothing/orders/:id/retry-mail',requireManager,admin,sameOrigin,endpoint(async(req,res)=>{if(!uuid(req.params.id))fail('Commande invalide.');const row=(await pool.query('SELECT * FROM schedule_clothing_orders WHERE id=$1',[req.params.id])).rows[0];if(!row)fail('Commande introuvable.',404);if(row.cancelled)fail('Commande annulée.');if(row.mail_status!=='sent'&&Date.now()-new Date(row.created_at).getTime()>20*3600000)fail('Envoi ancien : vérifiez la boîte de réception. La commande demeure disponible ici.');res.json({status:await deliver(row.id)});}));
+  app.patch('/api/clothing/orders/:id/tracking',requireManager,admin,sameOrigin,endpoint(async(req,res)=>{
+    const b=req.body||{};if(!uuid(req.params.id)||!Number.isInteger(b.version)||!['paid','collected'].includes(b.field)||typeof b.value!=='boolean')fail('Suivi invalide.');
+    const column=b.field==='paid'?'paid_at':'collected_at';
+    const r=await pool.query(`UPDATE schedule_clothing_orders SET ${column}=CASE WHEN $1 THEN COALESCE(${column},clock_timestamp()) ELSE NULL END,version=version+1 WHERE id=$2 AND version=$3 AND cancelled=FALSE RETURNING id`,[b.value,req.params.id,b.version]);
+    if(!r.rowCount)fail('Commande annulée ou modifiée entre-temps. Actualisez.',409);res.json({ok:true});
+  }));
+  app.get('/api/clothing/campaigns/:id/internal.xlsx',requireManager,admin,endpoint(async(req,res)=>{const c=await campaign(req.params.id);if(!c)fail('Campagne introuvable.',404);res.set({'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="suivi-employes-${c.id}.xlsx"`}).send(internalWorkbook(c.title,await orders(c.id)));}));
+  app.post('/api/clothing/orders/:id/retry-mail' ,requireManager,admin,sameOrigin,endpoint(async(req,res)=>{if(!uuid(req.params.id))fail('Commande invalide.');const row=(await pool.query('SELECT * FROM schedule_clothing_orders WHERE id=$1',[req.params.id])).rows[0];if(!row)fail('Commande introuvable.',404);if(row.cancelled)fail('Commande annulée.');if(row.mail_status!=='sent'&&Date.now()-new Date(row.created_at).getTime()>20*3600000)fail('Envoi ancien : vérifiez la boîte de réception. La commande demeure disponible ici.');res.json({status:await deliver(row.id)});}));
   app.get('/api/clothing/campaigns/:id/supplier.xlsx',requireManager,admin,endpoint(async(req,res)=>{const c=await campaign(req.params.id);if(!c)fail('Campagne introuvable.',404);res.set({'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':`attachment; filename="commande-fournisseur-${c.id}.xlsx"`}).send(supplierWorkbook(c.title,supplierRows(await orders(c.id))));}));
 }
