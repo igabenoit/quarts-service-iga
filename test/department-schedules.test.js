@@ -4,10 +4,10 @@ import {departmentFixture} from './department-fixture.js';
 import {installDepartmentSchedules} from '../department-schedules.js';
 import {beginUndo,undoLast} from '../undo.js';
 import {validateCandidate,validatePhoto,transcribePhoto} from '../department-photo.js';
-import {blankCell,totalMinutes,tenure,normalizeAvailability,sheetHTML,DEPARTMENT_STYLES,draftWarnings} from '../public/departments-core.js';
+import {blankCell,DAY_NAMES,totalMinutes,tenure,normalizeAvailability,sheetHTML,DEPARTMENT_STYLES,draftWarnings} from '../public/departments-core.js';
 const start='2030-10-14',shift={kind:'shift',start:480,end:960,breakMinutes:30,note:''},cells=()=>[shift,...Array.from({length:6},blankCell)];
 const photo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jJ3sAAAAASUVORK5CYII=';
-const candidate={departmentText:'Boulangerie',weekText:'14 au 20',warnings:['Pause à confirmer'],rows:[{name:'Camille Exemple',writtenTotal:'7,5',days:cells().map(c=>({...c,uncertain:false}))}]};
+const candidate={departmentText:'Boulangerie',weekText:'14 au 20',warnings:['Pause à confirmer'],rows:[{name:'Camille Exemple',writtenTotal:'7,5',days:cells().map((c,d)=>({...c,day:DAY_NAMES[d],rawText:d===0?'8 / 4':'',uncertain:false}))}]};
 test('heures nettes, ancienneté calculée et cases quotidiennes séparées',()=>{
   assert.equal(totalMinutes({cells:cells()}),450);assert.equal(tenure('2020-10-15','2026-10-14'),'5 ans 11 mois');assert.equal(tenure('2020-10-15','2026-10-15'),'6 ans');
   assert.throws(()=>normalizeAvailability({0:'17:00-08:00'}));assert.equal(normalizeAvailability({0:'8:00-24:00'})[0],'08:00-24:00');
@@ -63,7 +63,7 @@ test('PostgreSQL : répertoire, brouillons, publication privée et photos',async
     await t.test('photo privée, IA inactive sans clé, import explicite sans publication',async()=>{
       const r=await call('post','/api/departments/photos',{body:{departmentId:dept,weekStart:start,name:'exemple.png',dataUrl:photo}});assert.equal(r.code,201);photoId=r.body.id;
       assert.equal((await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}})).code,503);assert.equal(calls,0);
-      process.env.OPENAI_API_KEY='mock-only';const analyzed=await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}});assert.equal(analyzed.code,200,JSON.stringify(analyzed.body));assert.equal(calls,1);
+      process.env.OPENAI_API_KEY='mock-only';const analyzed=await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}});assert.equal(analyzed.code,200,JSON.stringify(analyzed.body));assert.equal(calls,2);
       const apply=body=>call('post','/api/departments/photos/:id/apply',{params:{id:photoId},body});
       assert.equal((await apply({revision:rev,mapping:[id]})).code,400);
       assert.equal((await apply({revision:rev,weekConfirmed:true,replaceConfirmed:true,mapping:[999]})).code,400);

@@ -66,7 +66,7 @@ export function normalizeAvailability(value={}){
   return out;
 }
 export const blankCell=()=>({kind:'blank',start:null,end:null,breakMinutes:0,note:''});
-export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'RS-SS',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs'});
+export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Commandes Sandwich',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs'});
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
 export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-c.breakMinutes:0;
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
