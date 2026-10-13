@@ -10,12 +10,12 @@ export function pageImagePlacement(width,height){
   const scale=Math.min(612/width,1008/height);
   return {x:(612-width*scale)/2,y:(1008-height*scale)/2,width:width*scale,height:height*scale};
 }
-export async function schedulePDF(sheet){
+export async function schedulePDF(sheet,{label}={}){
   await loadLibraries();await document.fonts.ready;
   await Promise.all([...sheet.querySelectorAll('img')].map(img=>img.decode()));
   const canvas=await window.html2canvas(sheet,{scale:3,backgroundColor:'#ffffff',logging:false,useCORS:false,
     width:Math.ceil(sheet.getBoundingClientRect().width),height:Math.ceil(sheet.getBoundingClientRect().height),
-    onclone(doc){const copy=doc.querySelector('#printPreview .department-sheet');copy.style.boxShadow='none';copy.style.margin='0';const preview=copy.parentElement;preview.style.overflow='visible';preview.style.padding='0';preview.style.background='#ffffff';}
+    onclone(doc){const copy=doc.querySelector('#printPreview .department-sheet');if(label)copy.querySelector('.sheet-header p').textContent=label;copy.style.boxShadow='none';copy.style.margin='0';const preview=copy.parentElement;preview.style.overflow='visible';preview.style.padding='0';preview.style.background='#ffffff';}
   });
   const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'legal',compress:true});
   const box=pageImagePlacement(canvas.width,canvas.height);

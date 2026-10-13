@@ -1,3 +1,4 @@
+import {installDepartmentMail} from './department-mail.js';
 import crypto from 'node:crypto';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
@@ -29,6 +30,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
   }
   await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
+  await installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl});
   app.use('/api/departments',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   const listDepartments=async client=>(await client.query('SELECT id,name,schedule_key AS key,active FROM schedule_leave_departments WHERE schedule_key IS NOT NULL ORDER BY name')).rows.map(d=>({...d,id:Number(d.id)}));
   const department=async(id,client=pool)=>{const d=(await listDepartments(client)).find(d=>d.id===integer(id));if(!d||d.key==='service')fail('Utilisez l’horaire Service pour ce département.');return d;};
