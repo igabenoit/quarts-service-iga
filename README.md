@@ -184,3 +184,8 @@ Chaque compte peut gérer employés, brouillons, publications, copies, photos, c
 Les mots de passe sont stockés avec scrypt et un sel aléatoire, jamais retournés par l’API. Les sessions signées durent 12 heures. À chaque requête, le serveur vérifie le compte actif et sa version en base. Toute modification d’un compte (droits, mot de passe ou désactivation) révoque ses anciennes sessions. Une modification de compte périmée est rejetée. Les essais de connexion sont limités par IP et identifiant pendant 15 minutes; ce compteur en mémoire est remis à zéro au redémarrage. La migration ajoute seulement `schedule_manager_accounts`, sans modifier les horaires ou le portail employés.
 
 Validation : tests HTTP avec PostgreSQL embarqué couvrant administration, mots de passe, cookies, isolation des départements, métadonnées, employés, photos, courriels, congés/disponibilités, publication autorisée, droits Service et révocation. Les tests n’envoient aucun courriel réel.
+
+### Postes du prêt-à-manger
+
+Le PAM propose Cuisine, Sandwichs, BBQ, RS-SS, Mets Cuisinés et Pizza + Sandwichs. Cuisine utilise une catégorie horaire distincte, comme Formation : ses heures nettes sont exclues du régulier, affichées séparément et incluses au grand total. Les cinq autres postes restent des heures régulières. Le libellé figure sous les heures dans la cellule, sur la feuille PDF et au portail. Les copies, transferts vers le PAM, publications et propositions de transcription conservent ces affectations.
+

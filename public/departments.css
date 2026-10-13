@@ -241,3 +241,9 @@ body{background:white}
 .availability-preview[data-invalid=true]{color:#a32323}
 .person-specification{display:block;color:#69522c;font-size:.8em;font-weight:500;line-height:1.3;margin:3px 0 7px;overflow-wrap:anywhere}
 .sheet-specification{display:block;font-size:6pt;font-weight:400;line-height:1.1;margin-top:1pt;overflow-wrap:anywhere;color:#40392b}
+
+.kitchen-hours{display:block;color:#3b3f37;line-height:1.2;margin-top:4px;font-size:.8rem}
+.sheet-total .kitchen-hours{font-size:5.5pt;white-space:nowrap;border-top:.5pt solid #c3d7ce;margin:3pt 1pt 0;padding-top:2pt;font-weight:600}
+.sheet-department-totals .department-kitchen-total{font-size:8pt}
+
+.sheet-total:has(.kitchen-hours) small{margin-top:1pt;padding-top:1pt}
