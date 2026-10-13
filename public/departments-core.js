@@ -67,7 +67,7 @@ export const isTimedCell=c=>['shift','training','buffet'].includes(c?.kind);
 export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-c.breakMinutes:0;
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
-export const transferLabel=c=>c.sourceDepartment?'De '+({poissonnerie:'Poisson',charcuterie:'Charcuterie',fruits:'Fruits',boulangerie:'Boulangerie',pam:'PAM',viande:'Viande',epicerie:'Épicerie'}[c.sourceDepartment]||c.sourceDepartment):c.workDepartment?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
+export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
 export const cellDetail=c=>[c.kind==='training'?'Formation':'',transferLabel(c)].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
