@@ -107,7 +107,7 @@ test('absence de sauvegarde, historique déjà restauré et rollback après éch
 
 test('la véritable route de recréation sauvegarde avant le retrait; un échec annule aussi la sauvegarde',async()=>{
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-  const route=source.slice(source.indexOf('app.post("/api/weeks/:weekStart/generate"'),source.indexOf('await installLeave(app,pool'));
+  const route=source.slice(source.indexOf('app.post("/api/weeks/:weekStart/generate"'),source.indexOf('const leaveAccess=await installLeave(app,pool'));
   for(const fail of [false,true]){
     let handler,stored=null,current=original().assignments;
     const client={release(){},async query(sql,args=[]){

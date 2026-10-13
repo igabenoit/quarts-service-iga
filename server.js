@@ -5,6 +5,7 @@ import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
+import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
 import { assignmentConflict, generateAssignments } from "./scheduler.js";
@@ -145,6 +146,7 @@ await pool.query(`
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
+app.use('/api/departments/photos',requireManager,sameOrigin,express.json({limit:'12mb'}));
 app.use(express.json({ limit: "250kb" }));
 app.use((_request, response, next) => {
   response.set({
@@ -542,7 +544,8 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
   } finally { client.release(); }
 });
 
-await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 await installUndo(app,pool,{requireManager,sameOrigin});
 app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));

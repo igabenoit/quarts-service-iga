@@ -206,4 +206,5 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     finally{client.release();}
   });
   app.get('/h/:token/conges',(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile('conges.html',{root:'public'}));
+  return {requireStaff:requireStoreStaff};
 }
