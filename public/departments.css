@@ -107,13 +107,13 @@ summary{cursor:pointer;font-weight:700}
 .sheet-table thead small{font-size:6pt;font-weight:400;text-transform:none}
 .sheet-group{height:16pt;background:var(--pale)}
 .sheet-group th{text-align:left;padding-left:6pt;text-transform:uppercase;font-size:7.5pt}
-.sheet-subtotal{height:16pt;background:#f5f6f0}
+.sheet-subtotal{height:25pt;background:#f5f6f0}
 .sheet-subtotal td:first-child{text-align:right;padding-right:7pt;text-transform:uppercase;font-size:6.8pt;font-weight:700}
 .person-job-title{display:block;font-size:.85em;font-weight:500;line-height:1.3;margin:4px 0;color:#4c5548;overflow-wrap:anywhere}
-.sheet-job-title{display:block;font-size:.8em;font-weight:400;line-height:1.15;margin-top:2pt;overflow-wrap:anywhere}
+.sheet-job-title{display:block;font-size:6.5pt;font-weight:400;line-height:1.15;margin-top:2pt;overflow-wrap:anywhere}
 #personForm label>small{font-weight:400;font-size:.75rem;color:#596451}
 .sheet-person{height:42pt}
-.sheet-name{text-align:left!important;font-size:8pt;font-weight:600}
+.sheet-name{text-align:left!important;font-size:9.5pt;font-weight:600}
 .sheet-person-label{height:41.45pt;padding:4pt;overflow:hidden;line-height:1.2;display:flex;flex-direction:column;justify-content:center;text-align:left}
 .sheet-seniority{font-size:6.5pt;padding:2pt!important}
 .sheet-day{position:relative}
@@ -201,3 +201,26 @@ body{background:white}
 .copy-week-summary{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
 .copy-week-summary span{background:var(--pale);border-radius:8px;padding:10px 14px;font-weight:700}
 #copyWeekDestination{margin:14px 0 0}
+
+/* Absences and formation remain labelled when printed without colour. */
+.status-off{background:#e8edf5!important;color:#344968!important}
+.status-vacation{background:#eee5fa!important;color:#5b367d!important}
+.status-requested{background:#fff0cb!important;color:#785500!important}
+.status-sick{background:#fbe3e5!important;color:#8c3443!important}
+.status-training{background:#dff3ef!important;color:#176354!important}
+.training-choice{grid-column:1/-1;background:#e9f6f2;padding:12px;border-radius:8px}
+.day-button small{display:block;font-size:.72rem;font-weight:700}
+.editor-total{min-width:90px}
+.editor-total>small{display:block;font-size:.7rem;color:#58644f}
+.training-hours{display:block;color:#176354;line-height:1.2;margin-top:4px;font-size:.8rem}
+.department-hours{display:flex;flex-direction:column;gap:5px;align-items:flex-end;padding:14px;color:#176354}
+.department-hours strong{color:#273521}
+.sheet-total .regular-hours{display:block;min-height:10pt}
+.sheet-total .training-hours,.sheet-subtotal .training-hours{font-size:5.5pt;white-space:nowrap;border-top:.5pt solid #c3d7ce;margin:3pt 1pt 0;padding-top:2pt;font-weight:600}
+.sheet-subtotal td>small{display:block;text-transform:none;font-weight:400;font-size:5.5pt}
+.sheet-department-totals{text-align:right;display:flex;flex-direction:column;gap:4pt}
+.sheet-department-totals strong+strong{color:#176354;font-size:8pt}
+.sheet-legend{display:flex;flex-wrap:wrap;gap:3pt;margin-top:5pt}
+.sheet-legend span{padding:2pt 3pt;border:.4pt solid #cbd0c8;border-radius:2pt;font-size:5.5pt}
+.sheet-work.status-training{padding:1pt;font-size:7.5pt;line-height:1.12}
+.sheet-work .training-label{font-weight:700}

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
-import {DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes} from './public/departments-core.js';
+import {DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell} from './public/departments-core.js';
 import {validatePhoto,transcribePhoto} from './department-photo.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -59,11 +59,11 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   async function warningsFor(current,client=pool){
     const warnings=draftWarnings(current.draft,current.people);
     const others=(await client.query('SELECT d.name,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start=$1 AND department_id<>$2 AND published IS NOT NULL',[current.weekStart,current.department.id])).rows;
-    for(const row of current.draft.rows)for(const other of others){const match=other.published.rows.find(r=>r.personId===row.personId);if(match)for(let day=0;day<7;day++){const a=row.cells[day],b=match.cells[day];if(a.kind==='shift'&&b.kind==='shift'&&a.start<b.end&&b.start<a.end)warnings.push(`${current.people.find(p=>p.id===row.personId)?.name||'Employé retiré'} : chevauchement avec ${other.name}, le ${addDays(current.weekStart,day)}.`);}}
+    for(const row of current.draft.rows)for(const other of others){const match=other.published.rows.find(r=>r.personId===row.personId);if(match)for(let day=0;day<7;day++){const a=row.cells[day],b=match.cells[day];if(isTimedCell(a)&&isTimedCell(b)&&a.start<b.end&&b.start<a.end)warnings.push(`${current.people.find(p=>p.id===row.personId)?.name||'Employé retiré'} : chevauchement avec ${other.name}, le ${addDays(current.weekStart,day)}.`);}}
     const leaves=(await client.query("SELECT employee_name,periods,effective_periods FROM schedule_leave_requests WHERE department_id=$1 AND status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$3 AND last_date>=$2",[current.department.id,current.weekStart,addDays(current.weekStart,6)])).rows;
-    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p)continue;for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)))for(let day=0;day<7;day++){const c=row.cells[day];if(c.kind==='shift'&&(leave.effective_periods||leave.periods).some(l=>l.date===addDays(current.weekStart,day)&&l.startMinute<c.end&&c.start<l.endMinute))warnings.push(`${p.name} : congé approuvé à vérifier le ${addDays(current.weekStart,day)}.`);}}
+    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p)continue;for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)))for(let day=0;day<7;day++){const c=row.cells[day];if(isTimedCell(c)&&(leave.effective_periods||leave.periods).some(l=>l.date===addDays(current.weekStart,day)&&l.startMinute<c.end&&c.start<l.endMinute))warnings.push(`${p.name} : congé approuvé à vérifier le ${addDays(current.weekStart,day)}.`);}}
     const assignments=(await client.query('SELECT a.employee_id,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1',[current.weekStart])).rows;
-    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(c?.kind==='shift'&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
+    for(const row of current.draft.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(isTimedCell(c)&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
     return [...new Set(warnings)];
   }
   app.get('/api/departments/meta',requireManager,endpoint(async(_req,res)=>res.json({departments:await listDepartments(pool),people:await directory(),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements'})));
