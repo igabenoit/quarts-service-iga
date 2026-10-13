@@ -55,6 +55,8 @@ test('individual accounts: administration, department boundaries, revocation and
     const photo=(await f.pool.query("INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,'2026-10-12','Test','data:image/png;base64,AA==') RETURNING id",[meat])).rows[0];
     assert.equal((await call('/api/departments/photos/'+photo.id,{session})).status,403);
     assert.equal((await call('/api/departments/photos/'+photo.id+'/analyze',{session,method:'POST',body:{}})).status,403);
+    assert.equal((await call('/api/departments/photos/'+photo.id+'/status',{session})).status,403);
+    assert.equal((await call('/api/departments/photos/'+photo.id+'/extend-attempts',{session,method:'POST',body:{attemptLimit:5}})).status,403);
     assert.equal((await call('/api/departments/document-mail/'+meat,{session,method:'POST',body:{}})).status,403);
     const week=(await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session})).body;
     const draftSaved=await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session,method:'PUT',body:{revision:week.revision,draft:week.draft}});assert.equal(draftSaved.status,200);

@@ -193,13 +193,26 @@ $('#printSheet').onclick=async()=>{
   }catch(error){$('#pdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}
   finally{button.disabled=false;$('#managerContent').inert=false;}
 };
-async function loadPhotos(){const result=await api(`/api/departments/photos?departmentId=${selectedDepartment}&weekStart=${current.weekStart}`);$('#photoList').innerHTML=result.photos.map(p=>`<button class="quiet" data-photo="${p.id}">${e(p.name)}${p.analyzed?' · transcription disponible':''}</button>`).join('')||'<p>Aucune photo pour cette semaine.</p>';$('#photoList').querySelectorAll('button').forEach(b=>b.onclick=()=>openPhoto(Number(b.dataset.photo)));$('#visionStatus').textContent=meta.visionConfigured?'La lecture automatique utilise OpenAI. En choisissant « Proposer une transcription », vous lui transmettez cette photo et les noms de l’équipe pour préparer un brouillon à vérifier.':'Le dépôt et la comparaison des photos sont disponibles. La transcription automatique attend la configuration de la connexion IA sur le serveur.';$('#analyzePhoto').disabled=!meta.visionConfigured||analyzingPhotoId!==null;}
+async function loadPhotos(){const result=await api(`/api/departments/photos?departmentId=${selectedDepartment}&weekStart=${current.weekStart}`);$('#photoList').innerHTML=result.photos.map(p=>`<button class="quiet" data-photo="${p.id}">${e(p.name)}${p.analyzed?' · transcription disponible':''}</button>`).join('')||'<p>Aucune photo pour cette semaine.</p>';$('#photoList').querySelectorAll('button').forEach(b=>b.onclick=()=>openPhoto(Number(b.dataset.photo)));$('#visionStatus').textContent=meta.visionConfigured?'La lecture automatique utilise OpenAI. En choisissant « Proposer une transcription », vous lui transmettez cette photo et les noms de l’équipe pour préparer un brouillon à vérifier.':'Le dépôt et la comparaison des photos sont disponibles. La transcription automatique attend la configuration de la connexion IA sur le serveur.';renderPhotoState();}
 $('#photoInput').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>8*1024*1024){$('#photoStatus').textContent='Photo trop lourde : choisissez une image de moins de 8 Mo.';return;}try{$('#photoStatus').textContent='Enregistrement de la photo…';const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});const result=await post('/api/departments/photos',{departmentId:selectedDepartment,weekStart:current.weekStart,name:file.name,dataUrl});await loadPhotos();await openPhoto(result.id);$('#photoStatus').textContent='Photo enregistrée. Vérifiez qu’elle montre toute la feuille, y compris les noms et les dates.';}catch(err){$('#photoStatus').textContent=err.message;}finally{event.target.value='';}};
-async function openPhoto(id){try{activePhoto=await api('/api/departments/photos/'+id);$('#photoReview').hidden=false;$('#photoImage').src=activePhoto.dataUrl;$('#largePhoto').src=activePhoto.dataUrl;renderCandidate();}catch(err){$('#photoStatus').textContent=err.message;}}
+let photoLoadSequence=0;
+async function openPhoto(id){const sequence=++photoLoadSequence;try{const photo=await api('/api/departments/photos/'+id);if(sequence!==photoLoadSequence)return;activePhoto=photo;$('#photoReview').hidden=false;$('#photoImage').src=activePhoto.dataUrl;$('#largePhoto').src=activePhoto.dataUrl;$('#photoStatus').textContent='';renderCandidate();renderPhotoState();}catch(err){if(sequence===photoLoadSequence)$('#photoStatus').textContent=err.message;}}
+function renderPhotoState(){
+  const p=activePhoto,busy=analyzingPhotoId!==null||p?.busy;
+  $('#analyzePhoto').disabled=!meta.visionConfigured||!p||busy||p.remainingAttempts===0;
+  $('#extendPhotoAttempts').hidden=!p||p.remainingAttempts!==0||busy;
+  $('#extendPhotoAttempts').disabled=busy;
+  if(!p){$('#photoAttemptStatus').textContent='';return;}
+  const detail=busy?'Lecture en cours. Actualisez la lecture pour récupérer le résultat sans lancer un nouvel essai.':p.remainingAttempts===0?'Limite atteinte. Vous pouvez autoriser 5 essais de plus sur cette même photo. Cela ne lance pas de lecture.':p.state==='processing'?'La lecture précédente a été interrompue. Vous pouvez proposer une nouvelle transcription.':p.candidate?'Une proposition est disponible ci-dessous.':'La photo est prête à lire.';
+  $('#photoAttemptStatus').textContent=`${p.attempts} / ${p.attemptLimit} essais utilisés (les échecs comptent aussi). ${detail}${!busy&&p.lastError?' Dernière erreur : '+p.lastError:''}`;
+}
+async function refreshPhotoState(id=activePhoto?.id){if(!id)return;const state=await api(`/api/departments/photos/${id}/status`);if(activePhoto?.id!==id)return;Object.assign(activePhoto,state);renderCandidate();renderPhotoState();return state;}
+$('#refreshPhotoStatus').onclick=async()=>{try{const state=await refreshPhotoState();if(state)$('#photoStatus').textContent=state.busy?'La lecture est toujours en cours.':state.candidate?'Proposition récupérée. Vérifiez-la avant de la reporter au brouillon.':'État de la lecture actualisé.';}catch(err){$('#photoStatus').textContent=err.message;}};
+$('#extendPhotoAttempts').onclick=async()=>{if(!activePhoto)return;const id=activePhoto.id;$('#extendPhotoAttempts').disabled=true;try{const state=await post(`/api/departments/photos/${id}/extend-attempts`,{attemptLimit:activePhoto.attemptLimit});if(activePhoto?.id!==id)return;Object.assign(activePhoto,state);renderPhotoState();$('#photoStatus').textContent='Cinq essais supplémentaires sont disponibles. Cliquez sur « Proposer une transcription » lorsque vous êtes prêt.';}catch(err){if(activePhoto?.id===id){$('#photoStatus').textContent=err.message;try{await refreshPhotoState(id);}catch{}}}finally{if(activePhoto?.id===id)renderPhotoState();}};
 $('#openPhoto').onclick=()=>$('#photoDialog').showModal();
 $('#analyzePhoto').onclick=async()=>{
-  if(!activePhoto||analyzingPhotoId!==null)return;
-  const b=$('#analyzePhoto'),photoId=activePhoto.id;analyzingPhotoId=photoId;b.disabled=true;
+  if(!activePhoto||analyzingPhotoId!==null||activePhoto.busy||activePhoto.remainingAttempts===0)return;
+  const photoId=activePhoto.id;analyzingPhotoId=photoId;renderPhotoState();
   $('#photoStatus').textContent='Lecture détaillée et seconde vérification en cours… Une feuille complète peut demander quelques minutes.';
   try{
     const result=await post(`/api/departments/photos/${photoId}/analyze`,{});
@@ -207,7 +220,7 @@ $('#analyzePhoto').onclick=async()=>{
     activePhoto.candidate=result.candidate;renderCandidate();
     $('#photoStatus').textContent=result.candidate.analysis?.verification==='complete'?'Lecture et relecture terminées. Vérifiez les écarts de total et les cases signalées avant de reporter au brouillon.':'Première lecture disponible. La seconde vérification n’a pas abouti : comparez les cases à la photo.';
   }catch(err){if(activePhoto?.id===photoId)$('#photoStatus').textContent=err.message;}
-  finally{analyzingPhotoId=null;b.disabled=!meta.visionConfigured;}
+  finally{analyzingPhotoId=null;try{await refreshPhotoState(photoId);}catch{if(activePhoto?.id===photoId)activePhoto.busy=false;}renderPhotoState();}
 };
 function renderCandidate(){
   const candidate=activePhoto.candidate;if(!candidate){$('#candidate').innerHTML='<div class="notice">La photo est prête à comparer. Utilisez « Proposer une transcription » lorsque la connexion IA est disponible, ou inscrivez les heures dans l’onglet Horaire.</div>';return;}
