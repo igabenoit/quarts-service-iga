@@ -15,7 +15,7 @@ test('relecture sur la photo originale, correction du jour et lecture littérale
   const result=await transcribePhoto(input,{key:'test',model:DEFAULT_VISION_MODEL,fetchImpl:async(_url,options)=>{sent.push(JSON.parse(options.body));return response(sent.length===1?first:second);}});
   assert.equal(sent.length,2);assert.equal(result.rows[0].days[0].start,420);assert.equal(result.rows[0].days[1].kind,'blank');
   assert.equal(result.rows[0].readings[0],'7 / 4');assert.equal(result.analysis.verification,'complete');
-  for(const request of sent){assert.equal(request.store,false);assert.equal(request.model,DEFAULT_VISION_MODEL);assert.equal(request.reasoning.effort,'high');assert.equal(request.input[0].content[1].image_url,photo);assert.equal(request.input[0].content[1].detail,'original');assert.equal(request.text.format.strict,true);}
+  for(const request of sent){assert.equal(request.store,false);assert.equal(request.model,DEFAULT_VISION_MODEL);assert.equal(request.reasoning.effort,'medium');assert.equal(request.input[0].content[1].image_url,photo);assert.equal(request.input[0].content[1].detail,'original');assert.equal(request.text.format.strict,true);}
   assert.match(sent[1].input[0].content[2].text,/Première proposition/);
 });
 

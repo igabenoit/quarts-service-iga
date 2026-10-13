@@ -64,6 +64,9 @@ test('PostgreSQL : répertoire, brouillons, publication privée et photos',async
       const r=await call('post','/api/departments/photos',{body:{departmentId:dept,weekStart:start,name:'exemple.png',dataUrl:photo}});assert.equal(r.code,201);photoId=r.body.id;
       assert.equal((await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}})).code,503);assert.equal(calls,0);
       process.env.OPENAI_API_KEY='mock-only';const analyzed=await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}});assert.equal(analyzed.code,200,JSON.stringify(analyzed.body));assert.equal(calls,2);
+      await pool.query("UPDATE schedule_department_photos SET state='processing',started_at=clock_timestamp()-interval '4 minutes' WHERE id=$1",[photoId]);
+      assert.equal((await call('post','/api/departments/photos/:id/analyze',{params:{id:photoId}})).code,409);assert.equal(calls,2,'do not restart a long analysis before its deadline');
+      await pool.query("UPDATE schedule_department_photos SET state='ready' WHERE id=$1",[photoId]);
       const apply=body=>call('post','/api/departments/photos/:id/apply',{params:{id:photoId},body});
       assert.equal((await apply({revision:rev,mapping:[id]})).code,400);
       assert.equal((await apply({revision:rev,weekConfirmed:true,replaceConfirmed:true,mapping:[999]})).code,400);
