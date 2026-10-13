@@ -16,7 +16,8 @@ export const monday=v=>{const d=new Date(v+'T12:00:00Z');return addDays(v,-((d.g
 export const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 export const dateLabel=v=>isDate(v)?new Intl.DateTimeFormat('fr-CA',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(v+'T12:00:00Z')):'À compléter';
 export const timeLabel=v=>`${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`;
-export const availabilityLabel=v=>String(v||'').replace(/\b(\d{2}):(\d{2})/g,(_m,h,m)=>Number(h)+(m==='00'?'':'h'+m)).replaceAll('-','–');
+export const availabilityCode=v=>{const raw=String(v??'').trim().toUpperCase();return ['J','LIBRE','00:00-24:00'].includes(raw)?'J':['0','NON'].includes(raw)?'0':raw;};
+export const availabilityLabel=v=>availabilityCode(v).replace(/\b(\d{2}):(\d{2})/g,(_m,h,m)=>Number(h)+(m==='00'?'':'h'+m)).replaceAll('-','–');
 export const hoursLabel=v=>new Intl.NumberFormat('fr-CA',{maximumFractionDigits:2}).format(v/60);
 export function tenure(date,asOf=today()){
   if(!isDate(date)||!isDate(asOf)||date>asOf)return 'À compléter';
@@ -33,11 +34,11 @@ export function normalizeAvailability(value={}){
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Disponibilités invalides.');
   const out={};
   for(let d=0;d<7;d++){
-    const raw=String(value[d]??'').trim().toUpperCase();
+    const raw=availabilityCode(value[d]);
     if(!raw){out[d]='';continue;}
-    if(['LIBRE','NON'].includes(raw)){out[d]=raw;continue;}
+    if(['J','0'].includes(raw)){out[d]=raw;continue;}
     const parts=raw.split(',').map(v=>v.trim().split('-'));
-    if(parts.length>2||parts.some(p=>p.length!==2||parseTime(p[0])===null||parseTime(p[1],{end:true})===null||parseTime(p[0])>=parseTime(p[1],{end:true})))throw Error(`${DAY_NAMES[d]} : utiliser LIBRE, NON ou une plage comme 08:00-17:00.`);
+    if(parts.length>2||parts.some(p=>p.length!==2||parseTime(p[0])===null||parseTime(p[1],{end:true})===null||parseTime(p[0])>=parseTime(p[1],{end:true})))throw Error(`${DAY_NAMES[d]} : utiliser J, 0 ou une plage comme 08:00-17:00.`);
     out[d]=parts.map(p=>timeLabel(parseTime(p[0]))+'-'+timeLabel(parseTime(p[1],{end:true}))).join(', ');
   }
   return out;
@@ -73,20 +74,20 @@ export function draftWarnings(draft,people){
     const c=row.cells[d];if(c.kind==='review')warnings.push(`${p.name}, ${DAY_NAMES[d]} : lecture à corriger.`);
     if(c.kind!=='shift')continue;
     if(!p.active)warnings.push(`${p.name} : fiche inactive.`);
-    const a=p.availability?.[d];if(!a)warnings.push(`${p.name}, ${DAY_NAMES[d]} : disponibilité non renseignée.`);
-    else if(a==='NON'||a!=='LIBRE'&&!a.split(',').some(range=>{const [s,e]=range.trim().split('-');return c.start>=parseTime(s)&&c.end<=parseTime(e,{end:true});}))warnings.push(`${p.name}, ${DAY_NAMES[d]} : quart en dehors de la disponibilité.`);
+    const a=availabilityCode(p.availability?.[d]);if(!a)warnings.push(`${p.name}, ${DAY_NAMES[d]} : disponibilité non renseignée.`);
+    else if(a==='0'||a!=='J'&&!a.split(',').some(range=>{const [s,e]=range.trim().split('-');return c.start>=parseTime(s)&&c.end<=parseTime(e,{end:true});}))warnings.push(`${p.name}, ${DAY_NAMES[d]} : quart en dehors de la disponibilité.`);
   }}return warnings;
 }
 export function publicSnapshot(draft,people){
-  return {rows:draft.rows.map(row=>({personId:row.personId,name:people.find(p=>p.id===row.personId).name,group:people.find(p=>p.id===row.personId).group,cells:row.cells.map(c=>({kind:c.kind,start:c.start,end:c.end,breakMinutes:c.breakMinutes,note:c.note}))})),notes:draft.notes};
+  return {rows:draft.rows.map(row=>({personId:row.personId,name:people.find(p=>p.id===row.personId).name,jobTitle:people.find(p=>p.id===row.personId).jobTitle||'',group:people.find(p=>p.id===row.personId).group,cells:row.cells.map(c=>({kind:c.kind,start:c.start,end:c.end,breakMinutes:c.breakMinutes,note:c.note}))})),notes:draft.notes};
 }
 export function sheetHTML({department,weekStart,people,draft,blank=false}){
   const e=escapeHTML,style=DEPARTMENT_STYLES.find(d=>d.key===department.key)||DEPARTMENT_STYLES[1];
-  let rows=draft.rows.map(r=>({...r,person:people.find(p=>p.id===r.personId)})).filter(r=>r.person);
+  let rows=blank?people.filter(p=>p.active!==false).map(person=>({person,cells:Array.from({length:7},blankCell)})):draft.rows.map(r=>({...r,person:people.find(p=>p.id===r.personId)})).filter(r=>r.person);
   if(!rows.length)rows=Array.from({length:14},(_,i)=>({person:{name:'',seniorityDate:'',group:i<7?'regular':'part_time',availability:{}},cells:Array.from({length:7},blankCell)}));
   const groups=[['regular','Réguliers'],['part_time','Temps partiel']];let sum=0;
   const table=groups.map(([key,label])=>{const selected=rows.filter(r=>r.person.group===key);if(!selected.length)return '';const subtotal=selected.reduce((n,r)=>n+totalMinutes(r),0);sum+=subtotal;
-    return `<tbody><tr class="sheet-group"><th colspan="10">${label}</th></tr>${selected.map(r=>`<tr class="sheet-person"><th class="sheet-name">${e(r.person.name)}</th><td class="sheet-seniority">${r.person.name?e(r.person.seniorityDate?dateLabel(r.person.seniorityDate):'À compléter'):''}</td>${r.cells.map((c,d)=>`<td class="sheet-day"><div class="sheet-work">${blank?'':c.kind==='shift'?`<b>${timeLabel(c.start)}</b><b>${timeLabel(c.end)}</b>${c.breakMinutes?`<small>Pause ${c.breakMinutes} min</small>`:''}${c.note?`<small>${e(c.note)}</small>`:''}`:c.kind==='off'?'CH':c.kind==='vacation'?'Vacances':e(c.note)}</div><div class="sheet-day-detail"><span class="sheet-daily-hours">${blank||c.kind!=='shift'?'':hoursLabel(c.end-c.start-c.breakMinutes)}</span><span class="sheet-availability">${e(availabilityLabel(r.person.availability?.[d]))}</span></div></td>`).join('')}<td class="sheet-total">${blank||!r.person.name?'':hoursLabel(totalMinutes(r))}</td></tr>`).join('')}<tr class="sheet-subtotal"><td colspan="9">Sous-total ${label.toLowerCase()}</td><td>${blank?'':hoursLabel(subtotal)}</td></tr></tbody>`;
+    return `<tbody><tr class="sheet-group"><th colspan="10">${label}</th></tr>${selected.map(r=>`<tr class="sheet-person"><th class="sheet-name">${e(r.person.name)}${r.person.jobTitle?`<small class="sheet-job-title">${e(r.person.jobTitle)}</small>`:''}</th><td class="sheet-seniority">${r.person.name?e(r.person.seniorityDate?dateLabel(r.person.seniorityDate):'À compléter'):''}</td>${r.cells.map((c,d)=>`<td class="sheet-day"><div class="sheet-work">${blank?'':c.kind==='shift'?`<b>${timeLabel(c.start)}</b><b>${timeLabel(c.end)}</b>${c.breakMinutes?`<small>Pause ${c.breakMinutes} min</small>`:''}${c.note?`<small>${e(c.note)}</small>`:''}`:c.kind==='off'?'CH':c.kind==='vacation'?'Vacances':e(c.note)}</div><div class="sheet-day-detail"><span class="sheet-daily-hours">${blank||c.kind!=='shift'?'':hoursLabel(c.end-c.start-c.breakMinutes)}</span><span class="sheet-availability">${e(availabilityLabel(r.person.availability?.[d]))}</span></div></td>`).join('')}<td class="sheet-total">${blank||!r.person.name?'':hoursLabel(totalMinutes(r))}</td></tr>`).join('')}<tr class="sheet-subtotal"><td colspan="9">Sous-total ${label.toLowerCase()}</td><td>${blank?'':hoursLabel(subtotal)}</td></tr></tbody>`;
   }).join('');
-  return `<article class="department-sheet theme-${e(style.key)} density-${rows.length>24?'small':rows.length>18?'medium':'large'}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><div class="sheet-meta"><span>Responsable : ${e(draft.manager)||'_______________________'}</span><span>Heures prévues : __________ h</span></div><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté<br><small>Date reconnue</small></th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><span>Petites cases : heures à gauche · disponibilité à droite (couleur) · CH : congé</span><strong>TOTAL : ${blank?'________':hoursLabel(sum)} h</strong></div><div class="sheet-notes"><strong>Notes / précisions</strong><p>${blank?'':e(draft.notes)}</p></div><footer>IGA extra Famille Benoit · Légal 8,5 × 14 po · Une page${blank?' · Gabarit à remplir à la main':''}</footer></article>`;
+  return `<article class="department-sheet theme-${e(style.key)} density-${rows.length>24?'small':rows.length>18?'medium':'large'}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><span>Petites cases : heures à gauche · disponibilité à droite (J : journée · 0 : indisponible) · CH : congé</span><strong>TOTAL : ${blank?'________':hoursLabel(sum)} h</strong></div><div class="sheet-notes"><strong>Notes / précisions</strong><p>${blank?'':e(draft.notes)}</p></div></article>`;
 }
