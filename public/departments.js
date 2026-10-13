@@ -68,7 +68,7 @@ function saveCellForm(){
 function renderCopyBar(){
   $('#copyBar').hidden=!copiedShift&&!lastPaste;$('#stopCopy').hidden=!copiedShift;$('#undoPaste').hidden=!lastPaste;
   $('#copyDescription').textContent=copiedShift?`Contenu à coller : ${copiedShift.cell.kind==='blank'?'Case vide':formatCell(copiedShift.cell)}`:'Contenu collé dans le brouillon';
-  $('#copyHelp').textContent=copiedShift?'Cliquez sur les journées où reproduire ce contenu. Échap pour terminer.':'Vous pouvez annuler le dernier collage avant d’enregistrer le brouillon.';
+  $('#copyHelp').textContent=copiedShift?'Cliquez sur les journées où reproduire ce contenu : leur contenu sera remplacé directement. Annuler le dernier collage en cas d’erreur. Échap pour terminer.':'Vous pouvez annuler le dernier collage avant d’enregistrer le brouillon.';
 }
 function stopCopy(){copiedShift=null;renderSchedule();}
 $('#stopCopy').onclick=stopCopy;
@@ -78,7 +78,6 @@ function pasteShift(personId,day){
   const row=current.draft.rows.find(r=>r.personId===personId),person=current.people.find(p=>p.id===personId);if(!row||!person||!copiedShift){message('Utilisez l’horaire d’origine pour attribuer un quart à cet employé reçu.');return;}
   let after={...copiedShift.cell};if(after.workDepartment===current.department.key)delete after.workDepartment;try{validateAssignment(after,current.department.key);}catch(err){message(err.message);return;}const before=row.cells[day];
   if(JSON.stringify(before)===JSON.stringify(after)){message('Cette journée contient déjà ce contenu.');return;}
-  if(before.kind!=='blank'&&!confirm(`${person.name} · ${DAY_NAMES[day]} : remplacer « ${formatCell(before)} » par ${formatCell(after)}?`))return;
   row.cells[day]=after;lastPaste={personId,day,before:{...before},after:{...after}};
   markDirty();renderSchedule();renderPrint();message(`Contenu collé pour ${person.name}, ${DAY_NAMES[day].toLowerCase()}. Enregistrez le brouillon pour conserver vos changements.`);
 }
