@@ -82,7 +82,7 @@ function modelOptions(model){
   return {detail:original?'original':'high',...reasoning};
 }
 
-export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{fetchImpl=fetch,key=process.env.OPENAI_API_KEY,model=process.env.SCHEDULE_VISION_MODEL||DEFAULT_VISION_MODEL}={}){
+export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{fetchImpl=fetch,key=process.env.OPENAI_API_KEY,model=process.env.SCHEDULE_VISION_MODEL||DEFAULT_VISION_MODEL,onFirstPass=async()=>{}}={}){
   if(!key)throw Object.assign(Error('La lecture automatique attend la configuration de la connexion IA. La photo reste disponible pour la saisie et la vérification manuelles.'),{status:503});
   validatePhoto(dataUrl);
   const {detail,...options}=modelOptions(model),signal=AbortSignal.timeout(PHOTO_ANALYSIS_TIMEOUT_MS);
@@ -106,6 +106,8 @@ export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{f
   }
   let first;
   try{first=await read();}catch(error){if(signal.aborted)throw Error('La lecture a pris trop de temps. Aucune heure n’a été modifiée. Réessayez avec une photo cadrée sur la feuille.');throw error;}
+  // Save a usable proposal before the second network call, including if the server restarts.
+  await onFirstPass({...auditCandidate(first.candidate),analysis:{version:3,model,verification:'pending'}});
   let selected=first.candidate,verification='partial';
   try{
     const second=await read(first.raw);

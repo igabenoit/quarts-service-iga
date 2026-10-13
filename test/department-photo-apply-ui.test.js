@@ -39,3 +39,8 @@ test('report photo : un échec d’affichage après sauvegarde ne prétend pas q
   const f=fixture();f.context.loadWeek=async()=>{throw Error('network');};const pending=f.click();f.resolve();await pending;
   assert.match(f.$('#photoApplyStatus').textContent,/transcription est enregistrée/);assert.equal(f.calls,1);
 });
+
+test('report photo : une ligne barrée peut être ignorée explicitement, mais un choix vide reste bloquant',async()=>{
+  const f=fixture();f.selects[1].value='skip';const pending=f.click();assert.equal(f.calls,1);assert.deepEqual(Array.from(f.payload.mapping),[1,null]);f.resolve();await pending;
+  const none=fixture();none.selects.forEach(s=>s.value='skip');await none.click();assert.equal(none.calls,0);assert.match(none.$('#photoApplyStatus').textContent,/au moins un/);
+});

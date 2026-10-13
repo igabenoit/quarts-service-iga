@@ -26,5 +26,9 @@ test('report photo : fiches explicites, doublons, contexte et lecture en cours; 
     await f.pool.query("UPDATE schedule_department_photos SET state='ready' WHERE id=$1",[photo.id]);
     r=await apply({});assert.equal(r.code,200,JSON.stringify(r.body));
     const saved=await get();assert.equal(saved.draft.rows.find(row=>row.personId===ids[0]).cells[0].start,420);assert.equal(saved.draft.rows.find(row=>row.personId===ids[1]).cells[0].kind,'vacation');assert.deepEqual(saved.draft.rows.find(row=>row.personId===ids[2]),current.draft.rows.find(row=>row.personId===ids[2]));assert.deepEqual(saved.published,current.published);
+    assert.equal((await apply({revision:saved.revision,mapping:[null,null]})).code,400,'cannot silently report nothing');
+    candidate.rows[1].days[0]=shift;await f.pool.query('UPDATE schedule_department_photos SET candidate=$2 WHERE id=$1',[photo.id,JSON.stringify(candidate)]);
+    r=await apply({revision:saved.revision,mapping:[ids[0],null]});assert.equal(r.code,200);
+    const skipped=await get();assert.deepEqual(skipped.draft.rows.find(row=>row.personId===ids[1]),saved.draft.rows.find(row=>row.personId===ids[1]),'an explicitly skipped row leaves existing shifts untouched');assert.deepEqual(skipped.published,current.published);
   }finally{await f.db.close();}
 });

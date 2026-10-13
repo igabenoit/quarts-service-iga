@@ -5,7 +5,7 @@ import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots} from './department-transfers.js';
-import {validatePhoto,transcribePhoto} from './department-photo.js';
+import {validatePhoto,transcribePhoto,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const iso=v=>v instanceof Date?v.toISOString().slice(0,10):v?.slice(0,10)||'';
@@ -13,7 +13,7 @@ const integer=v=>Number.isSafeInteger(Number(v))&&Number(v)>0?Number(v):fail('Id
 const week=v=>isDate(v)&&monday(v)===v?v:fail('Choisissez le lundi de la semaine.');
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||400).json({error:error.status||!error.code?error.message:'Cette opération n’a pas pu être enregistrée.'});}};
 
-export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch}){
+export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch,photoTimeoutMs=PHOTO_ANALYSIS_TIMEOUT_MS+5000}){
   await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
     CREATE TABLE IF NOT EXISTS schedule_store_people(id BIGSERIAL PRIMARY KEY,service_employee_id BIGINT UNIQUE,name TEXT NOT NULL,seniority_date DATE,birthday DATE,email TEXT NOT NULL DEFAULT '',employment_group TEXT NOT NULL DEFAULT 'regular' CHECK(employment_group IN('regular','part_time')),availability JSONB NOT NULL DEFAULT '{}',active BOOLEAN NOT NULL DEFAULT TRUE,source_note TEXT NOT NULL DEFAULT '',verified_at TIMESTAMPTZ,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS job_title TEXT NOT NULL DEFAULT '';
@@ -25,6 +25,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     CREATE TABLE IF NOT EXISTS schedule_department_photos(id BIGSERIAL PRIMARY KEY,department_id BIGINT NOT NULL REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,name TEXT NOT NULL,data_url TEXT NOT NULL,candidate JSONB,state TEXT NOT NULL DEFAULT 'saved',attempts INTEGER NOT NULL DEFAULT 0,operation_id TEXT,started_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS attempt_limit INTEGER NOT NULL DEFAULT 5;
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+    ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS schedule_department_photo_week ON schedule_department_photos(department_id,week_start);`);
   const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
   for(const style of DEPARTMENT_STYLES){
@@ -182,11 +183,16 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const d=await department(req.body.departmentId),start=week(req.body.weekStart),data=validatePhoto(req.body.dataUrl),name=String(req.body.name||'Photo').slice(0,120);
     const result=await transaction(async client=>{const count=(await client.query('SELECT COUNT(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[d.id,start])).rows[0].n;if(count>=4)fail('Quatre photos sont déjà conservées pour cette semaine.');return (await client.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[d.id,start,name,data])).rows[0];});res.status(201).json({id:Number(result.id)});
   }));
-  const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,Math.ceil((new Date(p.started_at).getTime()+300000-Date.now())/1000)):0;return {id:Number(p.id),name:p.name,state:p.state,attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,retryAfterSeconds,lastError:p.last_error||'',candidate:p.candidate};};
-  async function readPhoto(id){const p=(await pool.query('SELECT * FROM schedule_department_photos WHERE id=$1',[id])).rows[0];if(!p)fail('Photo introuvable. Actualisez la liste des photos.',404);return p;}
+  const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),elapsedSeconds=p.started_at?Math.max(0,Math.floor((Date.now()-new Date(p.started_at).getTime())/1000)):0,retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,300-elapsedSeconds):0;return {id:Number(p.id),name:p.name,state:p.state,phase:p.phase||'reading',attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,elapsedSeconds,retryAfterSeconds,lastError:p.last_error||'',candidate:p.candidate};};
+  async function readPhoto(id,withImage=false){
+    // A restart must not leave a photo permanently marked as processing, nor erase a saved proposal.
+    await pool.query("UPDATE schedule_department_photos SET state=CASE WHEN candidate IS NULL THEN 'saved' ELSE 'ready' END,phase='',operation_id=NULL,last_error='La lecture a été interrompue ou a dépassé le délai de cinq minutes. Toute proposition déjà reçue est conservée. Vous pouvez la vérifier ou relancer la lecture.' WHERE id=$1 AND state='processing' AND (started_at IS NULL OR started_at<clock_timestamp()-interval '5 minutes')",[id]);
+    const columns='id,name,state,phase,attempts,attempt_limit,started_at,last_error,candidate';
+    const p=(await pool.query(`SELECT ${columns}${withImage?',data_url':''} FROM schedule_department_photos WHERE id=$1`,[id])).rows[0];if(!p)fail('Photo introuvable. Actualisez la liste des photos.',404);return p;
+  }
   const photoBlocked=p=>{const state=photoState(p);if(state.busy)fail('Une lecture de cette photo est déjà en cours. Cliquez sur « Actualiser la lecture » pour récupérer son résultat. Une reprise sera possible dans au plus '+state.retryAfterSeconds+' secondes si la lecture a été interrompue.',409);if(!state.remainingAttempts)fail('Les '+state.attemptLimit+' essais autorisés pour cette photo ont été utilisés, y compris les lectures échouées. Cliquez sur « Autoriser 5 essais de plus » pour pouvoir la relire.',409);fail('L’état de la photo a changé. Actualisez la lecture avant de réessayer.',409);};
   app.get('/api/departments/photos',requireManager,endpoint(async(req,res)=>res.json({photos:(await pool.query('SELECT id,name,state,created_at,candidate IS NOT NULL AS analyzed FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2 ORDER BY id',[integer(req.query.departmentId),week(req.query.weekStart)])).rows})));
-  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{const p=await readPhoto(integer(req.params.id));res.json({...photoState(p),dataUrl:p.data_url});}));
+  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{const p=await readPhoto(integer(req.params.id),true);res.json({...photoState(p),dataUrl:p.data_url});}));
   app.get('/api/departments/photos/:id/status',requireManager,endpoint(async(req,res)=>res.json(photoState(await readPhoto(integer(req.params.id))))));
   app.post('/api/departments/photos/:id/extend-attempts',requireManager,sameOrigin,endpoint(async(req,res)=>{
     const id=integer(req.params.id);if(!Number.isSafeInteger(req.body.attemptLimit)||req.body.attemptLimit<5)fail('Actualisez la lecture avant d’autoriser de nouveaux essais.');
@@ -197,9 +203,30 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   app.post('/api/departments/photos/:id/analyze',requireManager,sameOrigin,endpoint(async(req,res)=>{
     if(!process.env.OPENAI_API_KEY)fail('La transcription automatique attend la configuration de la connexion IA. Vous pouvez déjà comparer la photo et saisir les heures.',503);
     const id=integer(req.params.id),operation=crypto.randomUUID();
-    const p=(await pool.query("UPDATE schedule_department_photos SET state='processing',operation_id=$2,started_at=clock_timestamp(),attempts=attempts+1,last_error='' WHERE id=$1 AND attempts<attempt_limit AND (state<>'processing' OR started_at IS NULL OR started_at<clock_timestamp()-interval '5 minutes') RETURNING *",[id,operation])).rows[0];if(!p)photoBlocked(await readPhoto(id));
-    try{const d=await department(p.department_id),people=await peopleFor(p.department_id);const candidate=await transcribePhoto({dataUrl:p.data_url,department:d.name,weekStart:iso(p.week_start),names:people.map(p=>p.name)},{fetchImpl});const saved=(await pool.query("UPDATE schedule_department_photos SET state='ready',candidate=$3,last_error='',operation_id=NULL WHERE id=$1 AND operation_id=$2 RETURNING id",[id,operation,JSON.stringify(candidate)])).rows[0];if(!saved)fail('Une autre lecture a repris cette photo. Actualisez la lecture pour récupérer le résultat courant.',409);res.json({candidate});}
-    catch(e){await pool.query("UPDATE schedule_department_photos SET state=CASE WHEN candidate IS NULL THEN 'saved' ELSE 'ready' END,last_error=$3,operation_id=NULL WHERE id=$1 AND operation_id=$2",[id,operation,String(e.message||'La lecture a échoué. Réessayez plus tard.').slice(0,600)]);throw e;}
+    const p=(await pool.query("UPDATE schedule_department_photos SET state='processing',phase='reading',operation_id=$2,started_at=clock_timestamp(),attempts=attempts+1,last_error='' WHERE id=$1 AND attempts<attempt_limit AND (state<>'processing' OR started_at IS NULL OR started_at<clock_timestamp()-interval '5 minutes') RETURNING *",[id,operation])).rows[0];if(!p)photoBlocked(await readPhoto(id));
+    async function run(){
+      let timer;
+      try{
+        const work=(async()=>{
+          const d=await department(p.department_id),people=await peopleFor(p.department_id);
+          return transcribePhoto({dataUrl:p.data_url,department:d.name,weekStart:iso(p.week_start),names:people.map(p=>p.name)},{fetchImpl,onFirstPass:async first=>{
+            const proposal={...first,warnings:['Première lecture conservée : la seconde vérification n’est pas encore terminée. Comparez chaque case à la photo.',...first.warnings],analysis:{...first.analysis,verification:'partial'}};
+            const saved=await pool.query("UPDATE schedule_department_photos SET candidate=$3,phase='verifying' WHERE id=$1 AND operation_id=$2 RETURNING id",[id,operation,JSON.stringify(proposal)]);
+            if(!saved.rowCount)fail('Une autre lecture a repris cette photo. Actualisez la lecture pour récupérer le résultat courant.',409);
+          }});
+        })();
+        const candidate=await Promise.race([work,new Promise((_resolve,reject)=>{timer=setTimeout(()=>reject(Error('La lecture a dépassé le délai prévu. Toute proposition déjà reçue est conservée; vérifiez-la ci-dessous avant de relancer.')),photoTimeoutMs);})]);
+        const saved=await pool.query("UPDATE schedule_department_photos SET state='ready',phase='',candidate=$3,last_error='',operation_id=NULL WHERE id=$1 AND operation_id=$2 RETURNING id",[id,operation,JSON.stringify(candidate)]);
+        if(!saved.rowCount)fail('Une autre lecture a repris cette photo. Actualisez la lecture pour récupérer le résultat courant.',409);
+        return candidate;
+      }catch(e){await pool.query("UPDATE schedule_department_photos SET state=CASE WHEN candidate IS NULL THEN 'saved' ELSE 'ready' END,phase='',last_error=$3,operation_id=NULL WHERE id=$1 AND operation_id=$2",[id,operation,String(e.message||'La lecture a échoué. Réessayez plus tard.').slice(0,600)]);throw e;}
+      finally{clearTimeout(timer);}
+    }
+    if(req.body.background===true){
+      res.status(202).json(photoState(p));
+      // The job and its saved result are independent of the browser's HTTP connection.
+      void run().catch(()=>{}); // User-facing failure is persisted by run(), then returned by /status.
+    }else res.json({candidate:await run()}); // Compatibility with an already-open older page.
   }));
   app.post('/api/departments/photos/:id/apply',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
     const p=(await client.query('SELECT * FROM schedule_department_photos WHERE id=$1',[integer(req.params.id)])).rows[0];if(!p?.candidate)fail('Aucune transcription à appliquer.');
@@ -208,9 +235,10 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const current=await getWeek(Number(p.department_id),iso(p.week_start),client);checkRevision(req.body,current);
     if(req.body.weekConfirmed!==true||req.body.replaceConfirmed!==true)fail('Vérifiez la semaine et confirmez le remplacement des journées des employés sélectionnés.');
     const mapping=req.body.mapping;if(!Array.isArray(mapping)||mapping.length!==p.candidate.rows.length||!mapping.length)fail('Reliez chaque ligne à un employé du répertoire.');
-    const missing=p.candidate.rows.filter((_row,i)=>!current.people.some(person=>person.id===Number(mapping[i])));if(missing.length)fail('Choisissez la fiche employé pour : '+missing.map(row=>row.name||'Nom illisible').join(', ')+'.');
-    const ids=mapping.map(Number),duplicate=ids.find((id,i)=>ids.indexOf(id)!==i);if(duplicate)fail('La fiche de '+current.people.find(person=>person.id===duplicate).name+' est sélectionnée sur plusieurs lignes. Chaque ligne doit correspondre à un employé différent.');
-    const incoming=p.candidate.rows.map((row,i)=>({personId:integer(mapping[i]),cells:row.days}));
+    const missing=p.candidate.rows.filter((_row,i)=>mapping[i]!==null&&!current.people.some(person=>person.id===Number(mapping[i])));if(missing.length)fail('Choisissez la fiche employé, ou « Ne pas reporter cette ligne », pour : '+missing.map(row=>row.name||'Nom illisible').join(', ')+'.');
+    const ids=mapping.filter(id=>id!==null).map(Number);if(!ids.length)fail('Sélectionnez au moins un employé à reporter.');
+    const duplicate=ids.find((id,i)=>ids.indexOf(id)!==i);if(duplicate)fail('La fiche de '+current.people.find(person=>person.id===duplicate).name+' est sélectionnée sur plusieurs lignes. Chaque ligne doit correspondre à un employé différent.');
+    const incoming=p.candidate.rows.flatMap((row,i)=>mapping[i]===null?[]:[{personId:integer(mapping[i]),cells:row.days}]);
     const normalized=normalizeDraft({...current.draft,rows:incoming},current.people);
     const rows=current.draft.rows.filter(r=>!normalized.rows.some(n=>n.personId===r.personId)).concat(normalized.rows);
     return saveWeek(client,current,normalizeDraft({...current.draft,rows},current.people),'photo');
