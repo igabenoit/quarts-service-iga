@@ -31,6 +31,24 @@ export function parseTime(value,{end=false}={}){
   if(!m)return null;const n=Number(m[1])*60+Number(m[2]);
   return Number(m[2])<60&&n>=0&&n<=(end?1440:1439)?n:null;
 }
+export const quickTimeLabel=v=>`${Math.floor(v/60)}${v%60?'h'+String(v%60).padStart(2,'0'):''}`;
+function quickHour(value,{end=false}={}){
+  const raw=String(value??'').trim().toLowerCase().replace(/\s+/g,'');
+  let match=/^(\d{1,2})(?:h|[:h](\d{2}))?$/.exec(raw);
+  if(!match&&/^\d{3,4}$/.test(raw))match=[raw,raw.slice(0,-2),raw.slice(-2)];
+  if(!match)return null;
+  const hour=Number(match[1]),minute=Number(match[2]||0),minutes=hour*60+minute;
+  if(minute>59||minutes>(end?1440:1439))return null;
+  return {minutes,afternoon:hour>=1&&hour<=12&&!match[1].startsWith('0')};
+}
+export function parseShiftTimes(startValue,endValue){
+  const start=quickHour(startValue),end=quickHour(endValue,{end:true});
+  if(!start||!end)throw Error('Indiquez les heures, par exemple 7 et 4, ou 7h30 et 16h30.');
+  let finish=end.minutes;
+  if(finish<=start.minutes&&end.afternoon)finish+=12*60;
+  if(finish<=start.minutes||finish>1440)throw Error('La fin doit suivre le début dans la même journée. Précisez l’heure sur 24 h, par exemple 16 ou 24.');
+  return {start:start.minutes,end:finish};
+}
 export function normalizeAvailability(value={}){
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Disponibilités invalides.');
   const out={};

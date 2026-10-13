@@ -1,5 +1,5 @@
-import {DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseTime,totalMinutes,sheetHTML,availabilityCode,PRINT_ROW_CAPACITY} from './departments-core.js';
-const $=s=>document.querySelector(s);let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0;
+import {DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,quickTimeLabel,totalMinutes,sheetHTML,availabilityCode,PRINT_ROW_CAPACITY} from './departments-core.js';
+const $=s=>document.querySelector(s);let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,copiedShift=null,lastPaste=null;
 const message=v=>$('#appMessage').textContent=v;
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous avec votre code gestionnaire depuis « Retour au Service », puis revenez ici.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
@@ -14,7 +14,7 @@ function renderNavigation(){
 }
 async function loadMeta(){meta=await api('/api/departments/meta');if(!selectedDepartment)selectedDepartment=meta.departments.find(d=>d.key==='boulangerie')?.id||meta.departments.find(d=>d.key!=='service')?.id;renderNavigation();}
 async function loadWeek(){
-  const sequence=++loadSequence;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(route());if(sequence!==loadSequence)return;current=loaded;dirty=false;document.body.className='theme-'+current.department.key;
+  const sequence=++loadSequence;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(route());if(sequence!==loadSequence)return;current=loaded;dirty=false;lastPaste=null;document.body.className='theme-'+current.department.key;
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
   $('#sheetManager').value=current.draft.manager;$('#sheetNotes').value=current.draft.notes;
   $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
@@ -22,21 +22,64 @@ async function loadWeek(){
 }
 function renderWarnings(){const warnings=current.warnings||[];$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
 function renderSchedule(){
+  renderCopyBar();
   if(!current.draft.rows.length){$('#scheduleGrid').innerHTML='<div class="notice">Aucun employé dans cette feuille. Commencez dans l’onglet « Employés ». Le gabarit papier vierge est déjà disponible dans « Feuille imprimable ».</div>';return;}
-  $('#scheduleGrid').innerHTML=`<table class="editor-table"><thead><tr><th>Employé / ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d}<br>${addDays(current.weekStart,i).slice(8)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${current.draft.rows.map(row=>{const p=current.people.find(p=>p.id===row.personId);if(!p)return `<tr><td colspan="9">Employé retiré du département. <button data-remove="${row.personId}">Retirer sa ligne du brouillon</button></td></tr>`;return `<tr><th>${e(p.name)}${p.jobTitle?`<span class="person-job-title">${e(p.jobTitle)}</span>`:''}<span class="person-meta">${p.group==='regular'?'Régulier':'Temps partiel'} · ${e(tenure(p.seniorityDate,current.weekStart))}</span><button class="remove-person" data-remove="${p.id}">Retirer de cette feuille</button></th>${row.cells.map((c,d)=>`<td><button class="day-button ${c.kind==='review'?'needs-review':''}" data-cell="${p.id}:${d}" aria-label="${e(p.name)}, ${DAY_NAMES[d]}, ${e(formatCell(c))}">${c.kind==='shift'?`<strong>${timeLabel(c.start)}</strong><strong>${timeLabel(c.end)}</strong>`:e(formatCell(c))}</button><div class="day-detail"><span>${c.kind==='shift'?hoursLabel(c.end-c.start-c.breakMinutes):''}</span><span>${e(availabilityCode(p.availability[d])||'?')}</span></div></td>`).join('')}<td><strong>${hoursLabel(totalMinutes(row))}</strong></td></tr>`;}).join('')}</tbody></table>`;
-  $('#scheduleGrid').querySelectorAll('[data-cell]').forEach(b=>b.onclick=()=>openCell(...b.dataset.cell.split(':').map(Number)));
+  $('#scheduleGrid').innerHTML=`<table class="editor-table ${copiedShift?'copy-mode':''}"><thead><tr><th>Employé / ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d}<br>${addDays(current.weekStart,i).slice(8)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${current.draft.rows.map(row=>{const p=current.people.find(p=>p.id===row.personId);if(!p)return `<tr><td colspan="9">Employé retiré du département. <button data-remove="${row.personId}">Retirer sa ligne du brouillon</button></td></tr>`;return `<tr><th>${e(p.name)}${p.jobTitle?`<span class="person-job-title">${e(p.jobTitle)}</span>`:''}<span class="person-meta">${p.group==='regular'?'Régulier':'Temps partiel'} · ${e(tenure(p.seniorityDate,current.weekStart))}</span><button class="remove-person" data-remove="${p.id}">Retirer de cette feuille</button></th>${row.cells.map((c,d)=>`<td><button class="day-button ${c.kind==='review'?'needs-review':''}" data-cell="${p.id}:${d}" aria-label="${e(p.name)}, ${DAY_NAMES[d]}, ${e(formatCell(c))}">${c.kind==='shift'?`<strong>${timeLabel(c.start)}</strong><strong>${timeLabel(c.end)}</strong>`:e(formatCell(c))}</button><div class="day-detail"><span>${c.kind==='shift'?hoursLabel(c.end-c.start-c.breakMinutes):''}</span><span>${e(availabilityCode(p.availability[d])||'?')}</span></div></td>`).join('')}<td><strong>${hoursLabel(totalMinutes(row))}</strong></td></tr>`;}).join('')}</tbody></table>`;
+  $('#scheduleGrid').querySelectorAll('[data-cell]').forEach(b=>b.onclick=()=>{const [personId,day]=b.dataset.cell.split(':').map(Number);if(copiedShift)pasteShift(personId,day);else openCell(personId,day);});
   $('#scheduleGrid').querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{if(!confirm('Retirer cette personne de ce brouillon? Sa fiche et les horaires déjà publiés sont conservés.'))return;current.draft.rows=current.draft.rows.filter(r=>r.personId!==Number(b.dataset.remove));markDirty();renderSchedule();});
 }
 function openCell(personId,day){
   const person=current.people.find(p=>p.id===personId),cell=current.draft.rows.find(r=>r.personId===personId).cells[day];editingCell={personId,day};
   $('#cellTitle').textContent=`${person.name} · ${DAY_NAMES[day]}`;$('#cellAvailability').textContent='Disponibilité : '+(availabilityCode(person.availability[day])||'Non renseignée');
   $('#cellOriginal').hidden=cell.kind!=='review';$('#cellOriginal').textContent='Lecture à vérifier sur la photo : '+cell.note;
-  $('#cellKind').value=cell.kind==='blank'||cell.kind==='review'?'shift':cell.kind;$('#cellStart').value=cell.start===null?'':timeLabel(cell.start);$('#cellEnd').value=cell.end===null?'':timeLabel(cell.end);
-  $('#cellBreak').value=cell.breakMinutes;$('#cellNote').value=cell.kind==='review'?'':cell.note;$('#cellError').textContent='';updateCellKind();$('#cellDialog').showModal();
+  $('#cellKind').value=cell.kind==='blank'||cell.kind==='review'?'shift':cell.kind;$('#cellStart').value=cell.start===null?'':quickTimeLabel(cell.start);$('#cellEnd').value=cell.end===null?'':quickTimeLabel(cell.end);
+  $('#cellBreak').value=cell.breakMinutes;$('#cellNote').value=cell.kind==='review'?'':cell.note;$('#cellError').textContent='';updateCellKind();$('#cellDialog').showModal();if($('#cellKind').value==='shift'){$('#cellStart').focus();$('#cellStart').select();}
 }
-function updateCellKind(){$('#shiftFields').hidden=$('#cellKind').value!=='shift';$('#cellStart').required=$('#cellKind').value==='shift';$('#cellEnd').required=$('#cellKind').value==='shift';}
+function updateCellKind(){const shift=$('#cellKind').value==='shift';$('#shiftFields').hidden=!shift;$('#quickTimeInfo').hidden=!shift;$('#cellStart').required=shift;$('#cellEnd').required=shift;$('#copyShift').disabled=!shift;previewShift();}
 $('#cellKind').onchange=updateCellKind;
-$('#cellForm').onsubmit=event=>{event.preventDefault();try{const c=normalizeCell({kind:$('#cellKind').value,start:parseTime($('#cellStart').value),end:parseTime($('#cellEnd').value,{end:true}),breakMinutes:Number($('#cellBreak').value),note:$('#cellNote').value});current.draft.rows.find(r=>r.personId===editingCell.personId).cells[editingCell.day]=c;markDirty();renderSchedule();$('#cellDialog').close();}catch(err){$('#cellError').textContent=err.message;}};
+$('#cellForm').onsubmit=event=>{event.preventDefault();try{saveCellForm();}catch(err){$('#cellError').textContent=err.message;}};
+function cellFromForm(){
+  const kind=$('#cellKind').value,times=kind==='shift'?parseShiftTimes($('#cellStart').value,$('#cellEnd').value):{};
+  return normalizeCell({kind,...times,breakMinutes:Number($('#cellBreak').value),note:$('#cellNote').value});
+}
+function previewShift(){
+  const el=$('#resolvedShift');el.textContent='';el.dataset.invalid='false';
+  if($('#cellKind').value!=='shift'||!$('#cellStart').value||!$('#cellEnd').value)return;
+  try{const c=cellFromForm();el.textContent=`Quart compris : ${timeLabel(c.start)} → ${timeLabel(c.end)} · ${hoursLabel(c.end-c.start-c.breakMinutes)} h travaillées`;}
+  catch(err){el.textContent=err.message;el.dataset.invalid='true';}
+}
+for(const id of ['cellStart','cellEnd','cellBreak'])$('#'+id).addEventListener('input',previewShift);
+for(const id of ['cellStart','cellEnd'])$('#'+id).addEventListener('blur',()=>{try{const t=parseShiftTimes($('#cellStart').value,$('#cellEnd').value);$('#cellStart').value=quickTimeLabel(t.start);$('#cellEnd').value=quickTimeLabel(t.end);}catch{}previewShift();});
+function saveCellForm(){
+  const c=cellFromForm();current.draft.rows.find(r=>r.personId===editingCell.personId).cells[editingCell.day]=c;
+  lastPaste=null;markDirty();renderSchedule();renderPrint();$('#cellDialog').close();return c;
+}
+function renderCopyBar(){
+  $('#copyBar').hidden=!copiedShift&&!lastPaste;$('#stopCopy').hidden=!copiedShift;$('#undoPaste').hidden=!lastPaste;
+  $('#copyDescription').textContent=copiedShift?`Quart à coller : ${timeLabel(copiedShift.cell.start)} → ${timeLabel(copiedShift.cell.end)}`:'Quart collé dans le brouillon';
+  $('#copyHelp').textContent=copiedShift?'Cliquez sur les journées où reproduire ce quart. Échap pour terminer.':'Vous pouvez annuler le dernier collage avant d’enregistrer le brouillon.';
+}
+function stopCopy(){copiedShift=null;renderSchedule();}
+$('#stopCopy').onclick=stopCopy;
+$('#copyShift').onclick=()=>{try{const cell=cellFromForm();if(cell.kind!=='shift')return;saveCellForm();copiedShift={cell:{...cell}};renderSchedule();message('Quart copié. Cliquez sur une ou plusieurs journées pour le coller, puis enregistrez le brouillon.');}catch(err){$('#cellError').textContent=err.message;}};
+function pasteShift(personId,day){
+  const row=current.draft.rows.find(r=>r.personId===personId),person=current.people.find(p=>p.id===personId);if(!row||!person||!copiedShift)return;
+  const before=row.cells[day],after={...copiedShift.cell};
+  if(JSON.stringify(before)===JSON.stringify(after)){message('Cette journée contient déjà ce quart.');return;}
+  if(before.kind!=='blank'&&!confirm(`${person.name} · ${DAY_NAMES[day]} : remplacer « ${formatCell(before)} » par ${formatCell(after)}?`))return;
+  row.cells[day]=after;lastPaste={personId,day,before:{...before},after:{...after}};
+  markDirty();renderSchedule();renderPrint();message(`Quart collé pour ${person.name}, ${DAY_NAMES[day].toLowerCase()}. Enregistrez le brouillon pour conserver vos changements.`);
+}
+$('#undoPaste').onclick=()=>{
+  if(!lastPaste)return;const row=current.draft.rows.find(r=>r.personId===lastPaste.personId);
+  if(row&&JSON.stringify(row.cells[lastPaste.day])===JSON.stringify(lastPaste.after)){row.cells[lastPaste.day]={...lastPaste.before};markDirty();message('Dernier collage annulé.');}
+  lastPaste=null;renderSchedule();renderPrint();
+};
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&copiedShift&&!document.querySelector('dialog[open]'))stopCopy();
+});
+
+
 async function saveDraft(){const result=await api(route(),{method:'PUT',body:JSON.stringify({revision:current.revision,draft:current.draft})});current.revision=result.revision;dirty=false;await loadWeek();return result;}
 $('#saveDraft').onclick=async()=>{try{await saveDraft();message('Brouillon enregistré.');}catch(err){message(err.message);}};
 $('#sheetManager').oninput=()=>{current.draft.manager=$('#sheetManager').value;markDirty();};$('#sheetNotes').oninput=()=>{current.draft.notes=$('#sheetNotes').value;markDirty();};
