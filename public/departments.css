@@ -186,6 +186,12 @@ body{background:white}
 .service-links{margin-top:35px}
 .staff-workspace .notice p{white-space:pre-wrap}
 @media(max-width:1155px){.week-scroll-hint{display:block}}
+@media(max-width:780px){
+  .week-strip{overflow:visible;scroll-snap-type:none;padding-bottom:0}
+  .week-cards{grid-template-columns:minmax(0,1fr);min-width:0}
+  .week-scroll-hint{display:none}
+  .day-card{scroll-snap-align:none}
+}
 
 
 .sheet-notes p{font-size:6.5pt}
