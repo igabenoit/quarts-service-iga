@@ -5,7 +5,7 @@ window.createUndoControl=function({onUndo,beforeUndo=async()=>false}){
   async function refresh(){
     const turn=++revision;
     try{
-      const res=await fetch('/api/undo',{cache:'no-store'});if(!res.ok)throw Error();
+      const res=await fetch('/api/undo',{cache:'no-store'});if(res.status===403){if(turn===revision){action=null;button.hidden=true;status.hidden=true;}return;}if(!res.ok)throw Error();
       const data=await res.json();if(turn!==revision)return;
       action=data.action;
       status.textContent=action?`À annuler : ${action.label}${action.week_start?' · semaine du '+String(action.week_start).slice(0,10):''}`:'Aucune action à annuler. Les actions antérieures à cette option ne sont pas disponibles.';

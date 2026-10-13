@@ -31,5 +31,5 @@ $('#requests').addEventListener('click',async e=>{
  catch(error){feedback.textContent=error.message;feedback.focus();card.querySelectorAll('button').forEach(b=>b.disabled=false);}
 });
 $('#refresh').onclick=()=>load();$('#status').onchange=render;$('#departmentFilter').onchange=render;$('#search').oninput=render;$('#mode').onchange=()=>load();
-api('/api/leave/notifications').then(d=>{$('#mailStatus').textContent=d.configured?'Le service de courriel est configuré. L’état de chaque envoi apparaît sur la demande.':'Le service de courriel doit être configuré dans les réglages des congés.';}).catch(e=>{$('#mailStatus').textContent=e.message;});
+api('/api/session').then(session=>session.user?.kind==='account'?{scoped:true}:api('/api/leave/notifications')).then(d=>{$('#mailStatus').textContent=d.scoped?'L’état des courriels apparaît sur chaque demande.':d.configured?'Le service de courriel est configuré. L’état de chaque envoi apparaît sur la demande.':'Le service de courriel doit être configuré dans les réglages des congés.';}).catch(e=>{$('#mailStatus').textContent=e.message;});
 setInterval(()=>load({quiet:true}),60000);load();

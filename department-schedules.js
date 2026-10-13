@@ -1,4 +1,5 @@
 import {installDepartmentMail} from './department-mail.js';
+import {isScoped,ownsDepartment,assertDepartment} from './manager-access.js';
 import crypto from 'node:crypto';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
@@ -86,12 +87,16 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     for(const row of display.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(isTimedCell(c)&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
     return [...new Set(warnings)];
   }
-  app.get('/api/departments/meta',requireManager,endpoint(async(_req,res)=>res.json({departments:await listDepartments(pool),people:await directory(),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements'})));
-  app.post('/api/departments/people',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body))));
-  app.put('/api/departments/people/:id',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,integer(req.params.id)))));
-  async function savePerson(body,id){return transaction(async client=>{
+  app.get('/api/departments/meta',requireManager,endpoint(async(req,res)=>res.json({departments:(await listDepartments(pool)).filter(d=>ownsDepartment(req,d.id)),people:(await directory()).filter(p=>p.departments.some(id=>ownsDepartment(req,id))),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements',account:req.manager||{kind:'admin'}})));
+  app.post('/api/departments/people',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,undefined,req))));
+  app.put('/api/departments/people/:id',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,integer(req.params.id),req))));
+  async function savePerson(body,id,req){return transaction(async client=>{
     const list=await directory(client),previous=id?list.find(p=>p.id===id):null;
     if(id&&!previous)fail('Employé introuvable.',404);
+    if(isScoped(req)){
+      for(const departmentId of body.departments||[])assertDepartment(req,departmentId);
+      if(previous&&!previous.departments.every(departmentId=>ownsDepartment(req,departmentId)))fail('Cette fiche est commune à plusieurs départements. L’administration doit modifier les renseignements partagés; vous pouvez gérer ses quarts dans votre département.',403);
+    }
     if(previous&&body.version!==previous.version)fail('Cette fiche a changé. Rechargez le répertoire.',409);
     const name=String(body.name||'').trim(),email=normalizeEmail(body.email),source=String(body.sourceNote||'').trim();
     if(name.length<2||name.length>100||body.email&&!email||source.length>200)fail('Vérifiez le nom, le courriel et la source de l’ancienneté.');
