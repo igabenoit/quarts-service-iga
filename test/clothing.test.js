@@ -40,6 +40,16 @@ test('clothing HTTP: access, campaign locks, durable orders, duplicate retries, 
     await call('/api/clothing/orders/'+body.requestId,{method:'PATCH',body:{cancelled:true,version:1}});detail=(await call(route+'/orders')).body;assert.equal(detail.supplier.length,0);
     assert.equal((await call('/api/clothing/orders/'+body.requestId,{method:'PATCH',body:{cancelled:false,version:1}})).code,409);
     await call('/api/clothing/orders/'+body.requestId,{method:'PATCH',body:{cancelled:false,version:2}});assert.equal((await call(route+'/orders')).body.supplier[0].quantity,2);
+    const track='/api/clothing/orders/'+body.requestId+'/tracking';
+    assert.equal((await call(track,{role:'staff',method:'PATCH',body:{field:'paid',value:true,version:3}})).code,403);
+    assert.equal((await call(track,{method:'PATCH',body:{field:'paid',value:true,version:3}})).code,200);
+    assert.equal((await call(track,{method:'PATCH',body:{field:'collected',value:true,version:3}})).code,409);
+    assert.equal((await call(track,{method:'PATCH',body:{field:'collected',value:true,version:4}})).code,200);
+    detail=(await call(route+'/orders')).body;assert.ok(detail.orders[0].paid_at);assert.ok(detail.orders[0].collected_at);assert.equal(detail.supplier[0].quantity,2);
+    const internal=await call(route+'/internal.xlsx');assert.equal(internal.body.subarray(0,2).toString(),'PK');assert.match(internal.body.toString(),/Employé Test/);
+    assert.equal((await call(route+'/internal.xlsx',{role:'staff'})).code,403);
+    assert.equal((await call(track,{method:'PATCH',body:{field:'paid',value:false,version:5}})).code,200);
+    detail=(await call(route+'/orders')).body;assert.equal(detail.orders[0].paid_at,null);assert.ok(detail.orders[0].collected_at);
     c=(await call(route,{method:'PUT',body:{...settings,opened:false,version:c.version}})).body;
     assert.equal((await call(orderPath,{role:'staff',method:'POST',body:{...body,requestId:crypto.randomUUID()}})).code,409);
     assert.equal((await call(orderPath,{role:'staff',method:'POST',body})).body.id,body.requestId);
