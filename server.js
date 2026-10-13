@@ -1,3 +1,4 @@
+import {installPdfAssets} from './pdf-assets.js';
 import crypto from "node:crypto";
 import {employeeAvailability,localDate} from "./availability-rules.js";
 import {availabilityRevision,recordManualAvailability,saveAvailabilityHistory} from "./availability.js";
@@ -805,6 +806,7 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
   } finally { client.release(); }
 });
 
+installPdfAssets(app);
 app.use(express.static("public", { extensions: ["html"] }));
 app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
 app.listen(port, () => console.log(`Quarts Service IGA sur le port ${port}`));
