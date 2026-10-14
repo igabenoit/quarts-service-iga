@@ -77,8 +77,16 @@ export const KITCHEN_POSTS=Object.freeze({kitchen_salads:'Cuisine Salades'});
 export const COMMON_POSTS=Object.freeze({night:'Nuit'});
 export const assignmentPost=c=>c.post||(c.kind==='kitchen'&&/\bsalades?\b/i.test(c.note||'')?'kitchen_salads':'');
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
-export const automaticBreakMinutes=(start,end)=>Number.isFinite(start)&&Number.isFinite(end)&&end-start>=8*60?60:0;
-export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-c.breakMinutes:0;
+export const isNightShift=(start,end,post)=>post==='night'||Number.isFinite(start)&&Number.isFinite(end)&&(end>1440||end<start);
+export function automaticBreakMinutes(start,end,post){
+  if(!Number.isFinite(start)||!Number.isFinite(end))return 0;
+  const duration=(end<start?end+1440:end)-start;
+  return isNightShift(start,end,post)?(duration>30?30:0):duration>=8*60?60:0;
+}
+// Nights saved with the former automatic hour now use the corrected half-hour.
+// Explicit overrides are retained, including an intentionally entered 60 minutes.
+export const cellBreakMinutes=c=>!c.breakOverride&&c.breakMinutes===60&&isNightShift(c.start,c.end,c.post)?automaticBreakMinutes(c.start,c.end,c.post):c.breakMinutes??0;
+export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-cellBreakMinutes(c):0;
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
@@ -99,7 +107,7 @@ export function normalizeCell(value){
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,start:c.start,end,breakMinutes:c.breakMinutes??0,note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    return {kind,start:c.start,end,breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};

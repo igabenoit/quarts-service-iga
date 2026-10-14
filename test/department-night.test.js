@@ -4,7 +4,7 @@ import {departmentFixture} from './department-fixture.js';
 import {parseShiftTimes,quickTimeLabel,timeLabel,normalizeCell,automaticBreakMinutes,cellMinutes,totalMinutes,trainingMinutes,grandMinutes,blankCell,cellDetail,DEPARTMENT_STYLES,validateAssignment,sheetHTML,draftWarnings,parseAvailability} from '../public/departments-core.js';
 import {normalizePhotoCell,photoSchema} from '../department-photo.js';
 
-const night=()=>({kind:'shift',start:1320,end:1830,breakMinutes:60,note:'',post:'night'});
+const night=()=>({kind:'shift',start:1320,end:1830,breakMinutes:30,note:'',post:'night'});
 const cells=(c,day=0)=>Array.from({length:7},(_,d)=>d===day?{...c}:blankCell());
 test('nuit : saisie explicite, durée, réouverture et garde-fous',()=>{
   for(const [a,b,start,end] of [['22','6h30',1320,1830],['22h','630',1320,1830],['22:00','06:30',1320,1830],['20','4',1200,1680],['19','7',1140,1860],['7','04:00',420,1680],['22','11:00 +1',1320,2100],['23','0',1380,1440]]){
@@ -12,12 +12,12 @@ test('nuit : saisie explicite, durée, réouverture et garde-fous',()=>{
     assert.deepEqual(parseShiftTimes(quickTimeLabel(start),quickTimeLabel(end)),{start,end},'reopening preserves the date offset');
   }
   assert.equal(timeLabel(1830),'06:30 +1');assert.equal(quickTimeLabel(1830),'06:30 +1');
-  assert.equal(automaticBreakMinutes(1320,1830),60);
-  assert.equal(cellMinutes(night()),450);assert.equal(cellMinutes({...night(),breakMinutes:0}),510);
+  assert.equal(automaticBreakMinutes(1320,1830),30);
+  assert.equal(cellMinutes(night()),480);assert.equal(cellMinutes({...night(),breakMinutes:0}),510);
   assert.deepEqual(normalizeCell({...night(),end:390}),night());
-  assert.equal(totalMinutes({cells:cells(night())}),450);
-  assert.equal(trainingMinutes({cells:cells({...night(),kind:'training'})}),450);
-  assert.equal(grandMinutes({cells:cells(night())}),450);
+  assert.equal(totalMinutes({cells:cells(night())}),480);
+  assert.equal(trainingMinutes({cells:cells({...night(),kind:'training'})}),480);
+  assert.equal(grandMinutes({cells:cells(night())}),480);
   for(const c of [{start:1440,end:1830},{start:-1,end:390},{end:1320},{end:3000},{end:-1},{breakMinutes:510}])assert.throws(()=>normalizeCell({...night(),...c}));
   for(const pair of [['22','22'],['22','23 +1'],['24','6'],['22','25'],['22','6h99']])assert.throws(()=>parseShiftTimes(...pair));
   assert.throws(()=>parseAvailability('22-6h30'),'availability still belongs to each calendar day');
@@ -26,12 +26,36 @@ test('nuit : poste commun, feuille et lecture photo cohérents',()=>{
   for(const department of DEPARTMENT_STYLES){
     assert.doesNotThrow(()=>validateAssignment(night(),department.key));
     const html=sheetHTML({department,weekStart:'2030-10-14',people:[{id:1,name:'Camille Nuit',group:'regular',availability:{}}],draft:{rows:[{personId:1,cells:cells(night())}],notes:''}});
-    assert.match(html,/06:30 \+1/);assert.match(html,/>Nuit<\/small>/);assert.match(html,/Grand total : 7,5 h/);assert.match(html,/\+1 : fin le lendemain/);assert.doesNotMatch(html,/30:30/);
+    assert.match(html,/06:30 \+1/);assert.match(html,/>Nuit<\/small>/);assert.match(html,/Grand total : 8 h/);assert.match(html,/\+1 : fin le lendemain/);assert.doesNotMatch(html,/30:30/);
   }
   assert.equal(cellDetail(night()),'Nuit');
   assert.ok(photoSchema.properties.rows.items.properties.days.items.properties.post.enum.includes('night'));
   for(const raw of ['22-6h30 Nuit','22:00 / 06:30 Nuit'])assert.deepEqual(normalizePhotoCell({...night(),end:390,breakMinutes:0,post:null},raw),night());
   assert.deepEqual(normalizePhotoCell({...night(),end:390,breakMinutes:0},''),night());
+});
+test('pause de nuit : anciens quarts recalculés sans changer les heures ni la règle de jour',()=>{
+  const legacy={...night(),breakMinutes:60},before=structuredClone(legacy);
+  assert.equal(cellMinutes(legacy),480);
+  assert.equal(totalMinutes({cells:cells(legacy)}),480);
+  assert.deepEqual(normalizeCell(legacy),night());
+  assert.deepEqual(legacy,before,'displaying a saved publication does not mutate it');
+  assert.equal(cellMinutes({...legacy,post:undefined}),480,'crossing midnight also qualifies without the night post');
+  assert.equal(automaticBreakMinutes(0,390,'night'),30,'night work after midnight');
+  assert.equal(automaticBreakMinutes(1320,1740),30,'a shorter overnight shift');
+  assert.equal(automaticBreakMinutes(1380,1395,'night'),0,'do not deduct more than the shift');
+  assert.equal(automaticBreakMinutes(420,930),60,'daytime rule unchanged');
+  assert.equal(automaticBreakMinutes(420,839),0,'short daytime shifts unchanged');
+  assert.equal(cellMinutes({kind:'shift',start:420,end:930,breakMinutes:60}),450);
+});
+test('pause de nuit : les dérogations manuelles restent explicites après sauvegarde et lecture',()=>{
+  for(const pause of [0,15,30,45,60]){
+    const c={...night(),breakMinutes:pause,breakOverride:true};
+    assert.deepEqual(normalizeCell(c),c);
+    assert.equal(cellMinutes(c),510-pause);
+    assert.deepEqual(normalizePhotoCell(c,''),c);
+  }
+  assert.equal(cellMinutes({...night(),breakMinutes:0}),510,'an existing zero is not silently replaced');
+  assert.equal(cellMinutes({...night(),breakMinutes:45}),465,'an existing custom pause is preserved');
 });
 test('nuit : disponibilité et chevauchement du lendemain, y compris dimanche',()=>{
   const p={id:1,name:'Camille',active:true,availability:{0:'22:00-24:00',1:'00:00-06:30',6:'J'}};
@@ -48,7 +72,7 @@ test('API : sauvegarde, publication, copie, conflits du lendemain et de la semai
   try{
     const meta=(await call('get','/api/departments/meta')).body,dept=meta.departments.find(d=>d.key==='epicerie'),other=meta.departments.find(d=>d.key==='viande');
     const person=(await call('post','/api/departments/people',{body:{name:'Camille Nuit',group:'regular',active:true,departments:[dept.id,other.id],availability:Object.fromEntries(Array.from({length:7},(_,d)=>[d,'J']))}})).body.id;
-    const draft={rows:[{personId:person,cells:cells({...night(),end:390})}],notes:'Conserver',manager:''};
+    const draft={rows:[{personId:person,cells:cells({...night(),end:390,breakMinutes:60})}],notes:'Conserver',manager:''};
     const params={id:dept.id,week};
     assert.equal((await call('put',route,{params,body:{revision:0,draft}})).code,200);
     let saved=(await call('get',route,{params})).body;
