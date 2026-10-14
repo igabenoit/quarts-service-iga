@@ -211,7 +211,7 @@ body{background:white}
 #copyWeekDestination{margin:14px 0 0}
 
 /* Absences and formation remain labelled when printed without colour. */
-.status-off{color:#344968!important}
+.status-off,.status-mobile{color:#344968!important}
 .status-vacation{color:#5b367d!important}
 .status-requested{color:#785500!important}
 .status-sick{color:#8c3443!important}
