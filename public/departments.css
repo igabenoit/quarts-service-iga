@@ -267,3 +267,5 @@ body{background:white}
 .compact-sheet .sheet-department-totals .grand-total{grid-column:1/-1}
 .compact-sheet .sheet-notes{min-height:35pt}
 .compact-sheet .sheet-notes p{min-height:20pt}
+
+.birthday-greeting{display:block;font-weight:700;color:#814000;font-size:.85em}.sheet-work .birthday-greeting{font-size:7px;line-height:1.1}
