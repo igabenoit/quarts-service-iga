@@ -1,42 +1,70 @@
-import {birthdayGreeting,DAY_NAMES,escapeHTML as e,dateLabel,addDays,timeLabel,hoursLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,cellDetail,isTimedCell,cellMinutes,cellLabel,cellTone} from './departments-core.js';
-const $=s=>document.querySelector(s);let listing,current,listSequence=0,scheduleSequence=0;
-async function api(path,options={}){const r=await fetch(path,{cache:'no-store',...options}),data=await r.json();if(r.status===401){$('#accessForm').hidden=false;$('#staffContent').hidden=true;throw Error('Entre ton code employé de six chiffres.');}if(!r.ok)throw Error(data.error||'Horaire indisponible.');return data;}
+import {escapeHTML as e,addDays,monday,today,hoursLabel} from './departments-core.js';
+import {availableWeeks,selectedWeek,weekInfo,weekRange,fullDate,personalDays} from './portal-weeks.js';
+const $=s=>document.querySelector(s);
+let listing=null,week=null,listSequence=0,scheduleSequence=0,loading=false;
 const status=text=>$('#status').textContent=text;
-async function load(){
-  const sequence=++listSequence;scheduleSequence++;$('#schedulePicker').disabled=true;$('#employeePicker').disabled=true;status('Actualisation…');
-  const previous=listing?.schedules[Number($('#schedulePicker').value)];
+async function api(path,options={}){
+  const response=await fetch(path,{cache:'no-store',...options}),data=await response.json();
+  if(!response.ok)throw Object.assign(Error(response.status===401?'Entre ton code employé de six chiffres.':data.error||'Horaire indisponible.'),{unauthorized:response.status===401});
+  return data;
+}
+function failed(error){
+  $('#personalSchedule').innerHTML='';
+  status(error.message+(error.unauthorized?'':' Aucun ancien horaire n’est affiché.'));
+  if(error.unauthorized){listing=null;week=null;$('#accessForm').hidden=false;$('#staffContent').hidden=true;}
+}
+function renderNavigation(){
+  const current=monday(listing.today),next=addDays(current,7),available=availableWeeks(listing);
+  for(const [id,value] of [['currentWeek',current],['nextWeek',next]]){
+    const info=weekInfo(value,listing.today),button=$('#'+id);
+    button.innerHTML=`<strong>${info.title}</strong><span>${weekRange(value)}</span><small>${available.includes(value)?'Horaire disponible':'Pas encore publié'}</small>`;
+    button.setAttribute('aria-pressed',String(week===value));
+    button.onclick=()=>chooseWeek(value);
+  }
+  const other=available.filter(w=>w!==current&&w!==next);
+  $('#otherWeeksLabel').hidden=!other.length;
+  $('#otherWeeks').innerHTML='<option value="">Autres semaines publiées…</option>'+other.map(w=>`<option value="${w}">${weekInfo(w,listing.today).title} · ${weekRange(w)}</option>`).join('');
+  $('#otherWeeks').value=other.includes(week)?week:'';
+  const info=weekInfo(week,listing.today);
+  $('#weekBanner').className='week-banner '+info.kind;
+  $('#weekBanner').innerHTML=`<p>VOUS CONSULTEZ</p><h2>${info.title}</h2><strong>${info.range}</strong><p>${info.note}</p>`;
+  $('#returnCurrent').hidden=week===current;
+  $('#employeeName').textContent=listing.employeeName||'Mon horaire personnel';
+}
+async function load({reset=false}={}){
+  const sequence=++listSequence;scheduleSequence++;loading=true;
+  $('#personalSchedule').innerHTML='';$('#weekControls').inert=true;$('#weekBanner').hidden=true;status('Actualisation des horaires…');
   try{
     const next=await api('/api/leave/department-schedules');if(sequence!==listSequence)return;
-    listing=next;$('#accessForm').hidden=true;$('#staffContent').hidden=false;
-    $('#schedulePicker').innerHTML=listing.schedules.map((s,i)=>`<option value="${i}">${e(s.name)} · ${dateLabel(s.weekStart)}</option>`).join('')||'<option value="">Aucun horaire publié pour le moment</option>';
-    const index=previous?listing.schedules.findIndex(s=>s.departmentId===previous.departmentId&&s.weekStart===previous.weekStart):-1;
-    if(index>=0)$('#schedulePicker').value=String(index);
-    $('#serviceLinks').innerHTML=listing.service.map(s=>`<a class="button quiet" href="${e(s.path)}">Semaine du ${dateLabel(s.weekStart)}</a>`).join('')||'<p>Aucun lien Service disponible.</p>';await loadSchedule();
-  }catch(error){if(sequence===listSequence){current=null;$('#personalSchedule').innerHTML='';status(error.message);}}
-  finally{if(sequence===listSequence){$('#schedulePicker').disabled=false;$('#employeePicker').disabled=!current;}}
+    next.today=next.today||today();week=selectedWeek(week,next,listing?.today,reset);listing=next;
+    $('#accessForm').hidden=true;$('#staffContent').hidden=false;$('#weekBanner').hidden=false;
+    renderNavigation();await loadSchedule();
+  }catch(error){if(sequence===listSequence)failed(error);}
+  finally{if(sequence===listSequence){loading=false;$('#weekControls').inert=false;}}
 }
+async function chooseWeek(value){if(loading||!listing)return;week=value;renderNavigation();await loadSchedule();}
 async function loadSchedule(){
-  const sequence=++scheduleSequence,index=$('#schedulePicker').value,previous=$('#employeePicker').value;
-  current=null;$('#employeePicker').disabled=true;$('#personalSchedule').innerHTML='';
-  const s=index===''?null:listing?.schedules[Number(index)];
-  if(!s){$('#employeePicker').innerHTML='<option value="">Aucun horaire disponible</option>';status('Aucun horaire publié pour le moment.');return;}
-  status('Chargement de l’horaire…');
+  const sequence=++scheduleSequence,chosen=week;
+  $('#personalSchedule').innerHTML='';status('Chargement de la semaine choisie…');
+  const sources=[...listing.schedules.filter(s=>s.weekStart===chosen).map(s=>({kind:'department',path:`/api/leave/department-schedules/${s.departmentId}/${chosen}`})),...listing.service.filter(s=>s.weekStart===chosen).map(s=>({kind:'service',path:'/api/public-schedules/'+encodeURIComponent(s.path.split('/').pop())}))];
+  if(!sources.length){status('');$('#personalSchedule').innerHTML=`<div class="empty-week"><h3>Horaire pas encore publié</h3><p>Aucun horaire personnel publié pour la période du ${weekRange(chosen)}.</p><p>Cela ne signifie pas que tu es en congé. Vérifie plus tard ou communique avec ton gérant.</p></div>`;return;}
   try{
-    const loaded=await api(`/api/leave/department-schedules/${s.departmentId}/${s.weekStart}`);if(sequence!==scheduleSequence)return;
-    current=loaded;document.body.className='theme-'+current.department.key;
-    $('#employeePicker').innerHTML='<option value="">Choisir mon nom</option>'+current.schedule.rows.map(r=>`<option value="${r.personId}">${e(r.name)}</option>`).join('');
-    if(current.schedule.rows.length===1)$('#employeePicker').value=String(current.schedule.rows[0].personId);else if(current.schedule.rows.some(r=>String(r.personId)===previous))$('#employeePicker').value=previous;status('');render();
-  }catch(error){if(sequence===scheduleSequence){current=null;$('#employeePicker').innerHTML='<option value="">Horaire indisponible</option>';status(error.message);}}
-  finally{if(sequence===scheduleSequence)$('#employeePicker').disabled=!current;}
+    const results=await Promise.all(sources.map(async s=>({...s,data:await api(s.path)})));
+    if(sequence!==scheduleSequence)return;
+    const days=personalDays(chosen,results),total=days.flatMap(d=>d.entries).reduce((n,c)=>n+(c.minutes||0),0);
+    $('#personalSchedule').innerHTML=`<p class="week-total"><strong>${hoursLabel(total)} h planifiées</strong> · Pauses déduites · Horaires publiés seulement</p><div class="personal-days">${days.map(day=>`<article class="portal-day${day.date===listing.today?' is-today':''}"><header><h3>${day.name}</h3><span>${fullDate(day.date)}</span>${day.date===listing.today?'<b class="today-tag">Aujourd’hui</b>':''}</header><div>${day.entries.map(c=>`<div class="portal-shift"><span class="department-tag">${e(c.department)}</span><strong>${e(c.hours)}</strong>${c.detail?`<span>${e(c.detail)}</span>`:''}${c.minutes!==null?`<small>${hoursLabel(c.minutes)} h</small>`:''}</div>`).join('')||'<p class="no-shift">Aucun quart inscrit dans les horaires publiés.</p>'}${day.birthday?'<p class="birthday-greeting">Bonne fête !</p>':''}</div></article>`).join('')}</div><p class="muted">+1 indique une fin le lendemain. Le quart figure au jour de son début.</p><p class="muted">Actualisé à ${new Date().toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})}. En cas de question, communique avec ton gérant.</p>`;
+    status('');
+    for(const r of results.filter(r=>r.kind==='service'))fetch(r.path+'/views',{method:'POST'}).catch(()=>{});
+  }catch(error){if(sequence===scheduleSequence)failed(error);}
 }
-function render(){
-  if(!current){$('#personalSchedule').innerHTML='';return;}
-  const row=current.schedule.rows.find(r=>String(r.personId)===$('#employeePicker').value);
-  if(!row){$('#personalSchedule').innerHTML='<p class="notice">Choisis ton nom pour voir tes journées.</p>';return;}
-  $('#personalSchedule').innerHTML=`<header class="personal-heading"><p class="eyebrow">${e(current.department.name)}</p><h2>${e(row.name)}</h2>${row.jobTitle?`<p class="person-job-title">${e(row.jobTitle)}</p>`:''}${row.specification?`<p class="person-specification">${e(row.specification)}</p>`:''}<p>Du ${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))} · <strong>${hoursLabel(totalMinutes(row))} h régulières</strong>${trainingMinutes(row)>0?`<br><span class="training-hours">Formation : ${hoursLabel(trainingMinutes(row))} h</span>`:''}${buffetMinutes(row)>0?`<br><span class="buffet-hours">Buffet : ${hoursLabel(buffetMinutes(row))} h</span>`:''}${kitchenMinutes(row)>0?`<br><span class="kitchen-hours">Cuisine : ${hoursLabel(kitchenMinutes(row))} h</span>`:''}</p></header><p id="weekScrollHint" class="week-scroll-hint">Lundi → dimanche · Fais défiler horizontalement pour voir toute la semaine.</p><div class="week-strip" role="region" aria-label="Horaire du lundi au dimanche" tabindex="0"><div class="week-cards">${row.cells.map((c,d)=>`<article class="day-card ${cellTone(c)}"><h3>${DAY_NAMES[d]} <span>${addDays(current.weekStart,d).slice(8)}</span></h3>${birthdayGreeting(row.birthdayMonthDay,addDays(current.weekStart,d))?'<p class="birthday-greeting">Bonne fête !</p>':''}<strong>${isTimedCell(c)?timeLabel(c.start)+' – '+timeLabel(c.end):c.kind==='off'?'Congé':c.kind==='blank'?'Aucun quart inscrit':e(cellLabel(c))}</strong>${isTimedCell(c)?`<p>${cellDetail(c)?e(cellDetail(c))+' · ':''}${hoursLabel(cellMinutes(c))} h</p>`:''}${c.note&&!isTimedCell(c)&&c.kind!=='note'?`<p>${e(c.note)}</p>`:''}</article>`).join('')}</div></div>${row.cells.some(c=>isTimedCell(c)&&c.end>1440)?'<p class="muted">+1 : le quart se termine le lendemain et figure au jour de son début.</p>':''}${current.schedule.notes?`<div class="notice"><strong>Notes de l’équipe</strong><p>${e(current.schedule.notes)}</p></div>`:''}<p class="muted">Publication : ${e(new Date(current.publishedAt).toLocaleString('fr-CA'))}. En cas de question, communique avec ton gérant.</p>`;
-}
-$('#accessForm').onsubmit=async event=>{event.preventDefault();const b=event.target.querySelector('button');b.disabled=true;try{await api('/api/employee-portal/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})});$('#staffCode').value='';await load();}catch(err){status(err.message);}finally{b.disabled=false;}};
-$('#schedulePicker').onchange=()=>loadSchedule().catch(err=>{current=null;$('#personalSchedule').innerHTML='';status(err.message);});$('#employeePicker').onchange=render;$('#refresh').onclick=()=>load().catch(err=>status(err.message));
-load().catch(err=>status(err.message));
-
-$('#logoutEmployee').onclick=async()=>{await api('/api/employee-portal/logout',{method:'POST'});location.reload();};
+$('#accessForm').onsubmit=async event=>{event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;try{await api('/api/employee-portal/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})});$('#staffCode').value='';await load({reset:true});}catch(error){status(error.message);}finally{button.disabled=false;}};
+$('#otherWeeks').onchange=event=>{if(event.target.value)chooseWeek(event.target.value);};
+$('#returnCurrent').onclick=()=>chooseWeek(monday(listing.today));
+$('#refresh').onclick=()=>load();
+$('#logoutEmployee').onclick=async()=>{listSequence++;scheduleSequence++;$('#personalSchedule').innerHTML='';try{await api('/api/employee-portal/logout',{method:'POST'});location.reload();}catch(error){failed(error);}};
+// A saved icon, a restored tab or a new Monday always returns to the current week.
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&listing)load({reset:true});});
+window.addEventListener('pageshow',event=>{if(event.persisted)load({reset:true});});
+let observedDate=today();
+setInterval(()=>{const date=today();if(date!==observedDate){observedDate=date;if(listing)load({reset:true});}},60000);
+load();

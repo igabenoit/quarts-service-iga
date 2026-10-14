@@ -37,11 +37,10 @@
       </section>
 
       <section class="card share-card">
-        <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Lien de l’horaire de cette semaine</h2><p>Lecture seule, adapté au téléphone. Les changements de quarts apparaissent dès que l’employé actualise la page. Un code commun est requis en plus du lien.</p></div>
-        <label for="shareCode">Code commun des employés (6 à 12 chiffres)</label><input id="shareCode" type="password" inputmode="numeric" pattern="[0-9]{6,12}" autocomplete="new-password" placeholder="Choisir un code à partager">
-        <div class="share-actions"><button id="createShareLink" type="button">Créer le lien</button><button id="changeShareCode" type="button" class="secondary" hidden>Changer le code</button><button id="copyShareLink" type="button" class="secondary" hidden>Copier le lien</button><button id="revokeShareLink" type="button" class="danger" hidden>Désactiver le lien</button></div>
+        <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Publication dans le portail employés</h2><p>Publie la semaine choisie quand elle est prête. Le lien et le QR restent toujours les mêmes; chaque employé utilise son code personnel. Les changements de quarts sont visibles à l’actualisation.</p></div>
+        <div class="share-actions"><button id="createShareLink" type="button">Publier cette semaine</button><button id="copyShareLink" type="button" class="secondary">Copier le lien permanent</button><button id="revokeShareLink" type="button" class="danger" hidden>Retirer cette semaine du portail</button></div>
         <output id="shareLinkDisplay" aria-live="polite"></output>
-        <div class="view-dashboard"><div class="view-dashboard-header"><div><h3>Consultation des horaires</h3><p>Un nom sélectionné avec le code commun ne confirme pas l’identité de la personne.</p></div><button id="refreshScheduleViews" type="button" class="secondary">Actualiser le suivi</button></div><div id="scheduleViews" aria-live="polite">Chargement…</div></div>
+        <div class="view-dashboard"><div class="view-dashboard-header"><div><h3>Consultation des horaires</h3><p>Consultations avec le code personnel de l’employé. Cela ne garantit pas qu’il a mémorisé tous ses quarts.</p></div><button id="refreshScheduleViews" type="button" class="secondary">Actualiser le suivi</button></div><div id="scheduleViews" aria-live="polite">Chargement…</div></div>
       </section>
 
       <section class="summary-grid">

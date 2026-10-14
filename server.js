@@ -603,12 +603,10 @@ app.get("/api/weeks/:weekStart/share-link", requireManager, async (request, resp
 app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
   try {
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
-    const code = String(request.body?.code || "").trim();
-    if (!/^\d{6,12}$/.test(code)) return response.status(400).json({ error: "Choisis un code numérique de 6 à 12 chiffres." });
     await ensureWeek(request.params.weekStart);
     const token = crypto.randomBytes(32).toString("base64url");
     const result = await pool.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
-      ON CONFLICT (week_start) DO UPDATE SET access_code_hash=EXCLUDED.access_code_hash RETURNING token`, [request.params.weekStart,token,staffCodeHash(code)]);
+      ON CONFLICT (week_start) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'']);
     response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}` });
   } catch { response.status(500).json({ error: "Impossible de créer le lien." }); }
 });
@@ -681,7 +679,7 @@ app.post("/api/public-schedules/:token/access", sameOrigin, employeePortal.login
 app.get("/h/:token", (request, response) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).send("Lien invalide.");
   response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" });
-  response.sendFile("horaire.html", { root: "public" });
+  response.redirect(302,"/horaires-departements");
 });
 
 app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
