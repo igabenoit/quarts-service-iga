@@ -29,7 +29,9 @@ test('PDF eligibility follows measured content, not employee count; real overflo
     assert.equal(sheetOverflowMessage(sheet),'');
     bottom=1320;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);bottom=1300;
     paragraphBottom=1400;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);paragraphBottom=1300;
-    text.scrollHeight=50;assert.match(sheetOverflowMessage(sheet),/dépasse une case/);text.scrollHeight=40;
+    text.scrollHeight=50;assert.match(sheetOverflowMessage(sheet),/dépasse une case/);
+    text.closest=()=>({querySelector:()=>({childNodes:[{textContent:' Alexandra Exemple '}]})});
+    assert.match(sheetOverflowMessage(sheet),/pour « Alexandra Exemple »/);text.scrollHeight=40;
     text.scrollWidth=100;assert.match(sheetOverflowMessage(sheet),/dépasse une case/);text.scrollWidth=90;
     sheet.scrollHeight=1400;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);
   }finally{if(previous===undefined)delete globalThis.getComputedStyle;else globalThis.getComputedStyle=previous;}

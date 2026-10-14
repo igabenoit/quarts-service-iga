@@ -6,7 +6,7 @@ import vm from 'node:vm';
 // Run the actual mail/navigation handlers with a small DOM and simulated services.
 const source=readFileSync(new URL('../public/departments.js',import.meta.url),'utf8');
 const start=source.lastIndexOf('\n}',source.indexOf('let departmentMailSettings'))+2;
-const handlers=source.slice(start,source.indexOf("$('#weekPicker').value=monday(today())"));
+const handlers=source.slice(start,source.indexOf('const initialSelection='));
 function fixture(){
   const elements=new Map();
   const $=id=>{if(!elements.has(id))elements.set(id,{value:'',disabled:false,open:false,events:{},addEventListener(type,fn){(this.events[type]??=[]).push(fn);},showModal(){this.open=true;},close(){this.open=false;}});return elements.get(id);};

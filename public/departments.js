@@ -5,22 +5,30 @@ const message=v=>$('#appMessage').textContent=v;
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous depuis le lien « Connexion » en haut de la page.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
 const displayDraft=()=>orderDraft(mergeIncoming(current.draft,current.incoming||[]),current.people,selectedDepartment);
-const route=()=>`/api/departments/${selectedDepartment}/weeks/${$('#weekPicker').value}`;
+// Writes always target the sheet actually loaded, never a picker being edited.
+const route=()=>`/api/departments/${current.department.id}/weeks/${current.weekStart}`;
+let weekLocks=0,weekLoading=false,savingDraft;
+async function withWeekLock(action){weekLocks++;$('#managerContent').inert=true;try{return await action();}finally{weekLocks--;$('#managerContent').inert=weekLocks>0||weekLoading;}}
 function markDirty(){dirty=true;$('#draftStatus').textContent='Modifications à enregistrer.';$('#verified').checked=false;$('#warningsReviewed').checked=false;}
-function mayLeave(){return !dirty||confirm('Des modifications ne sont pas enregistrées. Quitter cette feuille sans les enregistrer?');}
+function mayLeave(){return !weekLocks&&!weekLoading&&(!dirty||confirm('Des modifications ne sont pas enregistrées. Quitter cette feuille sans les enregistrer?'));}
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 function formatCell(c){return isTimedCell(c)?`${c.post==='cut_fruit'?'Fruits coupés · ':''}${cellDetail(c)?cellDetail(c)+' · ':''}${timeLabel(c.start)}–${timeLabel(c.end)}`:cellLabel(c)||'+';}
 function renderNavigation(){
   $('#departmentNav').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<button class="theme-${e(d.key)}" data-department="${d.id}" aria-current="${d.id===selectedDepartment}">${e(d.name)}</button>`).join('');
-  $('#departmentNav').querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(!mayLeave())return;selectedDepartment=Number(b.dataset.department);dirty=false;activePhoto=null;$('#photoReview').hidden=true;try{await loadWeek();}catch(err){message(err.message);}});
+  $('#departmentNav').querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(!mayLeave())return;try{await loadWeek({departmentId:Number(b.dataset.department)});}catch(err){message(err.message);}});
 }
 async function loadMeta(){meta=await api('/api/departments/meta');if(!meta.departments.some(d=>d.id===selectedDepartment))selectedDepartment=meta.departments.find(d=>d.key==='boulangerie')?.id||meta.departments.find(d=>d.key!=='service')?.id;renderNavigation();}
-async function loadWeek(){
-  const sequence=++loadSequence;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(route());if(sequence!==loadSequence)return;current=loaded;dirty=false;lastPaste=null;document.body.className='theme-'+current.department.key;
+async function loadWeek({departmentId=selectedDepartment,weekStart=current?.weekStart||$('#weekPicker').value}={}){
+  const sequence=++loadSequence;weekLoading=true;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(`/api/departments/${departmentId}/weeks/${weekStart}`);if(sequence!==loadSequence)return;
+  const changed=!current||current.department.id!==loaded.department.id||current.weekStart!==loaded.weekStart;
+  current=loaded;selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;dirty=false;lastPaste=null;
+  if(window.location?.href&&window.history){const url=new URL(window.location.href);url.searchParams.set('department',String(selectedDepartment));url.searchParams.set('week',current.weekStart);window.history.replaceState(null,'',url);}
+  if(changed){activePhoto=null;photoLoadSequence++;clearTimeout(photoPollTimer);$('#photoReview').hidden=true;$('#historyList').innerHTML='';}
+  document.body.className='theme-'+current.department.key;
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
   $('#sheetManager').value=current.draft.manager;$('#sheetNotes').value=current.draft.notes;
   $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
-  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();message('');}finally{if(sequence===loadSequence)$('#managerContent').inert=false;}
+  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();message('');}catch(error){if(sequence===loadSequence&&current){selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;renderNavigation();}throw error;}finally{if(sequence===loadSequence){weekLoading=false;$('#managerContent').inert=weekLocks>0;}}
 }
 function renderWarnings(){const warnings=current.warnings||[];$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
 function renderSchedule(){
@@ -48,7 +56,7 @@ $('#cellPost').onchange=()=>{if(['buffet','kitchen'].includes($('#cellPost').val
 $('#cellTraining').onchange=()=>{if($('#cellTraining').checked&&['buffet','kitchen'].includes($('#cellPost').value))$('#cellPost').value='';previewShift();};
 let transferSource;
 function openTransfer(item,day){transferSource=item;$('#transferDescription').textContent=departmentLabel(item.sourceDepartment)+' · '+DAY_NAMES[item.day]+'. Le quart reçu se modifie dans cet horaire d’origine. Ses heures sont comptées uniquement en '+current.department.name+'.';$('#transferDialog').showModal();}
-$('#openTransferSource').onclick=async()=>{if(!mayLeave())return;$('#transferDialog').close();selectedDepartment=transferSource.sourceDepartmentId;copiedShift=null;dirty=false;try{await loadWeek();}catch(err){message(err.message);}};
+$('#openTransferSource').onclick=async()=>{if(!mayLeave())return;$('#transferDialog').close();copiedShift=null;try{await loadWeek({departmentId:transferSource.sourceDepartmentId});}catch(err){message(err.message);}};
 $('#cellForm').onsubmit=event=>{event.preventDefault();try{saveCellForm();}catch(err){$('#cellError').textContent=err.message;}};
 function cellFromForm(){
   const kind=$('#cellKind').value==='shift'?($('#cellTraining').checked?'training':Object.hasOwn(KITCHEN_POSTS,$('#cellPost').value)?'kitchen':['buffet','kitchen'].includes($('#cellPost').value)?$('#cellPost').value:'shift'):$('#cellKind').value,times=isTimedCell({kind})?parseShiftTimes($('#cellStart').value,$('#cellEnd').value):{};
@@ -92,7 +100,16 @@ document.addEventListener('keydown',event=>{
 });
 
 
-async function saveDraft(){const result=await api(route(),{method:'PUT',body:JSON.stringify({revision:current.revision,draft:current.draft})});current.revision=result.revision;dirty=false;await loadWeek();return result;}
+async function saveDraft(){
+  if(savingDraft)return savingDraft;
+  savingDraft=withWeekLock(async()=>{
+    const result=await api(route(),{method:'PUT',body:JSON.stringify({revision:current.revision,draft:current.draft})});
+    current.revision=result.revision;dirty=false;$('#draftStatus').textContent='Brouillon enregistré.';
+    try{await loadWeek();}catch(error){throw Error('Le brouillon est enregistré, mais son actualisation a échoué. '+error.message);}
+    return result;
+  });
+  try{return await savingDraft;}finally{savingDraft=null;}
+}
 $('#saveDraft').onclick=async()=>{try{await saveDraft();message('Brouillon enregistré.');}catch(err){message(err.message);}};
 $('#copyWeek').onclick=async()=>{
   const button=$('#copyWeek');button.disabled=true;
@@ -130,7 +147,7 @@ $('#copyWeekForm').onsubmit=async event=>{
   try{
     await post(`/api/departments/${source.departmentId}/weeks/${target.weekStart}/copy`,{sourceWeek:source.weekStart,sourceRevision:source.revision,revision:target.revision,replaceConfirmed:$('#copyWeekReplace').checked});
     $('#copyWeekDialog').close();selectedDepartment=source.departmentId;$('#weekPicker').value=target.weekStart;copiedShift=null;activePhoto=null;$('#photoReview').hidden=true;
-    await loadWeek();message('Semaine copiée et enregistrée en brouillon. Ajustez les journées qui changent, puis publiez l’horaire.');
+    await loadWeek({departmentId:source.departmentId,weekStart:target.weekStart});message('Semaine copiée et enregistrée en brouillon. Ajustez les journées qui changent, puis publiez l’horaire.');
   }catch(err){$('#copyWeekError').textContent=err.message;message(err.message);}
   finally{weekCopyBusy=false;$('#copyWeekFields').disabled=false;$('#closeCopyWeek').disabled=false;$('#confirmCopyWeek').disabled=!weekCopyTarget||(weekCopyTarget.revision>0&&!$('#copyWeekReplace').checked);}
 };
@@ -141,8 +158,16 @@ $('#publishWeek').onclick=async()=>{
   const verified=$('#verified').checked,reviewed=$('#warningsReviewed').checked;if(!verified){message('Cochez la vérification des noms, de la semaine, des heures et des pauses.');return;}
   const button=$('#publishWeek');button.disabled=true;try{if(dirty){await saveDraft();$('#verified').checked=verified;$('#warningsReviewed').checked=reviewed;}await post(route()+'/publish',{revision:current.revision,verified,warningsReviewed:reviewed});await loadWeek();message('Horaire publié. Il est maintenant disponible dans le portail employés.');}catch(err){message(err.message);const fresh=await api(route()).catch(()=>null);if(fresh){current.warnings=fresh.warnings;renderWarnings();}}finally{button.disabled=false;$('#managerContent').inert=false;}
 };
-$('#unpublishWeek').onclick=async()=>{if(!confirm('Retirer les quarts saisis dans cet horaire du portail employés? Le brouillon restera disponible. Les quarts reçus dépendent de la publication de leur département d’origine.'))return;try{await post(route()+'/unpublish',{revision:current.revision});await loadWeek();message('Les quarts saisis ici sont retirés de l’affichage en ligne. Les quarts reçus suivent la publication de leur département d’origine.');}catch(err){message(err.message);}};
-$('#loadHistory').onclick=async()=>{try{const data=await api(route()+'/history');$('#historyList').innerHTML=data.history.map(h=>`<p>Version ${h.revision} · ${e(new Date(h.created_at).toLocaleString('fr-CA'))} <button class="quiet" data-restore="${h.id}">Rétablir ce brouillon</button></p>`).join('')||'<p>Aucune version précédente.</p>';$('#historyList').querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(!mayLeave())return;try{await post(route()+'/restore',{revision:current.revision,historyId:Number(b.dataset.restore)});await loadWeek();message('Version rétablie en brouillon. L’horaire publié reste inchangé.');}catch(err){message(err.message);}});}catch(err){message(err.message);}};
+$('#unpublishWeek').onclick=async()=>{if(!confirm('Retirer les quarts saisis dans cet horaire du portail employés? Les modifications seront enregistrées et le brouillon restera disponible. Les quarts reçus dépendent de la publication de leur département d’origine.'))return;try{if(dirty)await saveDraft();const result=await post(route()+'/unpublish',{revision:current.revision});current.revision=result.revision;current.publishedAt=null;await loadWeek();message('Les quarts saisis ici sont retirés de l’affichage en ligne. Les quarts reçus suivent la publication de leur département d’origine.');}catch(err){message(err.message);}};
+async function restoreDraft(historyId){
+  if(!mayLeave())return;
+  let restored=false;
+  return withWeekLock(async()=>{try{
+    await post(route()+'/restore',{revision:current.revision,historyId});restored=true;
+    await loadWeek();message('Version rétablie en brouillon. L’horaire publié reste inchangé.');
+  }catch(err){message(restored?'La version est rétablie sur le serveur, mais son affichage n’a pas pu être actualisé. Actualisez la feuille avant de poursuivre. '+err.message:err.message);}});
+}
+$('#loadHistory').onclick=async()=>{try{const data=await api(route()+'/history');$('#historyList').innerHTML=data.history.map(h=>`<p>Version ${h.revision} · ${e(new Date(h.created_at).toLocaleString('fr-CA'))} <button class="quiet" data-restore="${h.id}">Rétablir ce brouillon</button></p>`).join('')||'<p>Aucune version précédente.</p>';$('#historyList').querySelectorAll('button').forEach(b=>b.onclick=()=>restoreDraft(Number(b.dataset.restore)));}catch(err){message(err.message);}};
 function renderPeople(){
   const query=nameKey($('#personSearch').value),people=meta.people.filter(p=>query?nameKey(p.name+' '+(p.jobTitle||'')+' '+(p.specification||'')+' '+p.email).includes(query):p.departments.includes(selectedDepartment)).sort((a,b)=>comparePeople(a,b,selectedDepartment));
   $('#peopleList').innerHTML=people.map(p=>`<article class="person-card"><h3>${e(p.name)}</h3>${p.jobTitle?`<p class="person-job-title">${e(p.jobTitle)}</p>`:''}${p.specification?`<p class="person-specification">${e(p.specification)}</p>`:''}<p>${p.active?'Actif':'Inactif'} · ${p.group==='regular'?'Régulier':'Temps partiel'}</p><p>Priorité : ${p.displayPriorities?.[selectedDepartment]??'—'}</p><p>Ancienneté : <strong>${e(tenure(p.seniorityDate))}</strong><br>${e(dateLabel(p.seniorityDate))}</p><p>Anniversaire : ${p.birthday?e(dateLabel(p.birthday)):'À compléter'}</p><p>${e(p.email||'Courriel à compléter')}</p><p>${e(p.departments.map(id=>meta.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · '))}</p><button data-person="${p.id}" class="button quiet">Ouvrir la fiche</button></article>`).join('')||'<p class="notice">Aucune fiche pour ce département. Ajoutez les employés progressivement; les renseignements inconnus peuvent rester vides.</p>';
@@ -175,7 +200,20 @@ function previewAvailability(card){
   }catch(error){input.setCustomValidity(error.message);input.setAttribute('aria-invalid','true');preview.textContent=error.message;preview.dataset.invalid='true';card.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed','false'));}
 }
 $('#newPerson').onclick=()=>openPerson();$('#personSearch').oninput=renderPeople;
-$('#personForm').onsubmit=async event=>{event.preventDefault();const b={name:$('#personName').value,jobTitle:$('#personJobTitle').value,specification:$('#personSpecification').value,seniorityDate:$('#personSeniority').value,birthday:$('#personBirthday').value,email:$('#personEmail').value,group:$('#personGroup').value,sourceNote:$('#personSource').value,seniorityVerified:$('#personVerified').checked,active:$('#personActive').checked,distinctPerson:$('#distinctPerson').checked,departments:[...$('#personDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),availability:Object.fromEntries([...$('#personAvailability').querySelectorAll('input')].map(i=>[i.dataset.day,i.value])),version:editingPerson?.version};try{b.displayPriorities=Object.fromEntries([...$('#personPriorities').querySelectorAll('input:not(:disabled)')].filter(i=>i.value!==''&&(b.group!==editingPerson?.group||Number(i.value)!==editingPerson?.displayPriorities?.[i.dataset.priority])).map(i=>[i.dataset.priority,Number(i.value)]));b.availability=normalizeAvailability(b.availability);await api('/api/departments/people'+(editingPerson?'/'+editingPerson.id:''),{method:editingPerson?'PUT':'POST',body:JSON.stringify(b)});$('#personDialog').close();await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;renderPeople();renderSchedule();renderPrint();message(editingPerson?'Fiche enregistrée.'+(current.publishedAt?' Publiez à nouveau l’horaire pour actualiser les renseignements affichés aux employés.':''):'Fiche enregistrée. Dans l’horaire, utilisez « Actualiser la liste d’employés » pour l’ajouter à la feuille.');}catch(err){$('#personError').textContent=err.message;}};
+let personSaving=false;
+$('#personDialog').addEventListener('cancel',event=>{if(personSaving)event.preventDefault();});
+$('#personForm').onsubmit=async event=>{
+  event.preventDefault();if(personSaving)return;
+  const person=editingPerson,b={name:$('#personName').value,jobTitle:$('#personJobTitle').value,specification:$('#personSpecification').value,seniorityDate:$('#personSeniority').value,birthday:$('#personBirthday').value,email:$('#personEmail').value,group:$('#personGroup').value,sourceNote:$('#personSource').value,seniorityVerified:$('#personVerified').checked,active:$('#personActive').checked,distinctPerson:$('#distinctPerson').checked,departments:[...$('#personDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),availability:Object.fromEntries([...$('#personAvailability').querySelectorAll('input')].map(i=>[i.dataset.day,i.value])),version:person?.version};
+  let saved=false;personSaving=true;$('#personDialog').inert=true;$('#personError').textContent='Enregistrement…';
+  await withWeekLock(async()=>{try{
+    b.displayPriorities=Object.fromEntries([...$('#personPriorities').querySelectorAll('input:not(:disabled)')].filter(i=>i.value!==''&&(b.group!==person?.group||Number(i.value)!==person?.displayPriorities?.[i.dataset.priority])).map(i=>[i.dataset.priority,Number(i.value)]));b.availability=normalizeAvailability(b.availability);
+    await api('/api/departments/people'+(person?'/'+person.id:''),{method:person?'PUT':'POST',body:JSON.stringify(b)});saved=true;$('#personDialog').close();
+    await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;renderPeople();renderSchedule();renderPrint();
+    message(person?'Fiche enregistrée.'+(current.publishedAt?' Publiez à nouveau l’horaire pour actualiser les renseignements affichés aux employés.':''):'Fiche enregistrée. Dans l’horaire, utilisez « Actualiser la liste d’employés » pour l’ajouter à la feuille.');
+  }catch(err){if(saved)message('La fiche est enregistrée, mais son actualisation a échoué. Réessayez « Actualiser » sans recréer la fiche. '+err.message);else $('#personError').textContent=err.message;}
+  finally{personSaving=false;$('#personDialog').inert=false;}});
+};
 function renderPrint(){if(!current)return;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='';const html=sheetHTML({department:current.department,weekStart:current.weekStart,people:current.people,draft:displayDraft(),blank:$('#printKind').value==='blank'});$('#printPreview').innerHTML=html;$('#printRoot').innerHTML=html;const count=$('#printPreview').querySelectorAll('.sheet-person').length;$('#printNotice').hidden=count<=PRINT_ROW_CAPACITY;$('#printNotice').textContent=count>PRINT_ROW_CAPACITY?`${count} employés : la mise en page est ajustée pour la feuille légale. Tous les noms sont conservés.`:'';$('#printSheet').disabled=false;}
 let generatedPdfUrl;
 $('#printKind').onchange=()=>{renderPrint();$('#pdfResult').hidden=true;};
@@ -193,8 +231,8 @@ $('#printSheet').onclick=async()=>{
   }catch(error){$('#pdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}
   finally{button.disabled=false;$('#managerContent').inert=false;}
 };
-async function loadPhotos(){const result=await api(`/api/departments/photos?departmentId=${selectedDepartment}&weekStart=${current.weekStart}`);$('#photoList').innerHTML=result.photos.map(p=>`<button class="quiet" data-photo="${p.id}">${e(p.name)}${p.analyzed?' · transcription disponible':''}</button>`).join('')||'<p>Aucune photo pour cette semaine.</p>';$('#photoList').querySelectorAll('button').forEach(b=>b.onclick=()=>openPhoto(Number(b.dataset.photo)));$('#visionStatus').textContent=meta.visionConfigured?'La lecture automatique utilise OpenAI. En choisissant « Proposer une transcription », vous lui transmettez cette photo et les noms de l’équipe pour préparer un brouillon à vérifier.':'Le dépôt et la comparaison des photos sont disponibles. La transcription automatique attend la configuration de la connexion IA sur le serveur.';renderPhotoState();}
-$('#photoInput').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>8*1024*1024){$('#photoStatus').textContent='Photo trop lourde : choisissez une image de moins de 8 Mo.';return;}try{$('#photoStatus').textContent='Enregistrement de la photo…';const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});const result=await post('/api/departments/photos',{departmentId:selectedDepartment,weekStart:current.weekStart,name:file.name,dataUrl});await loadPhotos();await openPhoto(result.id);$('#photoStatus').textContent='Photo enregistrée. Vérifiez qu’elle montre toute la feuille, y compris les noms et les dates.';}catch(err){$('#photoStatus').textContent=err.message;}finally{event.target.value='';}};
+async function loadPhotos(){const sequence=loadSequence;const result=await api(`/api/departments/photos?departmentId=${selectedDepartment}&weekStart=${current.weekStart}`);if(sequence!==loadSequence)return;$('#photoList').innerHTML=result.photos.map(p=>`<button class="quiet" data-photo="${p.id}">${e(p.name)}${p.analyzed?' · transcription disponible':''}</button>`).join('')||'<p>Aucune photo pour cette semaine.</p>';$('#photoList').querySelectorAll('button').forEach(b=>b.onclick=()=>openPhoto(Number(b.dataset.photo)));$('#visionStatus').textContent=meta.visionConfigured?'La lecture automatique utilise OpenAI. En choisissant « Proposer une transcription », vous lui transmettez cette photo et les noms de l’équipe pour préparer un brouillon à vérifier.':'Le dépôt et la comparaison des photos sont disponibles. La transcription automatique attend la configuration de la connexion IA sur le serveur.';renderPhotoState();}
+$('#photoInput').onchange=async event=>{const file=event.target.files[0];if(!file||weekLocks||weekLoading)return;if(file.size>8*1024*1024){$('#photoStatus').textContent='Photo trop lourde : choisissez une image de moins de 8 Mo.';event.target.value='';return;}const departmentId=current.department.id,weekStart=current.weekStart;await withWeekLock(async()=>{try{$('#photoStatus').textContent='Enregistrement de la photo…';const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});const result=await post('/api/departments/photos',{departmentId,weekStart,name:file.name,dataUrl});await loadPhotos();await openPhoto(result.id);$('#photoStatus').textContent='Photo enregistrée. Vérifiez qu’elle montre toute la feuille, y compris les noms et les dates.';}catch(err){$('#photoStatus').textContent=err.message;}finally{event.target.value='';}});};
 let photoLoadSequence=0,photoPollTimer;
 async function openPhoto(id){const sequence=++photoLoadSequence;try{const photo=await api('/api/departments/photos/'+id);if(sequence!==photoLoadSequence)return;activePhoto=photo;$('#photoReview').hidden=false;$('#photoImage').src=activePhoto.dataUrl;$('#largePhoto').src=activePhoto.dataUrl;$('#photoStatus').textContent='';renderCandidate();renderPhotoState();}catch(err){if(sequence===photoLoadSequence)$('#photoStatus').textContent=err.message;}}
 function renderPhotoState(){
@@ -308,6 +346,10 @@ async function switchView(next){view=next;document.querySelectorAll('.view').for
 document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===next)));if(next==='print')renderPrint();if(next==='people'){await loadMeta();renderPeople();}if(next==='photos')await loadPhotos();if(next==='mail')await loadMailSettings();}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view).catch(err=>message(err.message)));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{if(b.dataset.close==='documentMailDialog'&&mailBusy)return;$('#'+b.dataset.close).close();});
-$('#weekPicker').value=monday(today());$('#weekPicker').onchange=async()=>{if(!mayLeave()){$('#weekPicker').value=current.weekStart;return;}if(!$('#weekPicker').value)return;$('#weekPicker').value=monday($('#weekPicker').value);dirty=false;activePhoto=null;clearTimeout(photoPollTimer);$('#photoReview').hidden=true;try{await loadWeek();}catch(err){message(err.message);}};
-$('#refreshWeek').onclick=async()=>{if(!mayLeave())return;try{await loadMeta();await loadWeek();}catch(err){message(err.message);}};
+const initialSelection=new URLSearchParams(window.location?.search||'');selectedDepartment=Number(initialSelection.get('department'))||undefined;
+try{$('#weekPicker').value=monday(initialSelection.get('week')||today());}catch{$('#weekPicker').value=monday(today());}
+$('#weekPicker').onchange=async()=>{if(!$('#weekPicker').value||!mayLeave()){$('#weekPicker').value=current.weekStart;return;}try{await loadWeek({weekStart:monday($('#weekPicker').value)});}catch(err){message(err.message);}};
+$('#refreshWeek').onclick=async()=>{if(!mayLeave())return;return withWeekLock(async()=>{try{await loadMeta();await loadWeek();}catch(err){message(err.message);}});};
+// Keep a whole save/publish/copy sequence locked, including the refresh after saving.
+for(const id of ['saveDraft','copyWeek','syncRoster','publishWeek','unpublishWeek','loadHistory']){const button=$('#'+id),handler=button.onclick;button.onclick=async event=>{if(weekLocks||weekLoading)return;return withWeekLock(()=>handler(event));};}
 try{await loadMeta();await loadWeek();$('#managerContent').hidden=false;}catch(err){message(err.message);}

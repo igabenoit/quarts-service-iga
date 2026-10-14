@@ -16,7 +16,8 @@ export function sheetOverflowMessage(sheet){
   const safeBottom=bounds.bottom-parseFloat(getComputedStyle(sheet).paddingBottom);
   const notes=sheet.querySelector('.sheet-notes');
   if(sheet.scrollHeight>sheet.clientHeight+2||notes.getBoundingClientRect().bottom>safeBottom+2||notes.querySelector('p').getBoundingClientRect().bottom>safeBottom+2)return 'Le contenu dépasse la page légale. Raccourcissez les notes ou précisions avant de préparer le PDF. Aucun employé ne sera coupé.';
-  if([...sheet.querySelectorAll('.sheet-work,.sheet-person-label,.sheet-day-detail span')].some(el=>el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2))return 'Un texte dépasse une case. Raccourcissez les titres, précisions ou notes avant de préparer le PDF. Aucun employé ne sera coupé.';
+  const overflow=[...sheet.querySelectorAll('.sheet-work,.sheet-person-label,.sheet-day-detail span')].find(el=>el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2);
+  if(overflow){const label=overflow.closest?.('.sheet-person')?.querySelector('.sheet-person-label'),name=label?.childNodes?.[0]?.textContent?.trim();return `Un texte dépasse une case${name?' pour « '+name+' »':''}. Raccourcissez les titres, précisions ou notes avant de préparer le PDF. Aucun employé ne sera coupé.`;}
   return '';
 }
 export async function schedulePDF(sheet,{label}={}){
