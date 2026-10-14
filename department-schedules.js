@@ -83,13 +83,34 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   async function warningsFor(current,client=pool){
     const display=mergeIncoming(current.draft,current.incoming);
     const warnings=draftWarnings(display,current.people);
-    const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start=$1 AND department_id<>$2 AND published IS NOT NULL',[current.weekStart,current.department.id])).rows;
-    for(const row of display.rows)for(const other of others){const match=other.published.rows.find(r=>r.personId===row.personId);if(match)for(let day=0;day<7;day++){const a=row.cells[day],b=match.cells[day];if(isTimedCell(a)&&isTimedCell(b)&&(a.sourceDepartment||current.department.key)!==other.key&&a.start<b.end&&b.start<a.end)warnings.push(`${current.people.find(p=>p.id===row.personId)?.name||'Employé retiré'} : chevauchement avec ${other.name}, le ${addDays(current.weekStart,day)}.`);}}
+    // Compare real intervals, including Sunday nights across the week boundary.
+    const minute=(date,n=0)=>Date.parse(iso(date)+'T00:00:00Z')/60000+Number(n);
+    const overlaps=(start,end,otherStart,otherEnd)=>start<otherEnd&&otherStart<end;
+    const previous=addDays(current.weekStart,-7),next=addDays(current.weekStart,7);
+    const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.week_start,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start BETWEEN $1 AND $2 AND (week_start<>$3 OR department_id<>$4) AND published IS NOT NULL',[previous,next,current.weekStart,current.department.id])).rows;
+    for(const row of display.rows)for(let day=0;day<7;day++){
+      const c=row.cells[day];if(!isTimedCell(c))continue;
+      const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
+      for(const other of others){
+        if(iso(other.week_start)===current.weekStart&&(c.sourceDepartment||current.department.key)===other.key)continue;
+        const match=other.published.rows.find(r=>r.personId===row.personId);if(!match)continue;
+        if(match.cells.some((cell,d)=>isTimedCell(cell)&&overlaps(start,end,minute(other.week_start,d*1440+cell.start),minute(other.week_start,d*1440+cell.end))))warnings.push((current.people.find(p=>p.id===row.personId)?.name||'Employé retiré')+' : chevauchement avec '+other.name+', le '+date+'.');
+      }
+    }
     const relevantKeys=[...new Set([current.department.key,...display.rows.flatMap(r=>r.cells.flatMap(c=>[c.workDepartment,c.sourceDepartment].filter(Boolean)))])];
-    const leaves=(await client.query("SELECT l.employee_name,l.periods,l.effective_periods,d.schedule_key AS key FROM schedule_leave_requests l JOIN schedule_leave_departments d ON d.id=l.department_id WHERE d.schedule_key=ANY($1::text[]) AND l.status='approved' AND l.is_test=FALSE AND l.archived_at IS NULL AND l.first_date<=$3 AND l.last_date>=$2",[relevantKeys,current.weekStart,addDays(current.weekStart,6)])).rows;
-    for(const row of display.rows){const p=current.people.find(p=>p.id===row.personId);if(!p)continue;for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)))for(let day=0;day<7;day++){const c=row.cells[day];if(isTimedCell(c)&&[current.department.key,c.workDepartment,c.sourceDepartment].includes(leave.key)&&(leave.effective_periods||leave.periods).some(l=>l.date===addDays(current.weekStart,day)&&l.startMinute<c.end&&c.start<l.endMinute))warnings.push(p.name+' : congé approuvé à vérifier le '+addDays(current.weekStart,day)+'.');}}
-    const assignments=(await client.query('SELECT a.employee_id,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1',[current.weekStart])).rows;
-    for(const row of display.rows){const p=current.people.find(p=>p.id===row.personId);if(!p?.serviceEmployeeId)continue;for(const a of assignments.filter(a=>Number(a.employee_id)===p.serviceEmployeeId)){const c=row.cells[a.day_index];if(isTimedCell(c)&&c.start<a.end_minute&&a.start_minute<c.end)warnings.push(p.name+' : chevauchement avec un quart du Service, le '+addDays(current.weekStart,a.day_index)+'.');}}
+    const leaves=(await client.query("SELECT l.employee_name,l.periods,l.effective_periods,d.schedule_key AS key FROM schedule_leave_requests l JOIN schedule_leave_departments d ON d.id=l.department_id WHERE d.schedule_key=ANY($1::text[]) AND l.status='approved' AND l.is_test=FALSE AND l.archived_at IS NULL AND l.first_date<=$3 AND l.last_date>=$2",[relevantKeys,current.weekStart,next])).rows;
+    const assignments=(await client.query('SELECT a.employee_id,s.week_start,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start BETWEEN $1 AND $2',[previous,next])).rows;
+    for(const row of display.rows){
+      const p=current.people.find(p=>p.id===row.personId);if(!p)continue;
+      for(let day=0;day<7;day++){
+        const c=row.cells[day];if(!isTimedCell(c))continue;
+        const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
+        for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)&&[current.department.key,c.workDepartment,c.sourceDepartment].includes(l.key)))for(const period of leave.effective_periods||leave.periods){
+          if(overlaps(start,end,minute(period.date,period.startMinute),minute(period.date,period.endMinute)))warnings.push(p.name+' : congé approuvé à vérifier le '+period.date+'.');
+        }
+        if(p.serviceEmployeeId&&assignments.some(a=>Number(a.employee_id)===p.serviceEmployeeId&&overlaps(start,end,minute(a.week_start,a.day_index*1440+a.start_minute),minute(a.week_start,a.day_index*1440+a.end_minute))))warnings.push(p.name+' : chevauchement avec un quart du Service, le '+date+'.');
+      }
+    }
     return [...new Set(warnings)];
   }
   app.get('/api/departments/meta',requireManager,endpoint(async(req,res)=>res.json({departments:(await listDepartments(pool)).filter(d=>ownsDepartment(req,d.id)),people:(await directory()).filter(p=>p.departments.some(id=>ownsDepartment(req,id))),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements',account:req.manager||{kind:'admin'}})));

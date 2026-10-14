@@ -1,4 +1,4 @@
-import {normalizeCell,parseShiftTimes,automaticBreakMinutes,DEPARTMENT_STYLES,PAM_POSTS,KITCHEN_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
+import {normalizeCell,parseShiftTimes,automaticBreakMinutes,DEPARTMENT_STYLES,PAM_POSTS,KITCHEN_POSTS,COMMON_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
 
 export function validatePhoto(data){
   if(typeof data!=='string')throw Error('Choisissez une photo JPEG, PNG ou WebP.');
@@ -17,7 +17,7 @@ const cellSchema={type:'object',additionalProperties:false,properties:{
   day:{type:'string',enum:DAY_NAMES},rawText:text,
   kind:{type:'string',enum:['blank','shift','training','buffet','kitchen','off','vacation','mobile','requested','sick','note','review']},
   start:{type:['integer','null']},end:{type:['integer','null']},breakMinutes:{type:'integer'},note:text,
-  post:{type:['string','null'],enum:['cut_fruit',...Object.keys(PAM_POSTS),...Object.keys(KITCHEN_POSTS),null]},
+  post:{type:['string','null'],enum:['cut_fruit',...Object.keys(COMMON_POSTS),...Object.keys(PAM_POSTS),...Object.keys(KITCHEN_POSTS),null]},
   workDepartment:{type:['string','null'],enum:[...DEPARTMENT_STYLES.map(d=>d.key),null]},uncertain:{type:'boolean'}
 },required:['day','rawText','kind','start','end','breakMinutes','note','post','workDepartment','uncertain']};
 export const photoSchema={type:'object',additionalProperties:false,properties:{weekText:text,departmentText:text,warnings:{type:'array',items:text},rows:{type:'array',items:{type:'object',additionalProperties:false,properties:{name:text,days:{type:'array',items:cellSchema},writtenTotal:text},required:['name','days','writtenTotal']}}},required:['weekText','departmentText','warnings','rows']};
@@ -30,6 +30,8 @@ export function normalizePhotoCell(cell,reading=''){
   if(/\bRS(?:\s*[-–—/]\s*|\s+)SS\b/i.test(reading+' '+(cell.note||''))){value.kind=cell.kind==='training'?'training':'shift';value.post='rs_ss';}
   if(value.post==='kitchen_salads'||value.kind==='kitchen'&&/\bsalades?\b/i.test(reading+' '+(cell.note||''))){value.kind=cell.kind==='training'?'training':'kitchen';value.post='kitchen_salads';}
   if(/\bF\s*\.?\s*C\b\.?/i.test(reading))value.post='cut_fruit';
+  if(/\bnuit\b/i.test(reading+' '+(cell.note||''))&&!value.post)value.post='night';
+  if(Number.isInteger(value.start)&&Number.isInteger(value.end)&&value.end>=0&&value.end<value.start)value.end+=1440;
   // Transcription explanations belong in the review, never beneath a scheduled shift.
   value.note='';
   if(value.end-value.start>=8*60)value.breakMinutes=automaticBreakMinutes(value.start,value.end);
@@ -93,7 +95,7 @@ Repère les en-têtes lundi à dimanche et les limites réelles des lignes/colon
 Les grandes cases contiennent les quarts. La petite case blanche sous le quart est un total quotidien; la petite case colorée à côté est la disponibilité (J = journée, 0 = indisponible). Ni l'une ni l'autre ne sont des heures de début/fin. Les traits, cercles et surligneurs ne sont pas des chiffres. Lis les chiffres d'après leurs formes en comparant l'écriture sur la feuille, sans recopier un quart d'une autre ligne.
 
 HEURES MANUSCRITES
-Deux heures superposées dans une grande case sont le début puis la fin. La notation abrégée québécoise omet souvent deux-points et après-midi : 6 / 3 = 06:00–15:00; 7 / 4 = 07:00–16:00; 4 / 8 = 16:00–20:00; 430 / 8 = 16:30–20:00; 3 / 8 = 15:00–20:00; 630 / 330 = 06:30–15:30; 730 / 230 = 07:30–14:30; 815 / 515 = 08:15–17:15; 12 / 9 = 12:00–21:00. 830 signifie 8 h 30, jamais 8 h 03. Les minutes finales 15, 30 et 45 restent des minutes, pas des décimales. Convention du magasin : un quart court en heures abrégées commençant entre 1 et 5 avec une fin plus grande jusqu’à 12 est un quart d’après-midi (5 / 9 = 17:00–21:00). Un début 6 reste le matin. Une heure explicitement sur 24 h avec zéro initial, comme 04:00–08:00, reste le matin. Ne suppose aucun quart de nuit. Rends start/end en minutes depuis minuit. Une notation abrégée lisible et non ambiguë selon ces conventions n'est pas automatiquement uncertain. Un chiffre réellement illisible ou un matin/soir non résolu reste uncertain=true, kind=review avec le texte lisible en note.
+Deux heures superposées dans une grande case sont le début puis la fin. La notation abrégée québécoise omet souvent deux-points et après-midi : 6 / 3 = 06:00–15:00; 7 / 4 = 07:00–16:00; 4 / 8 = 16:00–20:00; 430 / 8 = 16:30–20:00; 3 / 8 = 15:00–20:00; 630 / 330 = 06:30–15:30; 730 / 230 = 07:30–14:30; 815 / 515 = 08:15–17:15; 12 / 9 = 12:00–21:00. 830 signifie 8 h 30, jamais 8 h 03. Les minutes finales 15, 30 et 45 restent des minutes, pas des décimales. Convention du magasin : un quart court en heures abrégées commençant entre 1 et 5 avec une fin plus grande jusqu’à 12 est un quart d’après-midi (5 / 9 = 17:00–21:00). Un début 6 reste le matin. Une heure explicitement sur 24 h avec zéro initial, comme 04:00–08:00, reste le matin. Un quart explicitement de nuit ou sur 24 h peut finir le lendemain : 22:00–06:30 donne start=1320, end=1830. Conserve les conventions abrégées de jour ci-dessus; ne transforme pas 6 / 3 en quart de nuit. Rends start/end en minutes depuis le minuit du jour de départ; end dépasse 1440 quand la fin est le lendemain. Une mention explicite Nuit donne post=night avec kind=shift (ou training si formation), dans tous les départements. Une notation abrégée lisible et non ambiguë selon ces conventions n'est pas automatiquement uncertain. Un chiffre réellement illisible ou un matin/soir non résolu reste uncertain=true, kind=review avec le texte lisible en note.
 RÈGLE DU MAGASIN : tout quart de 8 heures ou plus sur l’horloge comprend automatiquement 60 minutes de pause non payée, même si aucune pause n’est écrite. Mets breakMinutes=60 dès que end-start>=480 : 6–15 et 7–16 donnent 8 h payées; 7–15 donne 7 h payées; 7–15:30 donne 7 h 30 payées; 7–16:30 donne 8 h 30 payées. Pour un quart de moins de 8 heures, breakMinutes=0 sauf pause explicitement écrite. Cette règle s’applique aussi à Formation, Buffet et Cuisine. Ne change pas les heures ou les jours pour faire correspondre un total. Le serveur calcule les heures payées et les écarts : ne génère aucun avertissement fondé sur les heures brutes ou l’absence de pause écrite. writtenTotal reprend uniquement le total manuscrit de cette personne. Les sous-totaux de groupe et total de feuille ne sont pas des employés.
 
 CODES ET POSTES

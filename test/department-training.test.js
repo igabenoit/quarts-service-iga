@@ -10,7 +10,7 @@ test('formation : heures nettes séparées, validation et transcription sans heu
   assert.equal(totalMinutes({cells:days()}),270);
   assert.equal(trainingMinutes({cells:days()}),510);
   assert.deepEqual(normalizeCell(training),training);
-  for(const invalid of [{start:null},{end:420},{breakMinutes:540},{end:1441}])assert.throws(()=>normalizeCell({...training,...invalid}));
+  for(const invalid of [{start:null},{end:420},{breakMinutes:540},{end:1861}])assert.throws(()=>normalizeCell({...training,...invalid}));
   const row={personId:1,cells:days()},person={id:1,name:'Camille',active:true,availability:{0:'J',1:'0'}};
   assert.match(draftWarnings({rows:[row]},[person]).join(' '),/Mardi.*en dehors/);
   assert.equal(cellTone({kind:'note',note:'Congé demandé'}),'status-requested');
