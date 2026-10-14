@@ -126,7 +126,7 @@ La saisie des quarts accepte 7, 7h30, 7:30 et 730. Une fin abrégée avant le d�
 
 Les horaires se sauvegardent en brouillon avec contrôle de version et historique restaurable. La publication exige une vérification explicite et une confirmation des avertissements : disponibilité manquante ou incompatible, congé approuvé au nom correspondant, chevauchement publié dans un autre département ou quart du Service. Un retrait du département ne supprime pas les horaires précédents : la ligne doit être retirée du brouillon avant de republier. Les horaires publiés sont des copies stables; l’édition ou la restauration du brouillon ne les modifie pas. La publication n’envoie aucun courriel.
 
-Le portail /horaires-departements utilise le code commun des employés déjà employé pour /conges. Seules les versions publiées sont accessibles via /api/leave/department-schedules. La réponse publique exclut courriels, anniversaires, ancienneté, disponibilités, photos et sources. Les fiches, brouillons et photos exigent une session gestionnaire; les mutations exigent également la même origine.
+Le portail /horaires-departements utilise le code personnel à six chiffres de chaque employé. Les congés et disponibilités conservent leur code commun. Seules les versions publiées sont accessibles via /api/leave/department-schedules. La réponse publique exclut courriels, anniversaires, ancienneté, disponibilités, photos et sources. Les fiches, brouillons et photos exigent une session gestionnaire; les mutations exigent également la même origine.
 
 ### Photos manuscrites
 
@@ -199,3 +199,10 @@ Le formulaire `/chandails`, protégé par le code commun des employés, propose 
 La commande est persistée avant l’envoi via Resend. La référence idempotente est conservée dans la session du navigateur pour retrouver une confirmation après un incident réseau; les tentatives avec le même contenu ne créent pas de doublon. Les courriels ont leur propre état et une clé d’idempotence, avec une limite de reprise automatique de 20 heures. Les annulations réversibles excluent la commande des quantités fournisseur. Les totaux sont calculés côté serveur, sans accepter de prix du navigateur.
 
 La gestion et les exports sont réservés à l’administration. Les exports PDF et XLSX contiennent uniquement modèle, référence, couleur, grandeur, quantité et nom de campagne. Aucun nom, département ou courriel d’employé n’est inclus. Aucun envoi automatique au fournisseur. Les photos sont les visuels fournis pour cette collection, sans transformation.
+
+
+### Accès personnel partagé entre plusieurs fiches
+
+Dans la fiche d’un département, l’administration peut rattacher une fiche sans code à une fiche active de la même personne qui possède déjà son code personnel. Le nom doit correspondre; deux dates de naissance renseignées doivent également correspondre. L’interface demande une confirmation explicite et protège les versions des deux fiches. Le rattachement est réversible et ne modifie aucun horaire, publication, disponibilité, groupe ou ancienneté.
+
+Le code existant et les sessions en cours donnent accès aux horaires publiés des fiches actives rattachées, ainsi qu’au Service si la fiche principale y appartient. Les notes d’équipe et les lignes des autres employés restent exclues. Les consultations sont comptées sur la fiche présente dans chaque publication. Le retrait du rattachement ou la désactivation d’une fiche retire immédiatement son accès. Un second code sur une fiche rattachée et les chaînes de rattachements sont refusés. Seule l’administration peut modifier ces liens. Aucune fiche réelle n’est rattachée automatiquement au déploiement.

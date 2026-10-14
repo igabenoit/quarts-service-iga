@@ -1,7 +1,7 @@
 import {installDepartmentMail} from './department-mail.js';
 import {isScoped,ownsDepartment,assertDepartment} from './manager-access.js';
 import crypto from 'node:crypto';
-import {installEmployeePortal,saveEmployeeCode} from './employee-portal.js';
+import {installEmployeePortal,saveEmployeeCode,employeePersonIds} from './employee-portal.js';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
@@ -49,7 +49,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const people=records.map(r=>{
       const service=!!r.service_employee_id;
       const a=service?employeeAvailability({availability:r.service_availability,availability_history:r.availability_history,target_minutes:r.target_minutes},weekStart).availability:null;
-      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
+      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',portalPersonId:r.portal_person_id?Number(r.portal_person_id):null,email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
     });
     // Compact the visible ranks, including changes inherited from Service.
     for(const departmentId of new Set(memberships.map(m=>Number(m.department_id))))for(const group of ['regular','part_time']){
@@ -132,6 +132,24 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     }));
   }));
   app.post('/api/departments/people',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,undefined,req))));
+  app.put('/api/departments/people/:id/portal-link',requireManager,sameOrigin,endpoint(async(req,res)=>{
+    if(isScoped(req))fail('Rattachement réservé à l’administration.',403);
+    if(req.body.confirmed!==true)fail('Confirmez que les deux fiches correspondent à la même personne.');
+    const id=integer(req.params.id),targetId=req.body.portalPersonId===null?null:integer(req.body.portalPersonId);
+    res.json(await transaction(async client=>{
+      const people=await directory(client),person=people.find(p=>p.id===id),target=people.find(p=>p.id===targetId);
+      if(!person)fail('Fiche introuvable.',404);
+      if(person.version!==req.body.version)fail('Cette fiche a changé. Rechargez le répertoire.',409);
+      if(person.serviceEmployeeId||person.employeeCode)fail('Rattachez la fiche du département à celle qui possède déjà le code.');
+      if(targetId!==null){
+        if(!target||target.id===id||!person.active||!target.active||!target.employeeCode||target.portalPersonId)fail('Choisissez une fiche active possédant son propre code personnel.');
+        if(target.version!==req.body.targetVersion)fail('La fiche de l’accès personnel a changé. Rechargez le répertoire.',409);
+        if(nameKey(person.name)!==nameKey(target.name)||person.birthday&&target.birthday&&person.birthday!==target.birthday)fail('Les renseignements des deux fiches ne correspondent pas. Vérifiez leur identité avant le rattachement.');
+      }
+      await client.query('UPDATE schedule_store_people SET portal_person_id=$1,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[targetId,id]);
+      return {id,portalPersonId:targetId,version:person.version+1};
+    }));
+  }));
   app.put('/api/departments/people/:id',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,integer(req.params.id),req))));
   async function savePerson(body,id,req){return transaction(async client=>{
     const list=await directory(client),previous=id?list.find(p=>p.id===id):null;
@@ -285,11 +303,13 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     return saveWeek(client,current,normalizeDraft({...current.draft,rows},current.people),'photo');
   }))));
   app.get('/api/leave/department-schedules',employeePortal.requireEmployee,endpoint(async(req,res)=>{
+    const personIds=employeePersonIds(req.employee);
     const rows=(await pool.query('SELECT d.name,d.schedule_key AS key,w.department_id,w.week_start,w.published_at,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.published IS NOT NULL ORDER BY w.week_start DESC,d.name LIMIT 100')).rows;
     const departments=await listDepartments(pool),schedules=new Map();
     for(const r of rows){
-      if(req.employee&&!r.published.rows.some(row=>row.personId===Number(req.employee.id)))continue;
-      const keys=new Set([r.key,...r.published.rows.flatMap(row=>row.cells.filter(c=>isTimedCell(c)&&c.workDepartment).map(c=>c.workDepartment))]);
+      const personalRows=req.employee?r.published.rows.filter(row=>personIds.includes(row.personId)):r.published.rows;
+      if(!personalRows.length)continue;
+      const keys=new Set([r.key,...personalRows.flatMap(row=>row.cells.filter(c=>isTimedCell(c)&&c.workDepartment).map(c=>c.workDepartment))]);
       for(const key of keys){const d=departments.find(d=>d.key===key);if(!d)continue;const k=iso(r.week_start)+':'+d.id,previous=schedules.get(k);if(!previous||new Date(previous.publishedAt)<new Date(r.published_at))schedules.set(k,{departmentId:d.id,name:d.name,key,weekStart:iso(r.week_start),publishedAt:r.published_at});}
     }
     const service=(await pool.query('SELECT week_start,token FROM schedule_public_links ORDER BY week_start DESC LIMIT 8')).rows;
@@ -301,11 +321,11 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const schedule=mergeIncoming(row?.published||{rows:[],notes:''},incoming),dates=[row?.published_at,...incoming.map(i=>i.publishedAt)].filter(Boolean).map(v=>new Date(v).getTime());
     const publishedAt=new Date(Math.max(...dates)).toISOString();
     if(req.employee){
-      schedule.rows=schedule.rows.filter(r=>r.personId===Number(req.employee.id));
+      schedule.rows=schedule.rows.filter(r=>employeePersonIds(req.employee).includes(r.personId));
       if(!schedule.rows.length)fail('Aucun horaire personnel disponible pour cette semaine.',404);
       schedule.notes=''; // Team notes may mention other employees.
       for(const r of schedule.rows)r.birthdayMonthDay=iso(req.employee.birthday).slice(5);
-      await pool.query(`INSERT INTO schedule_department_views(department_id,week_start,person_id,published_at) VALUES($1,$2,$3,$4) ON CONFLICT(department_id,week_start,person_id,published_at) DO UPDATE SET last_viewed_at=clock_timestamp(),view_count=schedule_department_views.view_count+1`,[d.id,start,req.employee.id,publishedAt]);
+      for(const r of schedule.rows)await pool.query(`INSERT INTO schedule_department_views(department_id,week_start,person_id,published_at) VALUES($1,$2,$3,$4) ON CONFLICT(department_id,week_start,person_id,published_at) DO UPDATE SET last_viewed_at=clock_timestamp(),view_count=schedule_department_views.view_count+1`,[d.id,start,r.personId,publishedAt]);
     }
     res.json({department:d,weekStart:start,schedule,publishedAt});
   }));
