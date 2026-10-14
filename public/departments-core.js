@@ -79,15 +79,15 @@ export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
 export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||'',transferLabel(c)].filter(Boolean).join(' · ');
-export const cellLabel=c=>({off:'CH',vacation:'Vacances',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
+export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
   if(c.post==='cut_fruit'&&isTimedCell(c))return 'status-cut-fruit';
-  const kind=c.kind==='note'?({ch:'off',conge:'off',congehebdomadaire:'off',vacances:'vacation',congedemande:'requested',maladie:'sick'}[nameKey(c.note)]||'note'):c.kind;
-  return ['off','vacation','requested','sick','training'].includes(kind)?'status-'+kind:'';
+  const kind=c.kind==='note'?({ch:'off',conge:'off',congehebdomadaire:'off',vacances:'vacation',congemobile:'mobile',congedemande:'requested',maladie:'sick'}[nameKey(c.note)]||'note'):c.kind;
+  return ['off','vacation','mobile','requested','sick','training'].includes(kind)?'status-'+kind:'';
 }
 export function normalizeCell(value){
   const c=value||{},kind=String(c.kind||'blank');
-  if(!['blank','shift','training','buffet','kitchen','off','vacation','requested','sick','note','review'].includes(kind))throw Error('Type de case invalide.');
+  if(!['blank','shift','training','buffet','kitchen','off','vacation','mobile','requested','sick','note','review'].includes(kind))throw Error('Type de case invalide.');
   const note=String(c.note||'').trim();if(note.length>100)throw Error('Le texte d’une case est limité à 100 caractères.');
   if(isTimedCell({kind})){
     if(!Number.isInteger(c.start)||!Number.isInteger(c.end)||c.start<0||c.end>1440||c.end<=c.start||!Number.isInteger(c.breakMinutes??0)||(c.breakMinutes??0)<0||(c.breakMinutes??0)>=c.end-c.start)throw Error('Vérifiez le début, la fin et la pause du quart.');

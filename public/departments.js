@@ -117,8 +117,8 @@ $('#copyWeek').onclick=async()=>{
     if(dirty||!current.revision)await saveDraft();
     weekCopySource={departmentId:selectedDepartment,weekStart:current.weekStart,revision:current.revision};
     $('#copyWeekSource').textContent=`${current.department.name} · du ${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;
-    const counts={shift:0,training:0,buffet:0,kitchen:0,off:0,vacation:0,requested:0,sick:0,note:0,review:0};for(const row of current.draft.rows)for(const cell of row.cells)if(cell.kind in counts)counts[cell.kind]++;
-    $('#copyWeekSummary').innerHTML=[`${current.draft.rows.length} employés`,`${counts.shift} quarts réguliers`,`${counts.training} quarts de formation`,`${counts.buffet} quarts Buffet`,`${counts.kitchen} quarts Cuisine`,`${counts.off} congés (CH)`,`${counts.vacation} jours de vacances`,`${counts.requested} congés demandés`,`${counts.sick} jours de maladie`,`${counts.note} autres mentions`,...(counts.review?[`${counts.review} cases à vérifier`]:[])].map(text=>`<span>${e(text)}</span>`).join('');
+    const counts={shift:0,training:0,buffet:0,kitchen:0,off:0,vacation:0,mobile:0,requested:0,sick:0,note:0,review:0};for(const row of current.draft.rows)for(const cell of row.cells)if(cell.kind in counts)counts[cell.kind]++;
+    $('#copyWeekSummary').innerHTML=[`${current.draft.rows.length} employés`,`${counts.shift} quarts réguliers`,`${counts.training} quarts de formation`,`${counts.buffet} quarts Buffet`,`${counts.kitchen} quarts Cuisine`,`${counts.off} congés (CH)`,`${counts.vacation} jours de vacances`,`${counts.mobile} congés mobiles`,`${counts.requested} congés demandés`,`${counts.sick} jours de maladie`,`${counts.note} autres mentions`,...(counts.review?[`${counts.review} cases à vérifier`]:[])].map(text=>`<span>${e(text)}</span>`).join('');
     $('#copyWeekTarget').value=addDays(current.weekStart,7);$('#copyWeekError').textContent='';$('#copyWeekDialog').showModal();await previewWeekCopy();
   }catch(err){message(err.message);}finally{button.disabled=false;$('#managerContent').inert=false;}
 };
