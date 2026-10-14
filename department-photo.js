@@ -70,8 +70,11 @@ function writtenMinutes(value){
 export function auditCandidate(candidate){
   const warnings=[...candidate.warnings];
   for(const row of candidate.rows){
-    const expected=writtenMinutes(row.writtenTotal),sum=row.days.reduce((n,c)=>n+cellMinutes(c),0);
-    if(expected!==null&&!row.days.some(c=>c.kind==='review')&&expected!==sum){
+    const expected=writtenMinutes(row.writtenTotal),label=/\b(cuisine|buffet|formation|pam|p\.a\.m\.)\s*$/i.exec(row.writtenTotal||'')?.[1]?.toLowerCase(),kind=label?({cuisine:'kitchen',buffet:'buffet',formation:'training'}[label]||'shift'):null;
+    const sum=row.days.reduce((n,c)=>n+(!kind||c.kind===kind?cellMinutes(c):0),0),regular=row.days.reduce((n,c)=>n+(c.kind==='shift'?cellMinutes(c):0),0);
+    // The paper can show only the regular subtotal when Buffet/Cuisine/Formation is separate.
+    const regularSubtotal=!kind&&regular>0&&regular!==sum&&expected===regular;
+    if(expected!==null&&!row.days.some(c=>c.kind==='review')&&expected!==sum&&!regularSubtotal){
       warnings.push(`${row.name||'Nom illisible'} : total manuscrit ${hoursLabel(expected)} h, heures payées calculées ${hoursLabel(sum)} h. Vérifiez les journées, les postes et les pauses.`);
     }
     row.days.forEach((c,d)=>{if(isTimedCell(c)&&c.end-c.start>12*60)warnings.push(`${row.name||'Nom illisible'} — ${DAY_NAMES[d]} : quart de plus de 12 heures, à vérifier.`);});

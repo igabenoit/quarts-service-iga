@@ -27,6 +27,10 @@ test('propositions enregistrées : recalcul sans IA, sans mutation et sans ancie
   const original=structuredClone(legacy),result=applyPhotoRules(legacy);assert.deepEqual(legacy,original);assert.equal(result.rows[0].days.reduce((n,c)=>n+cellMinutes(c),0),2400);assert.deepEqual(result.warnings,['La seconde vérification n’a pas abouti.','Un nom est masqué.']);assert.deepEqual(applyPhotoRules(result),result);
   const incomplete=structuredClone(legacy);incomplete.rows[0].days[0]={...blankCell(),kind:'review',note:'Chiffre masqué'};assert.equal(applyPhotoRules(incomplete).rows[0].days[0].kind,'review');
   const mismatch=structuredClone(legacy);mismatch.rows[0].writtenTotal='30 h';assert.match(applyPhotoRules(mismatch).warnings.at(-1),/heures payées calculées 40 h/);
+  const split={warnings:[],rows:[{name:'Camille',writtenTotal:'24 h.',days:[...Array.from({length:3},()=>({...shift})),...Array.from({length:2},()=>({...shift,kind:'buffet'})),blankCell(),blankCell()]}]};
+  assert.deepEqual(applyPhotoRules(split).warnings,[],'regular subtotal is not compared with the grand total');
+  split.rows[0].writtenTotal='16 h Buffet';assert.deepEqual(applyPhotoRules(split).warnings,[]);
+  split.rows[0].writtenTotal='24 h Buffet';assert.match(applyPhotoRules(split).warnings[0],/heures payées calculées 16 h/,'explicit category totals still flag a mismatch');
 });
 
 test('API : même proposition corrigée à l’ouverture, au suivi et au report; ligne terminée exclue sans désactiver sa fiche',async()=>{
