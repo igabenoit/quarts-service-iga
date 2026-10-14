@@ -21,7 +21,7 @@ test('postes : Fruits coupés inclus au régulier, Buffet séparé, transfert co
   assert.equal(totalMinutes(row),450);assert.equal(trainingMinutes(row),450);assert.equal(buffetMinutes(row),450);assert.equal(grandMinutes(row),1350);
   const html=sheetHTML({department:DEPARTMENT_STYLES[3],weekStart:'2030-10-14',people:[{id:1,name:'Camille',group:'regular',availability:{}}],draft:{rows:[row],notes:''}});
   assert.match(html,/Grand total : 22,5 h/);assert.match(html,/Buffet : 7,5 h/);
-  assert.ok([...html.matchAll(/class="sheet-work[^>]*>(.*?)<\/div>/g)].every(m=>!m[1].includes('Buffet')));
+  assert.match(html,/<small class="assignment-label">Buffet<\/small>/);
 });
 
 test('PostgreSQL : quarts reçus liés à la source, copies, conflits, publication privée et retrait',async t=>{

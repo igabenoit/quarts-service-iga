@@ -1,4 +1,4 @@
-import {normalizeCell,parseShiftTimes,automaticBreakMinutes,DEPARTMENT_STYLES,PAM_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
+import {normalizeCell,parseShiftTimes,automaticBreakMinutes,DEPARTMENT_STYLES,PAM_POSTS,KITCHEN_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
 
 export function validatePhoto(data){
   if(typeof data!=='string')throw Error('Choisissez une photo JPEG, PNG ou WebP.');
@@ -17,7 +17,7 @@ const cellSchema={type:'object',additionalProperties:false,properties:{
   day:{type:'string',enum:DAY_NAMES},rawText:text,
   kind:{type:'string',enum:['blank','shift','training','buffet','kitchen','off','vacation','requested','sick','note','review']},
   start:{type:['integer','null']},end:{type:['integer','null']},breakMinutes:{type:'integer'},note:text,
-  post:{type:['string','null'],enum:['cut_fruit',...Object.keys(PAM_POSTS),null]},
+  post:{type:['string','null'],enum:['cut_fruit',...Object.keys(PAM_POSTS),...Object.keys(KITCHEN_POSTS),null]},
   workDepartment:{type:['string','null'],enum:[...DEPARTMENT_STYLES.map(d=>d.key),null]},uncertain:{type:'boolean'}
 },required:['day','rawText','kind','start','end','breakMinutes','note','post','workDepartment','uncertain']};
 export const photoSchema={type:'object',additionalProperties:false,properties:{weekText:text,departmentText:text,warnings:{type:'array',items:text},rows:{type:'array',items:{type:'object',additionalProperties:false,properties:{name:text,days:{type:'array',items:cellSchema},writtenTotal:text},required:['name','days','writtenTotal']}}},required:['weekText','departmentText','warnings','rows']};
@@ -28,6 +28,9 @@ export function normalizePhotoCell(cell,reading=''){
   const hours=/^\s*(\d{1,4}(?:[:h]\d{2})?h?)\s*(?:[-–—/]|à|\s)\s*(\d{1,4}(?:[:h]\d{2})?h?)(?=$|[\s,;.()])/i.exec(reading);
   if(hours){try{Object.assign(value,parseShiftTimes(hours[1],hours[2]));}catch{/* Preserve the validated reading when the literal hours cannot be parsed. */}}
   if(/\bRS(?:\s*[-–—/]\s*|\s+)SS\b/i.test(reading+' '+(cell.note||''))){value.kind=cell.kind==='training'?'training':'shift';value.post='rs_ss';}
+  if(value.post==='kitchen_salads'||value.kind==='kitchen'&&/\bsalades?\b/i.test(reading+' '+(cell.note||''))){value.kind=cell.kind==='training'?'training':'kitchen';value.post='kitchen_salads';}
+  // Transcription explanations belong in the review, never beneath a scheduled shift.
+  value.note='';
   if(value.end-value.start>=8*60)value.breakMinutes=automaticBreakMinutes(value.start,value.end);
   return normalizeCell(value);
 }
@@ -94,7 +97,7 @@ RÈGLE DU MAGASIN : tout quart de 8 heures ou plus sur l’horloge comprend auto
 
 CODES ET POSTES
 CH ou C H = off; CD ou C D ou Congé demandé = requested; Vacances, même écrit une lettre par journée sur la semaine = vacation; Maladie = sick. Une case vraiment vide = blank; une case hors photo ou masquée = review. Une simple mention sans heures reste note (ou review si ambiguë).
-Formation avec heures = training; Buffet avec heures = buffet. Au PAM, Cuisine avec heures = kitchen et post=null (heures séparées du régulier). Les postes explicites Sandwichs, BBQ, Commandes Sandwich (RS-SS, RS SS et RS/SS sont ce même poste, jamais une note seule), Mets Cuisinés, Pizza + Sandwichs donnent post=sandwiches, bbq, rs_ss, cooked_meals, pizza_sandwiches avec kind=shift sauf formation explicite. Sans indication de poste, post=null. Fruits coupés explicitement indiqué ou la GRANDE case entièrement verte aux Fruits & Légumes = post=cut_fruit; la petite case de disponibilité verte ne suffit jamais. Ne déduis aucun poste d'un total.
+Formation avec heures = training; Buffet avec heures = buffet. Au PAM, Cuisine avec heures = kitchen et post=null (heures séparées du régulier); Salade, Salades ou Cuisine Salades dans cette section = kitchen et post=kitchen_salads, avec les mêmes heures Cuisine séparées. Les postes explicites Sandwichs, BBQ, Commandes Sandwich (RS-SS, RS SS et RS/SS sont ce même poste, jamais une note seule), Mets Cuisinés, Pizza + Sandwichs donnent post=sandwiches, bbq, rs_ss, cooked_meals, pizza_sandwiches avec kind=shift sauf formation explicite. Sans indication de poste, post=null. Fruits coupés explicitement indiqué ou la GRANDE case entièrement verte aux Fruits & Légumes = post=cut_fruit; la petite case de disponibilité verte ne suffit jamais. Ne déduis aucun poste d'un total. Pour tout quart avec heures (shift, training, buffet, kitchen), note doit rester vide : la case affiche uniquement les heures et le poste. Les explications de lecture, comme « dans le contexte des quarts BBQ » ou « mention transversale Cuisine », vont dans warnings et jamais dans note. Pour note/review uniquement, conserve la mention ou la difficulté à vérifier.
 Un département d'accueil explicitement indiqué "À Viande", "À Poisson", etc. donne workDepartment=fruits, boulangerie, viande, charcuterie, pam, poissonnerie ou epicerie, sinon null. "De" suivi d'un département désigne un quart reçu déjà sur son horaire d'origine : review pour éviter le double comptage.
 
 IDENTITÉ ET SEMAINE

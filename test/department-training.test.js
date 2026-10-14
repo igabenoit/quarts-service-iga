@@ -16,7 +16,7 @@ test('formation : heures nettes séparées, validation et transcription sans heu
   assert.equal(cellTone({kind:'note',note:'Congé demandé'}),'status-requested');
   assert.equal(trainingMinutes({cells:[{...blankCell(),kind:'note',note:'Formation'}]}),0);
   const candidate=validateCandidate({warnings:[],rows:[{name:'Camille',days:days()}]});
-  assert.deepEqual(candidate.rows[0].days,days().map(c=>c.kind==='training'?{...c,breakMinutes:60}:c));
+  assert.deepEqual(candidate.rows[0].days,days().map(c=>c.kind==='training'?{...c,breakMinutes:60,note:''}:c.kind==='shift'?{...c,note:''}:c));
   assert.ok(photoSchema.properties.rows.items.properties.days.items.properties.kind.enum.includes('training'));
 });
 test('gabarit : 14 lignes stables et répartition proportionnelle sans perdre de nom',()=>{
