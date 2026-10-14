@@ -41,16 +41,18 @@ function quickHour(value,{end=false}={}){
   if(minute>59||minutes>(end?1440:1439))return null;
   return {minutes,afternoon:hour>=1&&hour<=12&&!match[1].startsWith('0')};
 }
-export function parseShiftTimes(startValue,endValue,{shortShiftsInAfternoon=true,allowOvernight=true}={}){
+export function parseShiftTimes(startValue,endValue,{shortShiftsInAfternoon=true,allowOvernight=true,nightShift=false}={}){
   const nextDay=/\s*\+1\s*$/.test(String(endValue));
   const start=quickHour(startValue),end=quickHour(String(endValue??'').replace(/\s*\+1\s*$/,''),{end:true});
   if(!start||!end)throw Error('Indiquez les heures, par exemple 7 et 4, ou 7h30 et 16h30.');
   let begin=start.minutes,finish=end.minutes;
+  // On night schedules, handwritten 10/11 mean 22/23; the end stays in the morning.
+  if(nightShift&&start.afternoon&&begin>=10*60&&begin<12*60)begin+=12*60;
   // Store convention: abbreviated short shifts starting before 6 are afternoon shifts.
   // Explicit 24-hour input (04:00–08:00) remains available for an early morning shift.
   if(nextDay)finish+=1440;
-  else if(shortShiftsInAfternoon&&start.afternoon&&end.afternoon&&begin<6*60&&finish>begin){begin+=12*60;finish+=12*60;}
-  else if(finish<begin&&end.afternoon&&finish+12*60>begin)finish+=12*60;
+  else if(!nightShift&&shortShiftsInAfternoon&&start.afternoon&&end.afternoon&&begin<6*60&&finish>begin){begin+=12*60;finish+=12*60;}
+  else if(!nightShift&&finish<begin&&end.afternoon&&finish+12*60>begin)finish+=12*60;
   else if(finish<begin&&allowOvernight)finish+=1440;
   if(finish<=begin||finish-begin>1440||!allowOvernight&&finish>1440)throw Error(allowOvernight?'Vérifiez les heures : la durée doit être supérieure à zéro et ne pas dépasser 24 h.':'La disponibilité doit rester dans la même journée. Séparez la nuit sur les deux journées.');
   return {start:begin,end:finish};
