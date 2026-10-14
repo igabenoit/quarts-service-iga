@@ -40,7 +40,7 @@ test('PostgreSQL : répertoire, brouillons, publication privée et photos',async
     await t.test('migration réexécutable et routes protégées',async()=>{
       await installDepartmentSchedules(f.app,pool,f.options);
       const meta=(await call('get','/api/departments/meta')).body;assert.equal(meta.departments.length,8);assert.equal(meta.visionConfigured,false);dept=meta.departments.find(d=>d.key==='boulangerie').id;other=meta.departments.find(d=>d.key==='fruits').id;
-      for(const [path,handlers] of f.routes){if(path.includes('/api/departments/')){assert.equal(handlers[0],f.options.requireManager,path);if(!path.startsWith('get'))assert.equal(handlers[1],f.options.sameOrigin,path);}if(path.includes('/api/leave/department-schedules'))assert.equal(handlers[0],f.options.requireStaff);}
+      for(const [path,handlers] of f.routes){if(path.includes('/api/departments/')){assert.equal(handlers[0],f.options.requireManager,path);if(!path.startsWith('get'))assert.equal(handlers[1],f.options.sameOrigin,path);}if(path.includes('/api/leave/department-schedules'))assert.equal(handlers[0].name,'requireEmployee');}
     });
     await t.test('dates confirmées, aucune identité inventée, départements partagés',async()=>{
       body={name:'Camille Exemple',jobTitle:'  Gérante  ',seniorityDate:'2020-01-01',birthday:'1990-05-06',email:'camille@example.com',group:'regular',active:true,departments:[dept,other],availability:{0:'08:00-17:00'}};

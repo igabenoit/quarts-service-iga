@@ -51,7 +51,7 @@ function renderSelected(){
   if(!person){selectedId=null;return;}
   const shifts=[...person.shifts].sort((a,b)=>a.dayIndex-b.dayIndex||a.startMinute-b.startMinute);
   const rows=shifts.map(shift=>`<div class="day-row"><div class="day-date"><strong>${dayNames[shift.dayIndex]}</strong><span>${dateFor(schedule.weekStart,shift.dayIndex)}</span></div><div class="day-hours">${hour(shift.startMinute)} – ${hour(shift.endMinute)}</div>${shift.role!==person.role?`<div class="day-role">${escapeHtml(roleNames[shift.role]||shift.role)}</div>`:""}</div>`).join("");
-  card.innerHTML=`<article class="personal-card"><p class="eyebrow">MON HORAIRE</p><h2>${escapeHtml(person.name)}</h2><a class="leave-request-button" href="/conges">Faire une demande de congé <span aria-hidden="true">→</span></a><a class="leave-request-button" href="/disponibilites">Mes disponibilités permanentes <span aria-hidden="true">→</span></a><p class="leave-request-help">Congés : à envoyer avant 9 h le jeudi précédant la semaine du congé.</p>${rows||'<p class="empty">Aucun quart prévu cette semaine.</p>'}</article>`;
+  card.innerHTML=`<article class="personal-card"><p class="eyebrow">MON HORAIRE</p><h2>${escapeHtml(person.name)}</h2><a class="leave-request-button" href="/conges">Faire une demande de congé <span aria-hidden="true">→</span></a><a class="leave-request-button" href="/disponibilites">Mes disponibilités permanentes <span aria-hidden="true">→</span></a><p class="leave-request-help">Congés : à envoyer avant 9 h le jeudi précédant la semaine du congé.</p>${Array.from({length:7},(_,day)=>{const date=new Date(`${schedule.weekStart}T12:00:00Z`);date.setUTCDate(date.getUTCDate()+day);return person.birthdayMonthDay===date.toISOString().slice(5,10)?`<p class="birthday-greeting">${dateFor(schedule.weekStart,day)} : Bonne fête !</p>`:'';}).join('')}${rows||'<p class="empty">Aucun quart prévu cette semaine.</p>'}</article>`;
 }
 function selectPerson(id){
   const person=schedule?.employees.find(item=>item.id===id);
@@ -71,11 +71,12 @@ async function load(){
       schedule=null;selectedId=null;card.replaceChildren();hideSuggestions();
       document.querySelector("#accessForm").hidden=false;
       document.querySelector(".toolbar").hidden=true;
-      document.querySelector("#status").textContent="Entre le code commun transmis par le magasin.";
+      document.querySelector("#status").textContent="Entre ton code employé de six chiffres.";
       return;
     }
     if(!response.ok)throw new Error(response.status===404?"Ce lien est invalide ou a été désactivé.":"L’horaire est temporairement inaccessible.");
     schedule=await response.json();
+    if(schedule.employees.length===1)selectPerson(schedule.employees[0].id);
     document.querySelector("#accessForm").hidden=true;
     document.querySelector(".toolbar").hidden=false;
     document.querySelector("#period").textContent=`Semaine du ${dateFor(schedule.weekStart,0)} au ${dateFor(schedule.weekStart,6)}`;
@@ -115,3 +116,5 @@ document.querySelector("#accessForm").addEventListener("submit",async event=>{
   }catch(error){document.querySelector("#status").textContent=error.message;}
 });
 load();
+
+document.querySelector('#logoutEmployee').onclick=async()=>{await fetch('/api/employee-portal/logout',{method:'POST'});location.reload();};

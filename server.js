@@ -8,6 +8,7 @@ import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
+import {saveEmployeeCode} from './employee-portal.js';
 import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
@@ -304,9 +305,18 @@ async function reorderEmployees(client, role, column, movedId, requestedRank) {
     await client.query(`UPDATE schedule_employees SET ${column}=$1 WHERE id=$2`, [i + 1, ids[i]]);
   }
 }
+async function saveServicePersonal(client,id,body){
+  if(body.employeeCode===undefined&&body.birthday===undefined)return;
+  const birthday=body.birthday;
+  if(birthday!==undefined&&(typeof birthday!=='string'||birthday&&(!validDate(birthday)||birthday>new Date().toISOString().slice(0,10)||birthday<'1900-01-01')))throw Error('Date de naissance invalide.');
+  await client.query('INSERT INTO schedule_store_people(service_employee_id,name) SELECT id,name FROM schedule_employees WHERE id=$1 ON CONFLICT(service_employee_id) DO NOTHING',[id]);
+  const person=(await client.query('SELECT id FROM schedule_store_people WHERE service_employee_id=$1',[id])).rows[0];
+  await saveEmployeeCode(client,person.id,body.employeeCode);
+  if(birthday!==undefined)await client.query('UPDATE schedule_store_people SET birthday=$1,version=version+1 WHERE id=$2',[birthday||null,person.id]);
+}
 function mapEmployee(row,weekStart=null) {
   const profile=employeeAvailability(row,{weekStart:typeof weekStart==='string'&&validDate(weekStart)?weekStart:null});
-  return { id: Number(row.id), name: row.name, role: row.role,
+  return { id: Number(row.id), name: row.name, role: row.role, employeeCode:row.employee_code||'',birthday:row.birthday?isoDate(row.birthday):'',
     roles: [...new Set([row.role, ...(Array.isArray(row.roles) ? row.roles : [])])], area: row.area,
     seniority: row.seniority, targetMinutes: row.target_minutes, maxMinutes: row.max_minutes,
     availability: row.availability, notes: row.notes, active: row.active && !row.departed_at, departedAt: row.departed_at,
@@ -317,7 +327,7 @@ function mapEmployee(row,weekStart=null) {
 app.get("/api/employees", requireManager, async (request, response) => {
   try {
     if(request.query.weekStart&&!validDate(request.query.weekStart))return response.status(400).json({error:"Semaine invalide."});
-    const result = await pool.query("SELECT * FROM schedule_employees ORDER BY role, display_rank, seniority, name");
+    const result = await pool.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id ORDER BY e.role, e.display_rank, e.seniority, e.name");
     response.json({ employees: result.rows.map(row=>mapEmployee(row,request.query.weekStart)) });
   } catch { response.status(500).json({ error: "Impossible de charger les employés." }); }
 });
@@ -363,7 +373,8 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count));
-    const saved = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [id]);
+    await saveServicePersonal(client,id,request.body);
+    const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await client.query("COMMIT");
     response.status(201).json({ employee: mapEmployee(saved.rows[0]) });
   } catch (error) {
@@ -397,7 +408,8 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     const fallbackAssignment = old.role===e.role ? old.assignment_rank : count.rows[0].count;
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,fallbackDisplay));
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment));
-    const saved = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [id]);
+    await saveServicePersonal(client,id,request.body);
+    const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await client.query("COMMIT");
     response.json({ employee: mapEmployee(saved.rows[0]) });
   } catch (error) {
@@ -550,7 +562,8 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 });
 
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
-await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
+const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
+const employeePortal=departmentService.employeePortal;
 await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 await installUndo(app,pool,{requireManager,sameOrigin});
@@ -620,12 +633,12 @@ app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, 
   } catch { response.status(500).json({ error: "Impossible de charger les consultations." }); }
 });
 
-app.get("/api/public-schedules/:token", async (request, response) => {
+app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
     const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
     if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
-    if (!hasStaffAccess(request,request.params.token,link.rows[0].access_code_hash))
+    if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
     const weekStart = isoDate(link.rows[0].week_start);
     const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.role AS shift_role
@@ -633,25 +646,25 @@ app.get("/api/public-schedules/:token", async (request, response) => {
       LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN
         (SELECT id FROM schedule_shifts WHERE week_start=$1)
       LEFT JOIN schedule_shifts s ON s.id=a.shift_id
-      WHERE e.active=TRUE OR s.id IS NOT NULL
-      ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart]);
+      WHERE e.id=$2 AND e.active=TRUE AND e.departed_at IS NULL
+      ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart,request.employee.service_employee_id]);
     const people = new Map();
     for (const row of result.rows) {
       const id = Number(row.id);
-      if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,shifts:[] });
+      if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):'',shifts:[] });
       if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),breakMinutes:Number(row.break_minutes),role:row.shift_role });
     }
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
 });
-app.post("/api/public-schedules/:token/views", sameOrigin, async (request, response) => {
+app.post("/api/public-schedules/:token/views", sameOrigin, employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
     const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
     if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
-    if (!hasStaffAccess(request, request.params.token, link.rows[0].access_code_hash))
+    if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
-    const employeeId = Number(request.body?.employeeId);
+    const employeeId = Number(request.employee.service_employee_id);
     if (!Number.isSafeInteger(employeeId) || employeeId <= 0) return response.status(400).json({ error: "Employé invalide." });
     const weekStart = isoDate(link.rows[0].week_start);
     const employee = await pool.query(`SELECT 1 FROM schedule_employees e WHERE e.id=$1 AND
@@ -664,24 +677,7 @@ app.post("/api/public-schedules/:token/views", sameOrigin, async (request, respo
     response.set("Cache-Control", "no-store").json({ ok:true });
   } catch { response.status(500).json({ error: "Impossible d’enregistrer la consultation." }); }
 });
-app.post("/api/public-schedules/:token/access", sameOrigin, async (request, response) => {
-  try {
-    if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
-    const key = `${request.ip}:${request.params.token}`;
-    const now = Date.now(), entry = scheduleAccessAttempts.get(key) || { count:0,since:now };
-    if (now-entry.since > 15*60*1000) { entry.count=0;entry.since=now; }
-    if (entry.count>=20) return response.status(429).json({ error: "Trop d’essais. Réessaie dans 15 minutes." });
-    const link = await pool.query("SELECT access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
-    const code = String(request.body?.code || "").trim();
-    if (!link.rowCount || !/^\d{6,12}$/.test(code) || !secureEqual(staffCodeHash(code),link.rows[0].access_code_hash)) {
-      entry.count++;scheduleAccessAttempts.set(key,entry);
-      return response.status(401).json({ error: "Code incorrect ou lien désactivé." });
-    }
-    scheduleAccessAttempts.delete(key);
-    response.setHeader("Set-Cookie", `schedule_view=${staffAccessCookie(request.params.token,link.rows[0].access_code_hash)}; Path=/api/public-schedules; HttpOnly; SameSite=Lax; Max-Age=2592000${production?"; Secure":""}`);
-    response.set("Cache-Control","no-store").json({ ok:true });
-  } catch { response.status(500).json({ error: "Impossible de vérifier le code." }); }
-});
+app.post("/api/public-schedules/:token/access", sameOrigin, employeePortal.login);
 app.get("/h/:token", (request, response) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).send("Lien invalide.");
   response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" });
