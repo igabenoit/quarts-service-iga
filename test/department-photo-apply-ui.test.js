@@ -41,6 +41,6 @@ test('report photo : un échec d’affichage après sauvegarde ne prétend pas q
 });
 
 test('report photo : une ligne barrée peut être ignorée explicitement, mais un choix vide reste bloquant',async()=>{
-  const f=fixture();f.selects[1].value='skip';const pending=f.click();assert.equal(f.calls,1);assert.deepEqual(Array.from(f.payload.mapping),[1,null]);f.resolve();await pending;
+  const f=fixture();f.selects[1].value='terminated';const pending=f.click();assert.equal(f.calls,1);assert.deepEqual(Array.from(f.payload.mapping),[1,null]);f.resolve();await pending;
   const none=fixture();none.selects.forEach(s=>s.value='skip');await none.click();assert.equal(none.calls,0);assert.match(none.$('#photoApplyStatus').textContent,/au moins un/);
 });

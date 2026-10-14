@@ -5,7 +5,7 @@ import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots} from './department-transfers.js';
-import {validatePhoto,transcribePhoto,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
+import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const iso=v=>v instanceof Date?v.toISOString().slice(0,10):v?.slice(0,10)||'';
@@ -183,7 +183,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const d=await department(req.body.departmentId),start=week(req.body.weekStart),data=validatePhoto(req.body.dataUrl),name=String(req.body.name||'Photo').slice(0,120);
     const result=await transaction(async client=>{const count=(await client.query('SELECT COUNT(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[d.id,start])).rows[0].n;if(count>=4)fail('Quatre photos sont déjà conservées pour cette semaine.');return (await client.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[d.id,start,name,data])).rows[0];});res.status(201).json({id:Number(result.id)});
   }));
-  const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),elapsedSeconds=p.started_at?Math.max(0,Math.floor((Date.now()-new Date(p.started_at).getTime())/1000)):0,retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,300-elapsedSeconds):0;return {id:Number(p.id),name:p.name,state:p.state,phase:p.phase||'reading',attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,elapsedSeconds,retryAfterSeconds,lastError:p.last_error||'',candidate:p.candidate};};
+  const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),elapsedSeconds=p.started_at?Math.max(0,Math.floor((Date.now()-new Date(p.started_at).getTime())/1000)):0,retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,300-elapsedSeconds):0;return {id:Number(p.id),name:p.name,state:p.state,phase:p.phase||'reading',attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,elapsedSeconds,retryAfterSeconds,lastError:p.last_error||'',candidate:applyPhotoRules(p.candidate)};};
   async function readPhoto(id,withImage=false){
     // A restart must not leave a photo permanently marked as processing, nor erase a saved proposal.
     await pool.query("UPDATE schedule_department_photos SET state=CASE WHEN candidate IS NULL THEN 'saved' ELSE 'ready' END,phase='',operation_id=NULL,last_error='La lecture a été interrompue ou a dépassé le délai de cinq minutes. Toute proposition déjà reçue est conservée. Vous pouvez la vérifier ou relancer la lecture.' WHERE id=$1 AND state='processing' AND (started_at IS NULL OR started_at<clock_timestamp()-interval '5 minutes')",[id]);
@@ -229,7 +229,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     }else res.json({candidate:await run()}); // Compatibility with an already-open older page.
   }));
   app.post('/api/departments/photos/:id/apply',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
-    const p=(await client.query('SELECT * FROM schedule_department_photos WHERE id=$1',[integer(req.params.id)])).rows[0];if(!p?.candidate)fail('Aucune transcription à appliquer.');
+    const p=(await client.query('SELECT * FROM schedule_department_photos WHERE id=$1',[integer(req.params.id)])).rows[0];if(p?.candidate)p.candidate=applyPhotoRules(p.candidate);if(!p?.candidate)fail('Aucune transcription à appliquer.');
     if(photoState(p).busy)fail('Une lecture de cette photo est encore en cours. Actualisez la lecture lorsqu’elle est terminée avant de reporter la proposition.',409);
     if(req.body.departmentId!==undefined&&Number(req.body.departmentId)!==Number(p.department_id)||req.body.weekStart!==undefined&&req.body.weekStart!==iso(p.week_start))fail('Cette photo appartient à un autre département ou à une autre semaine. Rouvrez-la depuis sa feuille avant de reporter.',409);
     const current=await getWeek(Number(p.department_id),iso(p.week_start),client);checkRevision(req.body,current);

@@ -25,7 +25,7 @@ test('photos : diagnostic précis, compteur conservé et reprise explicite sans 
     assert.equal((await state()).busy,true);assert.ok((await state()).retryAfterSeconds<=60);
     await f.pool.query("UPDATE schedule_department_photos SET started_at=clock_timestamp()-interval '6 minutes',candidate=$2 WHERE id=$1",[id,JSON.stringify(candidate)]);
     const failed=await analyze();assert.match(failed.body.error,/crédit/);assert.equal(calls,1);
-    let s=await state();assert.equal(s.attempts,5);assert.equal(s.remainingAttempts,0);assert.equal(s.busy,false);assert.match(s.lastError,/crédit/);assert.deepEqual(s.candidate,candidate);
+    let s=await state();assert.equal(s.attempts,5);assert.equal(s.remainingAttempts,0);assert.equal(s.busy,false);assert.match(s.lastError,/crédit/);assert.deepEqual(s.candidate,{...candidate,rulesVersion:1});
     assert.equal(s.dataUrl,undefined);assert.equal(s.operation_id,undefined);
     const limited=await analyze();assert.equal(limited.code,409);assert.match(limited.body.error,/5 essais autorisés/);assert.equal(calls,1);
     const extended=await extend(5);assert.equal(extended.code,200);assert.equal(extended.body.attemptLimit,10);assert.equal(extended.body.attempts,5);assert.equal(calls,1,'authorizing more attempts does not call the provider');

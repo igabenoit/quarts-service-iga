@@ -1,4 +1,4 @@
-import {normalizeCell,DEPARTMENT_STYLES,PAM_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
+import {normalizeCell,parseShiftTimes,automaticBreakMinutes,DEPARTMENT_STYLES,PAM_POSTS,DAY_NAMES,cellMinutes,isTimedCell,hoursLabel} from './public/departments-core.js';
 
 export function validatePhoto(data){
   if(typeof data!=='string')throw Error('Choisissez une photo JPEG, PNG ou WebP.');
@@ -22,6 +22,27 @@ const cellSchema={type:'object',additionalProperties:false,properties:{
 },required:['day','rawText','kind','start','end','breakMinutes','note','post','workDepartment','uncertain']};
 export const photoSchema={type:'object',additionalProperties:false,properties:{weekText:text,departmentText:text,warnings:{type:'array',items:text},rows:{type:'array',items:{type:'object',additionalProperties:false,properties:{name:text,days:{type:'array',items:cellSchema},writtenTotal:text},required:['name','days','writtenTotal']}}},required:['weekText','departmentText','warnings','rows']};
 
+export function normalizePhotoCell(cell,reading=''){
+  if(!isTimedCell(cell)||cell.uncertain)return normalizeCell(cell);
+  let value={...cell};
+  const hours=/^\s*(\d{1,4}(?:[:h]\d{2})?h?)\s*(?:[-–—/]|à|\s)\s*(\d{1,4}(?:[:h]\d{2})?h?)(?=$|[\s,;.()])/i.exec(reading);
+  if(hours){try{Object.assign(value,parseShiftTimes(hours[1],hours[2]));}catch{/* Preserve the validated reading when the literal hours cannot be parsed. */}}
+  if(/\bRS(?:\s*[-–—/]\s*|\s+)SS\b/i.test(reading+' '+(cell.note||''))){value.kind=cell.kind==='training'?'training':'shift';value.post='rs_ss';}
+  if(value.end-value.start>=8*60)value.breakMinutes=automaticBreakMinutes(value.start,value.end);
+  return normalizeCell(value);
+}
+
+export function applyPhotoRules(candidate){
+  if(!candidate)return candidate;
+  const rows=candidate.rows.map(row=>({...row,days:row.days.map((cell,i)=>{
+    if(!isTimedCell(cell))return cell; // A blurred or hidden digit is still a human verification task.
+    try{return normalizePhotoCell(cell,row.readings?.[i]||cell.rawText||'');}catch{return cell;}
+  })}));
+  // Discard obsolete gross-pay calculations; rebuild the checks from the corrected paid hours.
+  const warnings=(candidate.warnings||[]).filter(w=>!(/aucune? pause|durées? brutes?|h brutes?|heures transcrites représentent|total manuscrit.*(?:quarts lus|heures payées calculées)/i.test(w)));
+  return {...auditCandidate({...candidate,rows,warnings}),rulesVersion:1};
+}
+
 export function validateCandidate(value){
   if(!value||!Array.isArray(value.rows)||value.rows.length>32||!Array.isArray(value.warnings))throw Error('La transcription reçue est incomplète. Reprenez une photo plus lisible.');
   return {weekText:String(value.weekText||'').slice(0,120),departmentText:String(value.departmentText||'').slice(0,120),warnings:value.warnings.slice(0,25).map(v=>String(v).slice(0,300)),rows:value.rows.map(row=>{
@@ -34,13 +55,13 @@ export function validateCandidate(value){
     }
     return {name:String(row.name||'').slice(0,100),writtenTotal:String(row.writtenTotal||'').slice(0,40),readings:days.map(c=>String(c.rawText||'').slice(0,100)),days:days.map(cell=>{
       if(cell.uncertain||cell.kind==='review')return {kind:'review',start:null,end:null,breakMinutes:0,note:String(cell.note||cell.rawText||'Lecture incertaine : vérifier la photo').slice(0,100)};
-      try{return normalizeCell(cell);}catch{return {kind:'review',start:null,end:null,breakMinutes:0,note:'Heures non valides : vérifier la photo'};}
+      try{return normalizePhotoCell(cell,cell.rawText||'');}catch{return {kind:'review',start:null,end:null,breakMinutes:0,note:'Heures non valides : vérifier la photo'};}
     })};
   })};
 }
 
 function writtenMinutes(value){
-  const decimal=/^\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:h|heures?)?\s*$/i.exec(value);
+  const decimal=/^\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:h\.?|heures?)?\s*(?:cuisine|buffet|formation|pam|p\.a\.m\.)?\s*$/i.exec(value);
   if(decimal)return Math.round(Number(decimal[1].replace(',','.'))*60);
   const clock=/^\s*(\d{1,3})\s*[:h]\s*(\d{2})\s*$/i.exec(value);
   return clock&&Number(clock[2])<60?Number(clock[1])*60+Number(clock[2]):null;
@@ -51,7 +72,7 @@ export function auditCandidate(candidate){
   for(const row of candidate.rows){
     const expected=writtenMinutes(row.writtenTotal),sum=row.days.reduce((n,c)=>n+cellMinutes(c),0);
     if(expected!==null&&!row.days.some(c=>c.kind==='review')&&expected!==sum){
-      warnings.push(`${row.name||'Nom illisible'} : total manuscrit ${hoursLabel(expected)} h, quarts lus ${hoursLabel(sum)} h. Vérifiez les heures et les pauses; aucune pause n’a été déduite automatiquement.`);
+      warnings.push(`${row.name||'Nom illisible'} : total manuscrit ${hoursLabel(expected)} h, heures payées calculées ${hoursLabel(sum)} h. Vérifiez les journées, les postes et les pauses.`);
     }
     row.days.forEach((c,d)=>{if(isTimedCell(c)&&c.end-c.start>12*60)warnings.push(`${row.name||'Nom illisible'} — ${DAY_NAMES[d]} : quart de plus de 12 heures, à vérifier.`);});
   }
@@ -65,12 +86,12 @@ Repère les en-têtes lundi à dimanche et les limites réelles des lignes/colon
 Les grandes cases contiennent les quarts. La petite case blanche sous le quart est un total quotidien; la petite case colorée à côté est la disponibilité (J = journée, 0 = indisponible). Ni l'une ni l'autre ne sont des heures de début/fin. Les traits, cercles et surligneurs ne sont pas des chiffres. Lis les chiffres d'après leurs formes en comparant l'écriture sur la feuille, sans recopier un quart d'une autre ligne.
 
 HEURES MANUSCRITES
-Deux heures superposées dans une grande case sont le début puis la fin. La notation abrégée québécoise omet souvent deux-points et après-midi : 7 / 4 = 07:00–16:00; 630 / 330 = 06:30–15:30; 730 / 230 = 07:30–14:30; 815 / 515 = 08:15–17:15; 12 / 9 = 12:00–21:00. 830 signifie 8 h 30, jamais 8 h 03. Les minutes finales 15, 30 et 45 restent des minutes, pas des décimales. Pour un départ 5 / fin 9, le matin ou le soir doit être établi par les indications de la feuille; si les deux restent plausibles, marque review. Ne suppose aucun quart de nuit. Rends start/end en minutes depuis minuit. Une notation abrégée lisible et non ambiguë selon ces conventions n'est pas automatiquement uncertain. Un chiffre réellement illisible ou un matin/soir non résolu reste uncertain=true, kind=review avec le texte lisible en note.
-breakMinutes=0 sauf pause explicitement écrite. Les totaux peuvent être nets de repas non inscrits : un écart sert à demander une relecture, JAMAIS à inventer ou déplacer un quart, à changer ses heures ou à déduire une pause. writtenTotal reprend uniquement le total manuscrit de cette personne. Les sous-totaux de groupe et total de feuille ne sont pas des employés.
+Deux heures superposées dans une grande case sont le début puis la fin. La notation abrégée québécoise omet souvent deux-points et après-midi : 6 / 3 = 06:00–15:00; 7 / 4 = 07:00–16:00; 4 / 8 = 16:00–20:00; 430 / 8 = 16:30–20:00; 3 / 8 = 15:00–20:00; 630 / 330 = 06:30–15:30; 730 / 230 = 07:30–14:30; 815 / 515 = 08:15–17:15; 12 / 9 = 12:00–21:00. 830 signifie 8 h 30, jamais 8 h 03. Les minutes finales 15, 30 et 45 restent des minutes, pas des décimales. Convention du magasin : un quart court en heures abrégées commençant entre 1 et 5 avec une fin plus grande jusqu’à 12 est un quart d’après-midi (5 / 9 = 17:00–21:00). Un début 6 reste le matin. Une heure explicitement sur 24 h avec zéro initial, comme 04:00–08:00, reste le matin. Ne suppose aucun quart de nuit. Rends start/end en minutes depuis minuit. Une notation abrégée lisible et non ambiguë selon ces conventions n'est pas automatiquement uncertain. Un chiffre réellement illisible ou un matin/soir non résolu reste uncertain=true, kind=review avec le texte lisible en note.
+RÈGLE DU MAGASIN : tout quart de 8 heures ou plus sur l’horloge comprend automatiquement 60 minutes de pause non payée, même si aucune pause n’est écrite. Mets breakMinutes=60 dès que end-start>=480 : 6–15 et 7–16 donnent 8 h payées; 7–15 donne 7 h payées; 7–15:30 donne 7 h 30 payées; 7–16:30 donne 8 h 30 payées. Pour un quart de moins de 8 heures, breakMinutes=0 sauf pause explicitement écrite. Cette règle s’applique aussi à Formation, Buffet et Cuisine. Ne change pas les heures ou les jours pour faire correspondre un total. Le serveur calcule les heures payées et les écarts : ne génère aucun avertissement fondé sur les heures brutes ou l’absence de pause écrite. writtenTotal reprend uniquement le total manuscrit de cette personne. Les sous-totaux de groupe et total de feuille ne sont pas des employés.
 
 CODES ET POSTES
 CH ou C H = off; CD ou C D ou Congé demandé = requested; Vacances, même écrit une lettre par journée sur la semaine = vacation; Maladie = sick. Une case vraiment vide = blank; une case hors photo ou masquée = review. Une simple mention sans heures reste note (ou review si ambiguë).
-Formation avec heures = training; Buffet avec heures = buffet. Au PAM, Cuisine avec heures = kitchen et post=null (heures séparées du régulier). Les postes explicites Sandwichs, BBQ, Commandes Sandwich (ancien libellé RS-SS), Mets Cuisinés, Pizza + Sandwichs donnent post=sandwiches, bbq, rs_ss, cooked_meals, pizza_sandwiches avec kind=shift sauf formation explicite. Sans indication de poste, post=null. Fruits coupés explicitement indiqué ou la GRANDE case entièrement verte aux Fruits & Légumes = post=cut_fruit; la petite case de disponibilité verte ne suffit jamais. Ne déduis aucun poste d'un total.
+Formation avec heures = training; Buffet avec heures = buffet. Au PAM, Cuisine avec heures = kitchen et post=null (heures séparées du régulier). Les postes explicites Sandwichs, BBQ, Commandes Sandwich (RS-SS, RS SS et RS/SS sont ce même poste, jamais une note seule), Mets Cuisinés, Pizza + Sandwichs donnent post=sandwiches, bbq, rs_ss, cooked_meals, pizza_sandwiches avec kind=shift sauf formation explicite. Sans indication de poste, post=null. Fruits coupés explicitement indiqué ou la GRANDE case entièrement verte aux Fruits & Légumes = post=cut_fruit; la petite case de disponibilité verte ne suffit jamais. Ne déduis aucun poste d'un total.
 Un département d'accueil explicitement indiqué "À Viande", "À Poisson", etc. donne workDepartment=fruits, boulangerie, viande, charcuterie, pam, poissonnerie ou epicerie, sinon null. "De" suivi d'un département désigne un quart reçu déjà sur son horaire d'origine : review pour éviter le double comptage.
 
 IDENTITÉ ET SEMAINE
@@ -107,7 +128,7 @@ export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{f
   let first;
   try{first=await read();}catch(error){if(signal.aborted)throw Error('La lecture a pris trop de temps. Aucune heure n’a été modifiée. Réessayez avec une photo cadrée sur la feuille.');throw error;}
   // Save a usable proposal before the second network call, including if the server restarts.
-  await onFirstPass({...auditCandidate(first.candidate),analysis:{version:3,model,verification:'pending'}});
+  await onFirstPass(applyPhotoRules({...first.candidate,analysis:{version:4,model,verification:'pending'}}));
   let selected=first.candidate,verification='partial';
   try{
     const second=await read(first.raw);
@@ -116,5 +137,5 @@ export async function transcribePhoto({dataUrl,department,weekStart,names=[]},{f
   }catch{
     selected={...first.candidate,warnings:['La seconde vérification n’a pas abouti. Cette proposition provient de la première lecture : vérifiez chaque case sur la photo.',...first.candidate.warnings]};
   }
-  return {...auditCandidate(selected),analysis:{version:3,model,verification}};
+  return applyPhotoRules({...selected,analysis:{version:4,model,verification}});
 }

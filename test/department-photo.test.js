@@ -26,13 +26,13 @@ test('jours réordonnés par étiquette; doublon refusé; incertitude jamais con
   value.rows[0].days[0].day='Lundi';assert.throws(()=>validateCandidate(value),/colonnes/);
 });
 
-test('totaux nets : signaler la différence sans inventer de pause ni altérer les heures',()=>{
+test('totaux nets : pause automatique et écarts calculés sans altérer les heures',()=>{
   const value=proposal();value.rows[0].writtenTotal='8 h';
   const candidate=validateCandidate(value),result=auditCandidate(candidate);
-  assert.match(result.warnings[0],/total manuscrit 8 h, quarts lus 9 h/);
-  assert.deepEqual(result.rows,candidate.rows);assert.equal(result.rows[0].days[0].breakMinutes,0);
+  assert.deepEqual(result.warnings,[]);
+  assert.deepEqual(result.rows,candidate.rows);assert.equal(result.rows[0].days[0].breakMinutes,60);
   for(const kind of ['training','buffet','kitchen']){
-    const special=structuredClone(candidate);special.rows[0].days[0].kind=kind;special.rows[0].writtenTotal='9h00';assert.deepEqual(auditCandidate(special).warnings,[]);
+    const special=structuredClone(candidate);special.rows[0].days[0].kind=kind;special.rows[0].writtenTotal='8h00';assert.deepEqual(auditCandidate(special).warnings,[]);
   }
   const uncertain=structuredClone(candidate);uncertain.rows[0].days[0]={...blankCell(),kind:'review',note:'illisible'};assert.deepEqual(auditCandidate(uncertain).warnings,[]);
 });

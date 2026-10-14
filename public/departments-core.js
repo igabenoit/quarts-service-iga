@@ -31,7 +31,7 @@ export function parseTime(value,{end=false}={}){
   if(!m)return null;const n=Number(m[1])*60+Number(m[2]);
   return Number(m[2])<60&&n>=0&&n<=(end?1440:1439)?n:null;
 }
-export const quickTimeLabel=v=>`${Math.floor(v/60)}${v%60?'h'+String(v%60).padStart(2,'0'):''}`;
+export const quickTimeLabel=v=>v<6*60?timeLabel(v):`${Math.floor(v/60)}${v%60?'h'+String(v%60).padStart(2,'0'):''}`;
 function quickHour(value,{end=false}={}){
   const raw=String(value??'').trim().toLowerCase().replace(/\s+/g,'');
   let match=/^(\d{1,2})(?:h|[:h](\d{2}))?$/.exec(raw);
@@ -41,20 +41,23 @@ function quickHour(value,{end=false}={}){
   if(minute>59||minutes>(end?1440:1439))return null;
   return {minutes,afternoon:hour>=1&&hour<=12&&!match[1].startsWith('0')};
 }
-export function parseShiftTimes(startValue,endValue){
+export function parseShiftTimes(startValue,endValue,{shortShiftsInAfternoon=true}={}){
   const start=quickHour(startValue),end=quickHour(endValue,{end:true});
   if(!start||!end)throw Error('Indiquez les heures, par exemple 7 et 4, ou 7h30 et 16h30.');
-  let finish=end.minutes;
-  if(finish<=start.minutes&&end.afternoon)finish+=12*60;
-  if(finish<=start.minutes||finish>1440)throw Error('La fin doit suivre le début dans la même journée. Précisez l’heure sur 24 h, par exemple 16 ou 24.');
-  return {start:start.minutes,end:finish};
+  let begin=start.minutes,finish=end.minutes;
+  // Store convention: abbreviated short shifts starting before 6 are afternoon shifts.
+  // Explicit 24-hour input (04:00–08:00) remains available for an early morning shift.
+  if(shortShiftsInAfternoon&&start.afternoon&&end.afternoon&&begin<6*60&&finish>begin){begin+=12*60;finish+=12*60;}
+  else if(finish<=begin&&end.afternoon)finish+=12*60;
+  if(finish<=begin||finish>1440)throw Error('La fin doit suivre le début dans la même journée. Précisez l’heure sur 24 h, par exemple 16 ou 24.');
+  return {start:begin,end:finish};
 }
 export function parseAvailability(value){
   const raw=availabilityCode(value).replace(/[–—−]/g,'-');
   if(!raw||['J','0'].includes(raw))return raw;
   const parts=raw.split(',').map(v=>v.trim().split('-'));
   if(parts.length>2||parts.some(p=>p.length!==2))throw Error('Utilisez 7 - 4, J, 0 ou deux plages séparées par une virgule.');
-  const ranges=parts.map(([start,end])=>parseShiftTimes(start,end)).sort((a,b)=>a.start-b.start);
+  const ranges=parts.map(([start,end])=>parseShiftTimes(start,end,{shortShiftsInAfternoon:false})).sort((a,b)=>a.start-b.start);
   return ranges.map(r=>timeLabel(r.start)+'-'+timeLabel(r.end)).join(', ');
 }
 export function normalizeAvailability(value={}){
@@ -68,6 +71,7 @@ export function normalizeAvailability(value={}){
 export const blankCell=()=>({kind:'blank',start:null,end:null,breakMinutes:0,note:''});
 export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Commandes Sandwich',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs'});
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
+export const automaticBreakMinutes=(start,end)=>Number.isFinite(start)&&Number.isFinite(end)&&end-start>=8*60?60:0;
 export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-c.breakMinutes:0;
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);

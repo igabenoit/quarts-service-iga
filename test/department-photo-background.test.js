@@ -44,7 +44,7 @@ test('redémarrage du serveur : état périmé libéré, erreur visible et premi
   let calls=0;const f=await setup({fetchImpl:async()=>{calls++;return response();}});
   try{
     await f.pool.query("UPDATE schedule_department_photos SET state='processing',phase='verifying',started_at=clock_timestamp()-interval '6 minutes',operation_id='lost',attempts=1,candidate=$2 WHERE id=$1",[f.id,JSON.stringify(candidate)]);
-    const state=await f.state();assert.equal(state.busy,false);assert.equal(state.state,'ready');assert.match(state.lastError,/interrompue/);assert.deepEqual(state.candidate,candidate);assert.equal(state.attempts,1);assert.equal(calls,0);
+    const state=await f.state();assert.equal(state.busy,false);assert.equal(state.state,'ready');assert.match(state.lastError,/interrompue/);assert.deepEqual(state.candidate,{...candidate,rulesVersion:1});assert.equal(state.attempts,1);assert.equal(calls,0);
     assert.equal((await f.pool.query('SELECT operation_id FROM schedule_department_photos WHERE id=$1',[f.id])).rows[0].operation_id,null);
   }finally{await f.db.close();}
 });
