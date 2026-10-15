@@ -11,6 +11,22 @@ test('presence includes named leadership and Service supervisors, explicit links
   const roster=leadershipRoster(people,[{id:1,key:'fruits'},{id:2,key:'pam'},{id:3,key:'service'}],[{id:1,role:'supervisor',shifts:[]}]);
   assert.equal(roster.length,3);assert.deepEqual(roster.find(p=>p.id===1).departmentKeys,['fruits','pam']);assert.ok(roster.some(p=>p.name==='Badia'));
 });
+
+test('attendance includes Administration titles and a Service manager without selecting ordinary department staff',()=>{
+  const departments=[{id:1,key:'administration'},{id:2,key:'service'},{id:3,key:'fruits'}];
+  const people=[
+    {id:1,name:'Bureau',jobTitle:'Adjointe administrative',departments:[1],active:true},
+    {id:2,name:'Propriétaire',jobTitle:'Copropriétaire',departments:[1],active:true},
+    {id:3,name:'Sans titre',departments:[1],active:true},
+    {id:4,name:'Gérante Service',serviceEmployeeId:10,departments:[2],active:true},
+    {id:5,name:'Commis',jobTitle:'Commis',departments:[3],active:true},
+    {id:6,name:'Inactif',departments:[1],active:false}
+  ];
+  const roster=leadershipRoster(people,departments,[{id:10,role:'manager',shifts:[]}]);
+  assert.deepEqual(roster.map(p=>p.id).sort(),[1,2,3,4]);
+  assert.equal(roster.find(p=>p.id===4).title,'Gérante');
+  assert.equal(roster.find(p=>p.id===3).title,'Administration');
+});
 test('seven daily pages distinguish off, missing, blank and overnight carry-over; packet alternates by day',()=>{
   const roster=[{id:1,name:'Émile <test>',title:'Assistant',departmentKeys:['fruits']},{id:2,name:'Sana',title:'Gérante',departmentKeys:['boulangerie']}];
   const employee={id:1,days:DAY_NAMES.map((name,i)=>({name,date:addDays(week,i),entries:i===0?[{start:1320,end:1830,minutes:480,department:'Fruits & Légumes',departmentKeys:['fruits']}]:i===3?[{hours:'Congé',minutes:null}]:[]}))};
@@ -28,17 +44,24 @@ test('attendance API protects all-store data, returns only leaders and published
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
   const call=async(session={role:'manager'},date=week)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api/weeks/${date}/leadership-presence`,{headers:session?{'x-test-session':JSON.stringify(session)}:{}});return {status:r.status,body:await r.json()};};
   try{
-    const serviceId=Number((await f.pool.query("INSERT INTO schedule_employees(name,area,role) VALUES('Superviseure Service','front','supervisor') RETURNING id")).rows[0].id);
+    const serviceId=Number((await f.pool.query("INSERT INTO schedule_employees(name,area,role) VALUES('Gérante Service','front','manager') RETURNING id")).rows[0].id);
     const meta=(await f.call('get','/api/departments/meta')).body,dept=k=>meta.departments.find(d=>d.key===k);
     async function person(name,title,key){return (await f.call('post','/api/departments/people',{body:{name,jobTitle:title,group:'regular',active:true,departments:[dept(key).id],availability:{},email:'private@example.com',sourceNote:'Secret'}})).body.id;}
-    const leader=await person('Gérante Fruits','Gérante','fruits'),clerk=await person('Commis Fruits','Commis','fruits'),missing=await person('Gérant Viande','Gérant','viande');
+    const leader=await person('Gérante Fruits','Gérante','fruits'),clerk=await person('Commis Fruits','Commis','fruits'),missing=await person('Gérant Viande','Gérant','viande'),office=await person('Employée Bureau','Adjointe administrative','administration');
     const cells=Array.from({length:7},(_,i)=>i===0?{kind:'shift',start:420,end:960,breakMinutes:60,note:'Note privée'}:blankCell());
     for(const [key,ids,pub] of [['fruits',[leader,clerk],true],['viande',[missing],false]]){const draft=JSON.stringify({rows:ids.map(personId=>({personId,name:'Test',cells})),notes:'Notes privées'});await f.pool.query('INSERT INTO schedule_department_weeks(department_id,week_start,draft,published) VALUES($1,$2,$3,$4)',[dept(key).id,week,draft,pub?draft:null]);}
+    const officeDraft=JSON.stringify({rows:[{personId:office,name:'Employée Bureau',cells}],notes:''});
+    await f.pool.query('INSERT INTO schedule_department_weeks(department_id,week_start,draft) VALUES($1,$2,$3)',[dept('administration').id,week,officeDraft]);
+    const unpublished=(await call()).body.days[0].people.find(p=>p.id===office);
+    assert.equal(unpublished.shifts.length,0);assert.match(unpublished.status,/non publié/);
+    await f.pool.query('UPDATE schedule_department_weeks SET published=draft WHERE department_id=$1 AND week_start=$2',[dept('administration').id,week]);
     await f.pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1)',[week]);const shift=(await f.pool.query("INSERT INTO schedule_shifts(week_start,area,role,day_index,start_minute,end_minute) VALUES($1,'front','supervisor',0,480,1020) RETURNING id",[week])).rows[0].id;await f.pool.query('INSERT INTO schedule_assignments(shift_id,employee_id) VALUES($1,$2)',[shift,serviceId]);
     const account=async key=>{const id=(await f.pool.query("INSERT INTO schedule_manager_accounts(name,login,password_hash,departments) VALUES($1,$1,'unused',$2) RETURNING id",[key,JSON.stringify([dept(key).id])])).rows[0].id;return {role:'manager',accountId:Number(id),accountVersion:1};};
     assert.equal((await call(null)).status,401);assert.equal((await call(await account('fruits'))).status,403);
     const serviceResponse=await call(await account('service'));assert.equal(serviceResponse.status,200,JSON.stringify(serviceResponse.body));assert.equal(serviceResponse.body.days.length,7);
-    const data=(await call()).body;assert.equal(data.days[0].people.length,3);assert.equal(data.days[0].people.find(p=>p.id===leader).shifts.length,1);assert.equal(data.days[0].people.find(p=>p.id===missing).shifts.length,0);assert.ok(data.days[0].people.some(p=>p.name==='Superviseure Service'&&p.shifts.length));
+    const data=(await call()).body;assert.equal(data.days[0].people.length,4);assert.equal(data.days[0].people.find(p=>p.id===leader).shifts.length,1);assert.equal(data.days[0].people.find(p=>p.id===missing).shifts.length,0);assert.ok(data.days[0].people.some(p=>p.name==='Gérante Service'&&p.title==='Gérante'&&p.shifts.length));
+    assert.equal(data.days[0].people.find(p=>p.id===office).shifts[0].start,420);
+    const html=presencePages(data)[0];assert.match(html,/theme-administration/);assert.match(html,/Employée Bureau/);assert.match(html,/Gérante Service<\/strong><small>Gérante/);
     assert.doesNotMatch(JSON.stringify(data),/Commis Fruits|private@example|Note privée|Notes privées|Secret/);assert.equal((await f.pool.query('SELECT * FROM schedule_department_views')).rows.length,0);assert.equal((await f.pool.query('SELECT * FROM schedule_schedule_views')).rows.length,0);assert.equal((await call(undefined,'2026-10-20')).status,400);
   }finally{await new Promise(r=>server.close(r));await f.db.close();}
 });

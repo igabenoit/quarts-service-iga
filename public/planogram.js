@@ -13,8 +13,8 @@
     const minutes = shift.endMinute - shift.startMinute;
     const pauses = minutes >= 360 ? 2 : minutes >= 180 ? 1 : 0;
     const meal = minutes >= 480;
-    const rowClass = employee ? (employee.role === "supervisor" || shift.role === "supervisor" ? ' class="plano-supervisor"' : "") : ' class="plano-unfilled"';
-    return `<tr${rowClass}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name) : "&nbsp;"}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
+    const rowClass = employee ? (["manager","supervisor"].includes(employee.role) || ["manager","supervisor"].includes(shift.role) ? ' class="plano-supervisor"' : "") : ' class="plano-unfilled"';
+    return `<tr${rowClass}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name)+(employee.role==='manager'?'<small class="plano-role">Gérante</small>':'') : "&nbsp;"}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
   };
 
   window.createPlanogramPages = ({ weekStart, shifts, assignments, employees }) => {
@@ -27,7 +27,7 @@
     const assignedIds = new Set(scheduled.map(item => item.shift.id));
     const unfilledShifts = shifts.filter(shift => !assignedIds.has(shift.id)).map(shift => ({ shift, employee: null }));
     const groups = [
-      { title: "CAISSIÈRES ET SUPERVISEURS", roles: ["cashier", "supervisor"] },
+      { title: "GÉRANTE, CAISSIÈRES ET SUPERVISEURS", roles: ["cashier", "supervisor", "manager"] },
       { title: "EMBALLEURS", roles: ["packer"] },
     ];
     const rowsFor = (day, group) => [...scheduled, ...unfilledShifts]

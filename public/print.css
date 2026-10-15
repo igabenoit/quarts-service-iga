@@ -76,3 +76,5 @@ body.printing-planogram #planoPrintSheet { display: block !important; }
 .plano-slot { background: #fff; }
 .plano-empty td { color: #77818b; text-align: left; padding-left: 9px; }
 .plano-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #cbd3d9; color: #66717b; font-size: 7pt; }
+
+.plano-role{display:block;font-size:.8em;font-weight:400}
