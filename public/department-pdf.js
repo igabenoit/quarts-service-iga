@@ -23,11 +23,11 @@ export function sheetOverflowMessage(sheet){
 export async function schedulePDF(sheet,{label}={}){
   return schedulePagesPDF([sheet],{label});
 }
-export async function schedulePagesPDF(sheets,{label,previewSelector='#printPreview .department-sheet'}={}){
+export async function schedulePagesPDF(sheets,{label,previewSelector='#printPreview .department-sheet',validateSheet=sheetOverflowMessage}={}){
   if(!sheets.length)throw Error('Aucune feuille à imprimer.');
   await loadLibraries();await document.fonts.ready;
   await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
-  for(const sheet of sheets){const overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);}
+  for(const sheet of sheets){const overflow=validateSheet(sheet);if(overflow)throw Error(overflow);}
   const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'legal',compress:true});
   for(const [index,sheet] of sheets.entries()){
     const canvas=await window.html2canvas(sheet,{scale:3,backgroundColor:'#ffffff',logging:false,useCORS:false,
