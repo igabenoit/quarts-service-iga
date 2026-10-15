@@ -292,3 +292,6 @@ body{background:white}
 .department-publication{display:flex;align-items:center;gap:7px;font-size:.62rem;line-height:1.35;font-weight:400;text-align:left;color:#4f5f54}
 .department-publication .publication-light{width:8px;height:8px;flex-basis:8px}
 @media(max-width:650px){.week-bar{flex-wrap:wrap}.publication-status{max-width:100%;width:100%}.department-nav button{flex:1 1 140px;max-width:none}}
+
+/* Keep the recovered footer space for employee rows. */
+.department-sheet .sheet-bottom{justify-content:flex-end;flex-shrink:0}

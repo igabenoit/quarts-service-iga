@@ -14,8 +14,8 @@ export function sheetOverflowMessage(sheet){
   const bounds=sheet.getBoundingClientRect();
   if(!(bounds.width>0&&bounds.height>0))return 'Affichez la feuille imprimable avant de préparer le PDF.';
   const safeBottom=bounds.bottom-parseFloat(getComputedStyle(sheet).paddingBottom);
-  const notes=sheet.querySelector('.sheet-notes');
-  if(sheet.scrollHeight>sheet.clientHeight+2||notes.getBoundingClientRect().bottom>safeBottom+2||notes.querySelector('p').getBoundingClientRect().bottom>safeBottom+2)return 'Le contenu dépasse la page légale. Raccourcissez les notes ou précisions avant de préparer le PDF. Aucun employé ne sera coupé.';
+  const contentBottom=Math.max(bounds.top,...[...sheet.children].filter(el=>getComputedStyle(el).display!=='none').map(el=>el.getBoundingClientRect().bottom));
+  if(sheet.scrollHeight>sheet.clientHeight+2||contentBottom>safeBottom+2)return 'Le contenu dépasse la page légale. Réduisez les titres ou précisions trop longs avant de préparer le PDF. Aucun employé ne sera coupé.';
   const overflow=[...sheet.querySelectorAll('.sheet-work,.sheet-person-label,.sheet-day-detail span')].find(el=>el.scrollHeight>el.clientHeight+2||el.scrollWidth>el.clientWidth+2);
   if(overflow){const label=overflow.closest?.('.sheet-person')?.querySelector('.sheet-person-label'),name=label?.childNodes?.[0]?.textContent?.trim();return `Un texte dépasse une case${name?' pour « '+name+' »':''}. Raccourcissez les titres, précisions ou notes avant de préparer le PDF. Aucun employé ne sera coupé.`;}
   return '';
