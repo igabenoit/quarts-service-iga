@@ -1,3 +1,4 @@
+import {prepareSharedDraft} from './public/department-buffet.js';
 import {installDepartmentMail} from './department-mail.js';
 import {isScoped,ownsDepartment,assertDepartment} from './manager-access.js';
 import crypto from 'node:crypto';
@@ -5,7 +6,7 @@ import {installEmployeePortal,saveEmployeeCode,employeePersonIds} from './employ
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
-import {incomingFor,assertTransferSlots} from './department-transfers.js';
+import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
 import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -17,6 +18,7 @@ const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.stat
 export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch,photoTimeoutMs=PHOTO_ANALYSIS_TIMEOUT_MS+5000}){
   await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
     CREATE TABLE IF NOT EXISTS schedule_store_people(id BIGSERIAL PRIMARY KEY,service_employee_id BIGINT UNIQUE,name TEXT NOT NULL,seniority_date DATE,birthday DATE,email TEXT NOT NULL DEFAULT '',employment_group TEXT NOT NULL DEFAULT 'regular' CHECK(employment_group IN('regular','part_time')),availability JSONB NOT NULL DEFAULT '{}',active BOOLEAN NOT NULL DEFAULT TRUE,source_note TEXT NOT NULL DEFAULT '',verified_at TIMESTAMPTZ,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+    ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS buffet_pam_priority BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS job_title TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS specification TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS schedule_store_memberships(person_id BIGINT REFERENCES schedule_store_people(id),department_id BIGINT REFERENCES schedule_leave_departments(id),PRIMARY KEY(person_id,department_id));
@@ -49,7 +51,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const people=records.map(r=>{
       const service=!!r.service_employee_id;
       const a=service?employeeAvailability({availability:r.service_availability,availability_history:r.availability_history,target_minutes:r.target_minutes},weekStart).availability:null;
-      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',portalPersonId:r.portal_person_id?Number(r.portal_person_id):null,email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
+      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',buffetPamPriority:r.buffet_pam_priority===true,seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',portalPersonId:r.portal_person_id?Number(r.portal_person_id):null,email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
     });
     // Compact the visible ranks, including changes inherited from Service.
     for(const departmentId of new Set(memberships.map(m=>Number(m.department_id))))for(const group of ['regular','part_time']){
@@ -66,7 +68,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const members=await peopleFor(id,client,start),d=await department(id,client),weeks=await transferWeeks(start,client),row=weeks.find(w=>Number(w.department_id)===Number(id));
     const incoming=incomingFor(weeks,d.key),guestIds=new Set(incoming.map(i=>i.personId)),people=[...members];
     if(guestIds.size)for(const p of await directory(client,start))if(guestIds.has(p.id)&&!people.some(m=>m.id===p.id))people.push({...p,visiting:true});
-    return {department:d,weekStart:start,people,incoming,draft:row?.draft||emptyDraft(members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
+    const related=relatedFor(weeks,d.key,await directory(client,start),people);
+    return {department:d,weekStart:start,people,incoming,related,draft:row?.draft||emptyDraft(members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
   }
   async function transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
   async function saveWeek(client,current,draft,action,published=current.published){
@@ -87,16 +90,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const minute=(date,n=0)=>Date.parse(iso(date)+'T00:00:00Z')/60000+Number(n);
     const overlaps=(start,end,otherStart,otherEnd)=>start<otherEnd&&otherStart<end;
     const previous=addDays(current.weekStart,-7),next=addDays(current.weekStart,7);
-    const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.week_start,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start BETWEEN $1 AND $2 AND (week_start<>$3 OR department_id<>$4) AND published IS NOT NULL',[previous,next,current.weekStart,current.department.id])).rows;
-    for(const row of display.rows)for(let day=0;day<7;day++){
-      const c=row.cells[day];if(!isTimedCell(c))continue;
-      const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
-      for(const other of others){
-        if(iso(other.week_start)===current.weekStart&&(c.sourceDepartment||current.department.key)===other.key)continue;
-        const match=other.published.rows.find(r=>r.personId===row.personId);if(!match)continue;
-        if(match.cells.some((cell,d)=>isTimedCell(cell)&&overlaps(start,end,minute(other.week_start,d*1440+cell.start),minute(other.week_start,d*1440+cell.end))))warnings.push((current.people.find(p=>p.id===row.personId)?.name||'Employé retiré')+' : chevauchement avec '+other.name+', le '+date+'.');
-      }
-    }
+    const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.week_start,w.draft,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start BETWEEN $1 AND $2 AND (week_start<>$3 OR department_id<>$4)',[previous,next,current.weekStart,current.department.id])).rows;
+    warnings.push(...crossDepartmentWarnings(current,display,others,await directory(client,current.weekStart)));
     const relevantKeys=[...new Set([current.department.key,...display.rows.flatMap(r=>r.cells.flatMap(c=>[c.workDepartment,c.sourceDepartment].filter(Boolean)))])];
     const leaves=(await client.query("SELECT l.employee_name,l.periods,l.effective_periods,d.schedule_key AS key FROM schedule_leave_requests l JOIN schedule_leave_departments d ON d.id=l.department_id WHERE d.schedule_key=ANY($1::text[]) AND l.status='approved' AND l.is_test=FALSE AND l.archived_at IS NULL AND l.first_date<=$3 AND l.last_date>=$2",[relevantKeys,current.weekStart,next])).rows;
     const assignments=(await client.query('SELECT a.employee_id,s.week_start,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start BETWEEN $1 AND $2',[previous,next])).rows;
@@ -177,11 +172,14 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(!ids.length||ids.some(id=>!departments.some(d=>d.id===id)))fail('Choisissez au moins un département.');
     if(!previous?.serviceEmployeeId&&ids.some(id=>departments.find(d=>d.id===id).key==='service'))fail('Ajoutez les employés du Service depuis leur section existante, puis utilisez leur fiche dans ce répertoire.');
     if(previous?.serviceEmployeeId){const serviceId=departments.find(d=>d.key==='service').id;if(!ids.includes(serviceId))ids.push(serviceId);}
+    const buffetPamPriority=body.buffetPamPriority??previous?.buffetPamPriority??false;
+    if(typeof buffetPamPriority!=='boolean')fail('Règle Buffet invalide.');
+    if(buffetPamPriority&&!['pam','charcuterie'].every(key=>ids.some(id=>departments.find(d=>d.id===id)?.key===key)))fail('La priorité Buffet exige les départements PAM et Charcuterie.');
     const availability=normalizeAvailability(body.availability||{});
-    const args=[previous?.serviceEmployeeId?previous.name:name,previous?.serviceEmployeeId?null:seniority||null,birthday||null,email,body.group,JSON.stringify(availability),body.active,source,seniority&&body.seniorityVerified?new Date():null,jobTitle,specification];
+    const args=[previous?.serviceEmployeeId?previous.name:name,previous?.serviceEmployeeId?null:seniority||null,birthday||null,email,body.group,JSON.stringify(availability),body.active,source,seniority&&body.seniorityVerified?new Date():null,jobTitle,specification,buffetPamPriority];
     let saved;
-    if(id)saved=(await client.query('UPDATE schedule_store_people SET name=$1,seniority_date=$2,birthday=$3,email=$4,employment_group=$5,availability=$6,active=$7,source_note=$8,verified_at=$9,job_title=$10,specification=$11,version=version+1,updated_at=clock_timestamp() WHERE id=$12 RETURNING id',[...args,id])).rows[0];
-    else{if(list.some(p=>nameKey(p.name)===nameKey(name))&&body.distinctPerson!==true)fail('Un nom identique existe déjà. Utilisez sa fiche pour ajouter un département, ou confirmez qu’il s’agit d’une autre personne.',409);saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id',args)).rows[0];}
+    if(id)saved=(await client.query('UPDATE schedule_store_people SET name=$1,seniority_date=$2,birthday=$3,email=$4,employment_group=$5,availability=$6,active=$7,source_note=$8,verified_at=$9,job_title=$10,specification=$11,buffet_pam_priority=$12,version=version+1,updated_at=clock_timestamp() WHERE id=$13 RETURNING id',[...args,id])).rows[0];
+    else{if(list.some(p=>nameKey(p.name)===nameKey(name))&&body.distinctPerson!==true)fail('Un nom identique existe déjà. Utilisez sa fiche pour ajouter un département, ou confirmez qu’il s’agit d’une autre personne.',409);saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification,buffet_pam_priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id',args)).rows[0];}
     await saveEmployeeCode(client,saved.id,body.employeeCode);
     if(previous?.serviceEmployeeId&&!(await client.query('SELECT 1 FROM schedule_employees WHERE id=$1',[previous.serviceEmployeeId])).rows.length)fail('La fiche Service a été annulée. Réactualisez le répertoire.',409);
     if(previous?.serviceEmployeeId)await client.query('INSERT INTO schedule_employee_contacts(employee_id,email) VALUES($1,$2) ON CONFLICT(employee_id) DO UPDATE SET email=EXCLUDED.email,updated_at=clock_timestamp()',[previous.serviceEmployeeId,email]);
@@ -327,6 +325,9 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       for(const r of schedule.rows)r.birthdayMonthDay=iso(req.employee.birthday).slice(5);
       for(const r of schedule.rows)await pool.query(`INSERT INTO schedule_department_views(department_id,week_start,person_id,published_at) VALUES($1,$2,$3,$4) ON CONFLICT(department_id,week_start,person_id,published_at) DO UPDATE SET last_viewed_at=clock_timestamp(),view_count=schedule_department_views.view_count+1`,[d.id,start,r.personId,publishedAt]);
     }
+    const directoryPeople=await directory(pool,start),members=directoryPeople.filter(p=>schedule.rows.some(r=>r.personId===p.id));
+    const prepared=prepareSharedDraft(schedule,relatedFor(weeks,d.key,directoryPeople,members,{published:true}),members,d.key);
+    for(const row of schedule.rows){const adjusted=prepared.draft.rows.find(r=>r.personId===row.personId);row.cells=adjusted.cells;}
     res.json({department:d,weekStart:start,schedule,publishedAt});
   }));
   app.get('/api/departments/:id/weeks/:week/views',requireManager,endpoint(async(req,res)=>{

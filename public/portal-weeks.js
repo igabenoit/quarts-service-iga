@@ -19,6 +19,7 @@ export function selectedWeek(previous,list,previousToday,reset=false){
 // Incoming transfers are another view of their source shift, not a second shift.
 export function personalDays(week,results){
   const days=DAY_NAMES.map((name,index)=>({name,date:addDays(week,index),entries:[]}));
+  const seenBuffet=new Set();
   const origins=new Set(results.filter(r=>r.kind==='department').map(r=>r.data.department.key));
   const roles={supervisor:'Supervision',orders:'Commandes téléphoniques',cashier:'Caisse',packer:'Emballage',support:'Aide autre département'};
   for(const result of results){
@@ -26,14 +27,20 @@ export function personalDays(week,results){
     if(data.weekStart!==week)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');
     for(const person of result.kind==='service'?data.employees:data.schedule.rows)for(const day of days)if(person.birthdayMonthDay===day.date.slice(5))day.birthday=true;
     if(result.kind==='service'){
-      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:roles[s.role]||s.role,minutes:serviceShiftTiming(s.startMinute,s.endMinute).paidMinutes,birthday:person.birthdayMonthDay});
+      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:roles[s.role]||s.role,minutes:serviceShiftTiming(s.startMinute,s.endMinute).paidMinutes,start:s.startMinute,birthday:person.birthdayMonthDay});
     }else{
       for(const row of data.schedule.rows)row.cells.forEach((c,index)=>{
         if(c.sourceDepartment&&origins.has(c.sourceDepartment)||c.kind==='blank')return;
+        if(c.buffetAllocation){if(seenBuffet.has(c.buffetAllocation.key))return;seenBuffet.add(c.buffetAllocation.key);}
         const timed=isTimedCell(c);
-        days[index].entries.push({department:departmentLabel(c.workDepartment||data.department.key),hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?cellDetail(c):'',minutes:timed?cellMinutes(c):null,birthday:row.birthdayMonthDay});
+        const department=c.buffetAllocation?[c.buffetAllocation.pam&&'Prêt-à-manger',c.buffetAllocation.charcuterie&&'Charcuterie'].filter(Boolean).join(' / '):departmentLabel(c.workDepartment||data.department.key);
+        days[index].entries.push({department,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:timed?cellMinutes(c):null,birthday:row.birthdayMonthDay,start:c.start});
       });
     }
+  }
+  for(const day of days){
+    if(day.entries.some(c=>c.minutes!==null))day.entries=day.entries.filter(c=>c.minutes!==null);
+    day.entries.sort((a,b)=>(a.start??0)-(b.start??0));
   }
   return days;
 }

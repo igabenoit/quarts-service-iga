@@ -271,3 +271,13 @@ body{background:white}
 .birthday-greeting{display:block;font-weight:700;color:#814000;font-size:.85em}.sheet-work .birthday-greeting{font-size:7px;line-height:1.1}
 
 .consultation-week{font-size:1.05rem}.consultation-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:16px;background:#eaf1ff;border-radius:12px;color:#214c88}.consultation-list{list-style:none;padding:0;margin:18px 0}.consultation-list li{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 4px;border-bottom:1px solid #dfe5e1}.consultation-status{font-size:.9rem}.consultation-status.seen{color:#176747}.consultation-status.pending{color:#86560b}
+
+.manager-password{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin:12px 0}.manager-password code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:1rem;user-select:all}.manager-password small{color:#526052}
+.printed-shift{display:flex;flex-direction:column;align-items:center;width:100%}
+.multi-shift-row .sheet-work{height:auto;min-height:30.45pt;overflow:visible}
+.sheet-work.multiple-shifts{gap:3pt;padding:3pt 1pt}
+.multiple-shifts .printed-shift+.printed-shift{border-top:.5pt solid #aab3a2;padding-top:3pt}
+.all-posts-total{display:block;font-size:5.5pt;border-top:.5pt solid #aab3a2;padding-top:2pt;margin-top:2pt}
+.shared-print-note{font-size:7pt;margin:2pt 0 5pt;color:#3b3f37}
+
+.schedule-conflicts{background:#fff0ee;border:2px solid #b53129;color:#7d211c}

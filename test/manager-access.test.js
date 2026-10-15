@@ -14,7 +14,7 @@ test('individual accounts: administration, department boundaries, revocation and
   // Test-only sessions replace signature verification, which remains in server.js.
   const readSession=req=>{try{return JSON.parse(req.headers['x-test-session']||'null');}catch{return null;}};
   const origin=(req,res,next)=>req.headers.origin&&req.headers.origin!=='https://same.example'?res.status(403).json({error:'origin'}):next();
-  const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true});
+  const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true,credentialSecret:'test-only-secret-for-recoverable-passwords'});
   const guard=async(req,res,next)=>{try{await access.authorize(req);next();}catch(e){res.status(e.status||500).json({error:e.message});}};
   for(const [key,handlers] of f.routes){const space=key.indexOf(' '),method=key.slice(0,space),path=key.slice(space+1);if(path.startsWith('/api/departments')||path.startsWith('/api/leave/'))app[method](path,guard,handlers.at(-1));}
   for(const path of ['/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool'])app.get(path,guard,(_q,res)=>res.json({ok:true}));
@@ -27,9 +27,20 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/manager-accounts',{method:'POST',body,origin:'https://wrong.example'})).status,403);
     const created=await call('/api/manager-accounts',{method:'POST',body});assert.equal(created.status,200);let account=created.body.accounts[0];
     assert.equal('password_hash' in account,false);
+    assert.equal('password_encrypted' in account,false);assert.equal(account.passwordAvailable,true);
+    const reveal='/api/manager-accounts/'+account.id+'/password';
+    assert.equal((await call(reveal,{method:'POST',session:null})).status,401);
+    assert.equal((await call(reveal,{method:'POST',origin:'https://wrong.example'})).status,403);
+    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password);
+    const stored=(await f.pool.query('SELECT password_encrypted FROM schedule_manager_accounts WHERE id=$1',[account.id])).rows[0].password_encrypted;
+    assert.ok(stored.startsWith('v1.'));assert.ok(!stored.includes(body.password));
+    await f.pool.query('UPDATE schedule_manager_accounts SET password_encrypted=NULL WHERE id=$1',[account.id]);
+    assert.equal((await call(reveal,{method:'POST'})).status,409);
     assert.equal((await call('/api/manager-accounts',{method:'POST',body})).status,409);
     const login=await call('/api/manager-login',{method:'POST',session:null,body:{login:'GERANT.TEST',password:body.password}});assert.equal(login.status,200);assert.match(login.cookie,/HttpOnly; SameSite=Strict/);assert.match(login.cookie,/Secure/);
     const session=JSON.parse(decodeURIComponent(login.cookie.split(';')[0].split('=').slice(1).join('=')));
+    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password,'successful legacy login enables recovery');
+    assert.equal((await call(reveal,{method:'POST',session})).status,403);
     assert.equal((await call('/api/manager-accounts',{session})).status,403);
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',session,body:{...body,version:1,departments:[meat]}})).status,403);
     const meta=await call('/api/departments/meta',{session});assert.deepEqual(meta.body.departments.map(d=>d.id),[fruit]);
@@ -70,6 +81,7 @@ test('individual accounts: administration, department boundaries, revocation and
     const serviceSession=JSON.parse(decodeURIComponent(serviceLogin.cookie.split(';')[0].split('=').slice(1).join('=')));
     assert.equal((await call('/api/employees',{session:serviceSession})).status,200);
     account=saved.body.accounts[0];
+    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password,'blank password preserves recoverability');
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',body:{...body,password:'',version:account.version,active:false}})).status,200);
     assert.equal((await call('/api/employees',{session:serviceSession})).status,401);
     assert.equal((await call('/api/manager-login',{method:'POST',session:null,body:{login:body.login,password:body.password}})).status,401);

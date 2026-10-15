@@ -1,10 +1,12 @@
+import {prepareSharedDraft} from './department-buffet.js';
 import {schedulePDF,sheetOverflowMessage} from './department-pdf.js';
 import {isBirthday,comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,automaticBreakMinutes,cellBreakMinutes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,PAM_POSTS,KITCHEN_POSTS,COMMON_POSTS,assignmentPost,grandMinutes,mergeIncoming,validateAssignment,cellDetail,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
 const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,viewsSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous depuis le lien « Connexion » en haut de la page.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
-const displayDraft=()=>orderDraft(mergeIncoming(current.draft,current.incoming||[]),current.people,selectedDepartment);
+const sharedDisplay=()=>prepareSharedDraft(mergeIncoming(current.draft,current.incoming||[]),current.related||[],current.people,current.department.key);
+const displayDraft=()=>orderDraft(sharedDisplay().draft,current.people,selectedDepartment);
 // Writes always target the sheet actually loaded, never a picker being edited.
 const route=()=>`/api/departments/${current.department.id}/weeks/${current.weekStart}`;
 let weekLocks=0,weekLoading=false,savingDraft;
@@ -30,7 +32,7 @@ async function loadWeek({departmentId=selectedDepartment,weekStart=current?.week
   $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
   $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();if(view==='views')await loadViews();message('');}catch(error){if(sequence===loadSequence&&current){selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;renderNavigation();}throw error;}finally{if(sequence===loadSequence){weekLoading=false;$('#managerContent').inert=weekLocks>0;}}
 }
-function renderWarnings(){const warnings=current.warnings||[];$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
+function renderWarnings(){const warnings=current.warnings||[],conflicts=warnings.filter(w=>w.includes('chevauchement'));$('#scheduleConflicts').hidden=!conflicts.length;$('#scheduleConflicts').innerHTML='<strong>Conflits d’horaires à corriger</strong><ul>'+conflicts.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
 function renderSchedule(){
   renderCopyBar();const rows=displayDraft().rows;
   $('#transferInfo').hidden=!(current.incoming||[]).length;$('#transferInfo').textContent='Les quarts reçus sont comptés ici et se modifient depuis leur horaire d’origine. Leur affichage en ligne suit la publication du département d’origine.';
@@ -187,7 +189,7 @@ function renderPersonalAccess(person){
 function openPerson(person){
   if(person&&meta.account?.kind==='account'&&person.departments.some(id=>!meta.departments.some(d=>d.id===id))){message('Cette fiche est partagée avec un autre département. Demandez à l’administration de modifier les renseignements communs. Vous pouvez gérer les quarts dans votre horaire.');return;}
   editingPerson=person||null;$('#personForm').reset();$('#personError').textContent='';$('#personTitle').textContent=person?'Modifier la fiche':'Ajouter un employé';
-  $('#personName').value=person?.name||'';$('#personJobTitle').value=person?.jobTitle||'';$('#personSpecification').value=person?.specification||'';$('#personSeniority').value=person?.seniorityDate||'';$('#personBirthday').value=person?.birthday||'';$('#personEmployeeCode').value=person?.employeeCode||'';$('#personEmail').value=person?.email||'';$('#personGroup').value=person?.group||'regular';$('#personSource').value=person?.sourceNote||'';$('#personVerified').checked=!!person?.verifiedAt;$('#personActive').checked=person?.active??true;
+  $('#personName').value=person?.name||'';$('#personJobTitle').value=person?.jobTitle||'';$('#personSpecification').value=person?.specification||'';$('#personSeniority').value=person?.seniorityDate||'';$('#personBirthday').value=person?.birthday||'';$('#personEmployeeCode').value=person?.employeeCode||'';$('#personEmail').value=person?.email||'';$('#personGroup').value=person?.group||'regular';$('#personSource').value=person?.sourceNote||'';$('#personVerified').checked=!!person?.verifiedAt;$('#personActive').checked=person?.active??true;$('#personBuffetPriority').checked=person?.buffetPamPriority===true;
   renderPersonalAccess(person);
   const linked=!!person?.serviceEmployeeId;$('#serviceSource').hidden=!linked;$('#personName').readOnly=linked;$('#personSeniority').readOnly=linked;$('#personActive').disabled=linked;$('#availabilityEditor').disabled=linked;
   $('#personDepartments').innerHTML=meta.departments.map(d=>`<label class="check"><input type="checkbox" value="${d.id}" ${person?.departments.includes(d.id)||!person&&d.id===selectedDepartment?'checked':''} ${d.key==='service'?'disabled':''}> ${e(d.name)}</label>`).join('');
@@ -231,24 +233,27 @@ $('#savePersonPortalLink').onclick=async()=>{
 };
 $('#personForm').onsubmit=async event=>{
   event.preventDefault();if(personSaving)return;
-  const person=editingPerson,b={name:$('#personName').value,jobTitle:$('#personJobTitle').value,specification:$('#personSpecification').value,seniorityDate:$('#personSeniority').value,birthday:$('#personBirthday').value,employeeCode:$('#personEmployeeCode').value,email:$('#personEmail').value,group:$('#personGroup').value,sourceNote:$('#personSource').value,seniorityVerified:$('#personVerified').checked,active:$('#personActive').checked,distinctPerson:$('#distinctPerson').checked,departments:[...$('#personDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),availability:Object.fromEntries([...$('#personAvailability').querySelectorAll('input')].map(i=>[i.dataset.day,i.value])),version:person?.version};
+  const person=editingPerson,b={name:$('#personName').value,jobTitle:$('#personJobTitle').value,specification:$('#personSpecification').value,buffetPamPriority:$('#personBuffetPriority').checked,seniorityDate:$('#personSeniority').value,birthday:$('#personBirthday').value,employeeCode:$('#personEmployeeCode').value,email:$('#personEmail').value,group:$('#personGroup').value,sourceNote:$('#personSource').value,seniorityVerified:$('#personVerified').checked,active:$('#personActive').checked,distinctPerson:$('#distinctPerson').checked,departments:[...$('#personDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),availability:Object.fromEntries([...$('#personAvailability').querySelectorAll('input')].map(i=>[i.dataset.day,i.value])),version:person?.version};
   let saved=false;personSaving=true;$('#personDialog').inert=true;$('#personError').textContent='Enregistrement…';
   await withWeekLock(async()=>{try{
     b.displayPriorities=Object.fromEntries([...$('#personPriorities').querySelectorAll('input:not(:disabled)')].filter(i=>i.value!==''&&(b.group!==person?.group||Number(i.value)!==person?.displayPriorities?.[i.dataset.priority])).map(i=>[i.dataset.priority,Number(i.value)]));b.availability=normalizeAvailability(b.availability);
     await api('/api/departments/people'+(person?'/'+person.id:''),{method:person?'PUT':'POST',body:JSON.stringify(b)});saved=true;$('#personDialog').close();
-    await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;renderPeople();renderSchedule();renderPrint();
+    await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;current.related=fresh.related;current.warnings=fresh.warnings;renderPeople();renderSchedule();renderPrint();renderWarnings();
     message(person?'Fiche enregistrée.'+(current.publishedAt?' Publiez à nouveau l’horaire pour actualiser les renseignements affichés aux employés.':''):'Fiche enregistrée. Dans l’horaire, utilisez « Actualiser la liste d’employés » pour l’ajouter à la feuille.');
   }catch(err){if(saved)message('La fiche est enregistrée, mais son actualisation a échoué. Réessayez « Actualiser » sans recréer la fiche. '+err.message);else $('#personError').textContent=err.message;}
   finally{personSaving=false;$('#personDialog').inert=false;}});
 };
-function renderPrint(){if(!current)return;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='';const html=sheetHTML({department:current.department,weekStart:current.weekStart,people:current.people,draft:displayDraft(),blank:$('#printKind').value==='blank'});$('#printPreview').innerHTML=html;$('#printRoot').innerHTML=html;const count=$('#printPreview').querySelectorAll('.sheet-person').length;$('#printNotice').hidden=count<=PRINT_ROW_CAPACITY;$('#printNotice').textContent=count>PRINT_ROW_CAPACITY?`${count} employés : la mise en page est ajustée pour la feuille légale. Tous les noms sont conservés.`:'';$('#printSheet').disabled=false;}
+function renderPrint(){if(!current)return;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='';const html=sheetHTML({department:current.department,weekStart:current.weekStart,people:current.people,draft:displayDraft(),related:sharedDisplay().related,blank:$('#printKind').value==='blank'});$('#printPreview').innerHTML=html;$('#printRoot').innerHTML=html;const count=$('#printPreview').querySelectorAll('.sheet-person').length;$('#printNotice').hidden=count<=PRINT_ROW_CAPACITY;$('#printNotice').textContent=count>PRINT_ROW_CAPACITY?`${count} employés : la mise en page est ajustée pour la feuille légale. Tous les noms sont conservés.`:'';$('#printSheet').disabled=false;}
 let generatedPdfUrl;
 $('#printKind').onchange=()=>{renderPrint();$('#pdfResult').hidden=true;};
 $('#printSheet').onclick=async()=>{
-  renderPrint();const sheet=$('#printPreview .department-sheet');
-  const overflow=sheetOverflowMessage(sheet);if(overflow){$('#pdfStatus').textContent=overflow;return;}
+  if(weekLocks||weekLoading)return;
   const button=$('#printSheet');button.disabled=true;$('#managerContent').inert=true;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='Préparation du PDF d’une page…';
   try{
+    if(dirty)await saveDraft();else await loadWeek();
+    renderPrint();button.disabled=true;$('#managerContent').inert=true;
+    const sheet=$('#printPreview .department-sheet'),overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);
+    $('#pdfStatus').textContent='Préparation du PDF d’une page…';
     const blob=await schedulePDF(sheet);
     if(generatedPdfUrl)URL.revokeObjectURL(generatedPdfUrl);
     generatedPdfUrl=URL.createObjectURL(blob);
