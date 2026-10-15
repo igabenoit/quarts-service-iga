@@ -257,7 +257,7 @@ body{background:white}
 .sheet-total:has(.kitchen-hours) small{margin-top:1pt;padding-top:1pt}
 
 /* Keep larger teams on legal paper without hiding employees or their totals. */
-.compact-sheet{padding:.3in}
+.compact-sheet{padding:.25in .3in}
 .compact-sheet .sheet-header{min-height:64pt;padding:5pt 0}
 .compact-sheet .sheet-header img{width:115pt}
 .compact-sheet .sheet-table{margin-top:8pt}
