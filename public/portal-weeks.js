@@ -27,14 +27,15 @@ export function personalDays(week,results){
     if(data.weekStart!==week)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');
     for(const person of result.kind==='service'?data.employees:data.schedule.rows)for(const day of days)if(person.birthdayMonthDay===day.date.slice(5))day.birthday=true;
     if(result.kind==='service'){
-      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:roles[s.role]||s.role,minutes:serviceShiftTiming(s.startMinute,s.endMinute).paidMinutes,start:s.startMinute,birthday:person.birthdayMonthDay});
+      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',departmentKeys:['service'],hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:roles[s.role]||s.role,minutes:serviceShiftTiming(s.startMinute,s.endMinute).paidMinutes,start:s.startMinute,birthday:person.birthdayMonthDay});
     }else{
       for(const row of data.schedule.rows)row.cells.forEach((c,index)=>{
         if(c.sourceDepartment&&origins.has(c.sourceDepartment)||c.kind==='blank')return;
         if(c.buffetAllocation){if(seenBuffet.has(c.buffetAllocation.key))return;seenBuffet.add(c.buffetAllocation.key);}
         const timed=isTimedCell(c);
         const department=c.buffetAllocation?[c.buffetAllocation.pam&&'Prêt-à-manger',c.buffetAllocation.charcuterie&&'Charcuterie'].filter(Boolean).join(' / '):departmentLabel(c.workDepartment||data.department.key);
-        days[index].entries.push({department,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:timed?cellMinutes(c):null,birthday:row.birthdayMonthDay,start:c.start});
+        const departmentKeys=c.buffetAllocation?[c.buffetAllocation.pam&&'pam',c.buffetAllocation.charcuterie&&'charcuterie'].filter(Boolean):[c.workDepartment||data.department.key];
+        days[index].entries.push({department,departmentKeys,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:timed?cellMinutes(c):null,birthday:row.birthdayMonthDay,start:c.start});
       });
     }
   }

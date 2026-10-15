@@ -3,6 +3,8 @@
 <body><main class="workspace staff-workspace employee-portal">
 <header class="portal-header"><span class="brand"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"></span><div><p class="eyebrow">PORTAIL EMPLOYÉS</p><h1>Mon horaire</h1><p>Un seul code personnel pour tous tes quarts.</p></div></header>
 <p id="status" class="message" role="status" aria-live="polite"></p>
+<section id="adminSignIn" class="view" hidden><h2>Administration · Tout le magasin</h2><p>Utilise ton code administrateur actuel pour consulter tous les horaires publiés.</p><form id="adminSignInForm"><label>Code administrateur<input id="adminCode" type="password" autocomplete="current-password" required></label><button>Voir tout le magasin</button><p id="adminLoginStatus" role="status"></p></form><a href="/horaires-departements?vue=employe">Retour au code employé</a></section>
+<section id="storeContent" hidden></section>
 <form id="accessForm" class="view" hidden><h2>Bienvenue !</h2><p>Ton code reste le même d’une semaine à l’autre.</p><label>Code employé - 6 chiffres<input id="staffCode" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required></label><button>Voir mon horaire</button><p class="muted">Code oublié ou manquant ? Demande à ton gérant.</p></form>
 <section id="staffContent" hidden>
 <div class="identity-bar"><h2 id="employeeName"></h2><button id="refresh" class="quiet">Actualiser</button></div>
@@ -12,6 +14,7 @@
 <nav class="portal-links" aria-label="Mes démarches"><a class="button quiet" href="/conges">Demander un congé</a><a class="button quiet" href="/disponibilites">Mes disponibilités</a><a class="button quiet" href="/chandails">Commander un chandail</a></nav>
 <button id="logoutEmployee" class="quiet">Changer d’employé / se déconnecter</button>
 </section>
+<p id="adminPortalLink" hidden><a href="/horaires-departements?vue=magasin">Administration · Voir tout le magasin</a></p>
 <details class="home-help"><summary>Ajouter « Mon horaire » à l’écran d’accueil</summary><p>Ouvre cette page dans le navigateur de ton téléphone. Le raccourci ouvre toujours la semaine en cours.</p><div class="help-columns"><div><h3>iPhone · Safari</h3><p>Ouvre <strong>Partager</strong> (parfois dans le menu •••), puis <strong>Sur l’écran d’accueil</strong> et <strong>Ajouter</strong>.</p></div><div><h3>Android · Chrome</h3><p>Ouvre le menu <strong>⋮</strong>, puis <strong>Installer et créer un raccourci → Créer un raccourci</strong> (ou <strong>Ajouter à l’écran d’accueil</strong>), puis confirme.</p></div></div><p>Nom suggéré : <strong>Mon horaire IGA</strong>. Une connexion Internet est nécessaire pour consulter l’horaire à jour.</p></details>
 <footer class="portal-footer">Avant chaque quart, vérifie les dates affichées en haut de ton horaire.</footer>
-</main><script type="module" src="/horaires-departements.js"></script></body></html>
+</main><script type="module" src="/portal-entry.js"></script></body></html>
