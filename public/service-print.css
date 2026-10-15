@@ -42,7 +42,7 @@
 .service-sheet .service-unfilled .service-shift{color:#6b4300}
 .service-sheet .birthday-greeting{font-size:5.7pt;line-height:1.1;color:#814000;display:block}
 .service-sheet .sheet-bottom{display:flex;justify-content:space-between;gap:8pt;padding:9pt 0;font-size:6pt;line-height:1.4;flex-shrink:0}
-.service-sheet .sheet-totals{text-align:right;flex-shrink:0}
+.service-sheet .sheet-totals{margin-left:auto;text-align:right;flex-shrink:0}
 .service-sheet .sheet-totals strong{display:block;font-size:9pt}
 .service-sheet .sheet-totals span{font-size:6.5pt}
 .service-sheet .service-week-total{display:flex;justify-content:space-between;gap:8pt;align-items:center;background:var(--pale);border-top:.7pt solid #adc0dc;padding:7pt;margin-bottom:12pt;flex-shrink:0}
