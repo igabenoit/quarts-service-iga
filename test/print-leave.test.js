@@ -1,12 +1,13 @@
+import {serviceShiftTiming} from '../public/service-rules.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
-const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 function render({periods=[],manual=false,shift=false}={}) {
   const sheet={innerHTML:''};
-  const context=vm.createContext({document:{querySelector:()=>sheet}});
+  const context=vm.createContext({serviceShiftTiming,document:{querySelector:()=>sheet}});
   vm.runInContext(app.slice(0,app.indexOf('function render(){')),context);
   vm.runInContext(app.match(/^function approvedForDay[^\n]+/m)[0],context);
   context.fixture={periods,manual,shift};

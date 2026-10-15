@@ -1,9 +1,10 @@
+import {serviceShiftTiming} from '../public/service-rules.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
-function print(data){const c=vm.createContext({});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data)',c);}
+const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
+function print(data){const c=vm.createContext({serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data)',c);}
 const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
 test('Service pages keep every employee exactly once across page boundaries and preserve priorities',()=>{
@@ -25,7 +26,9 @@ test('names and department labels are escaped and internal planning notes stay o
  assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img src=x>'));assert.ok(!html.includes('Internal planning note'));assert.match(html,/&lt;img src=x&gt;/);
 });
 
-test('breaks stay deducted from paid totals without a label beneath the shift',()=>{
- const html=print({employees:[person(1)],shifts:[{...shift(1),breakMinutes:30,paidMinutes:450}],assignments:[{shiftId:1,employeeId:1}]});
- assert.ok(!html.includes('Pause 30 min'));assert.match(html,/class="sheet-total print-hours">7,5</);assert.match(html,/Service · semaine complète : 7,5 h/);
+test('paid rest breaks are never deducted, and only a one-hour meal is deducted from shifts of at least 8 hours',()=>{
+ for(const [elapsed,paid] of [[3,3],[4,4],[5,5],[6,6],[7,7],[8,7],[9,8]]){
+  const html=print({employees:[person(1)],shifts:[{...shift(1),endMinute:480+elapsed*60,breakMinutes:30,paidMinutes:elapsed*60-30}],assignments:[{shiftId:1,employeeId:1}]});
+  assert.ok(!html.includes('Pause 30 min'));assert.match(html,new RegExp('class="sheet-total print-hours">'+paid+'<'));assert.match(html,new RegExp('Service · semaine complète : '+paid+' h'));
+ }
 });

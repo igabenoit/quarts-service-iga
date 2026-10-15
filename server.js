@@ -1,4 +1,5 @@
 import {installClothing} from './clothing.js';
+import {serviceShiftTiming} from './public/service-rules.js';
 import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
@@ -230,8 +231,7 @@ function normalizeShift(body) {
   if (!["cashier", "supervisor", "support", "packer", "orders"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
-  const breakMinutes = parseMinutes(body.breakMinutes ?? 0, "Pause", 0, 240);
-  if (endMinute <= startMinute || endMinute - startMinute <= breakMinutes) throw new Error("Le quart et la pause sont incompatibles.");
+  const {breakMinutes} = serviceShiftTiming(startMinute,endMinute);
   return {
     role,
     area: role === "packer" ? "packer" : "front",
@@ -257,7 +257,7 @@ function mapShift(row) {
   return {
     id: Number(row.id), weekStart: isoDate(row.week_start), area: row.area, role: row.role,
     dayIndex: Number(row.day_index), startMinute: Number(row.start_minute), endMinute: Number(row.end_minute),
-    breakMinutes: Number(row.break_minutes), paidMinutes: Number(row.end_minute) - Number(row.start_minute) - Number(row.break_minutes),
+    ...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute)),
     sourceDepartment: row.source_department, notes: row.notes,
   };
 }
@@ -650,7 +650,7 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
     for (const row of result.rows) {
       const id = Number(row.id);
       if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):'',shifts:[] });
-      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),breakMinutes:Number(row.break_minutes),role:row.shift_role });
+      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute)),role:row.shift_role });
     }
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }

@@ -1,11 +1,12 @@
+import {serviceShiftTiming} from '../public/service-rules.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 test('inactif visible, départ retiré de la liste, anciens horaires conservés',()=>{
   const elements=new Map();
-  const context=vm.createContext({document:{querySelector:key=>{if(!elements.has(key))elements.set(key,{innerHTML:''});return elements.get(key);},querySelectorAll:()=>[]}});
+  const context=vm.createContext({serviceShiftTiming,document:{querySelector:key=>{if(!elements.has(key))elements.set(key,{innerHTML:''});return elements.get(key);},querySelectorAll:()=>[]}});
   vm.runInContext(source.slice(0,source.indexOf('function render(){')),context);
   vm.runInContext(source.slice(source.indexOf('function renderEmployees(){'),source.indexOf('async function loadEmployees()')),context);
   vm.runInContext(source.match(/^function approvedForDay[^\n]+/m)[0],context);

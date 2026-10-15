@@ -101,7 +101,7 @@
           <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
           <label>Début<input id="startTime" type="time" value="08:00" required></label>
           <label>Fin<input id="endTime" type="time" value="16:00" required></label>
-          <label>Pause<select id="breakMinutes"><option value="0">Aucune</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label>
+          <label>Repas non payé (automatique)<select id="breakMinutes" disabled><option value="0">Aucun</option><option value="60">1 heure</option></select><small id="serviceBreakSummary" aria-live="polite"></small></label>
           <label id="departmentWrap" hidden>Département<input id="sourceDepartment" maxlength="80" placeholder="Ex. Épicerie"></label>
           <label class="notes-field">Précision<input id="shiftNotes" maxlength="300" placeholder="Optionnel"></label>
           <div class="form-actions"><button id="submitShift">Ajouter le quart</button><button id="cancelEdit" type="button" class="ghost" hidden>Annuler</button><button id="deleteShift" type="button" class="danger" hidden>Supprimer</button></div>
@@ -127,6 +127,6 @@
   </div>
   <script src="planogram.js" defer></script>
   <script src="undo-control.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js" type="module"></script>
 <script src="/manager-nav.js" type="module"></script></body>
 </html>
