@@ -5,6 +5,7 @@
 <p id="status" class="message" role="status" aria-live="polite"></p>
 <section id="adminSignIn" class="view" hidden><h2>Administration · Tout le magasin</h2><p>Utilise ton code administrateur actuel pour consulter tous les horaires publiés.</p><form id="adminSignInForm"><label>Code administrateur<input id="adminCode" type="password" autocomplete="current-password" required></label><button>Voir tout le magasin</button><p id="adminLoginStatus" role="status"></p></form><a href="/horaires-departements?vue=employe">Retour au code employé</a></section>
 <section id="storeContent" hidden></section>
+<p><a href="/horaire-famille">Consulter les horaires de mes enfants</a></p>
 <form id="accessForm" class="view" hidden><h2>Bienvenue !</h2><p>Ton code reste le même d’une semaine à l’autre.</p><label>Code employé - 6 chiffres<input id="staffCode" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required></label><button>Voir mon horaire</button><p class="muted">Code oublié ou manquant ? Demande à ton gérant.</p></form>
 <section id="staffContent" hidden>
 <div class="identity-bar"><h2 id="employeeName"></h2><button id="refresh" class="quiet">Actualiser</button></div>

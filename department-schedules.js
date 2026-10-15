@@ -4,6 +4,7 @@ import {isScoped,ownsDepartment,assertDepartment} from './manager-access.js';
 import crypto from 'node:crypto';
 import {installEmployeePortal,saveEmployeeCode,employeePersonIds} from './employee-portal.js';
 import {installStorePortal} from './store-portal.js';
+import {installFamilyPortal} from './family-portal.js';
 import {employeeAvailability} from './availability-rules.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
@@ -336,7 +337,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const views=(await pool.query('SELECT * FROM schedule_department_views WHERE department_id=$1 AND week_start=$2 AND published_at=$3',[current.department.id,current.weekStart,current.publishedAt])).rows;
     res.json({publishedAt:current.publishedAt,employees:(current.published?.rows||[]).map(r=>{const v=views.find(v=>Number(v.person_id)===r.personId);return {name:r.name,personId:r.personId,lastViewedAt:v?.last_viewed_at||null,count:v?.view_count||0};})});
   }));
-  installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek:async(start,people)=>{
+  const readPublishedWeek=async(start,people)=>{
     const weeks=await transferWeeks(start),results=[];
     for(const d of (await listDepartments(pool)).filter(d=>d.active&&d.key!=='service')){
       const row=weeks.find(w=>Number(w.department_id)===d.id),incoming=incomingFor(weeks,d.key,{published:true});
@@ -346,6 +347,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       results.push({department:d,weekStart:start,schedule:{rows:schedule.rows.map(r=>({...r,cells:prepared.draft.rows.find(p=>p.personId===r.personId).cells})),notes:''}});
     }
     return results;
-  }});
-  return {directory,getWeek,warningsFor,employeePortal};
+  };
+  installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek});
+  const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
+  return {directory,getWeek,warningsFor,employeePortal,familyPortal};
 }

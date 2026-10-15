@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#176747"><meta name="apple-mobile-web-app-title" content="Horaires famille"><title>Horaires de la famille · IGA Famille Benoit</title><link rel="apple-touch-icon" href="/portal-icon-180.png"><link rel="stylesheet" href="/departments.css"><link rel="stylesheet" href="/employee-portal.css"><link rel="stylesheet" href="/family-portal.css"></head>
+<body><main class="workspace staff-workspace employee-portal family-portal">
+<header class="portal-header"><span class="brand"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"></span><div><p class="eyebrow">ACCÈS FAMILIAL</p><h1>Horaires de la famille</h1><p>Tous les horaires autorisés, au même endroit.</p></div></header>
+<p id="status" class="message" role="status" aria-live="polite" hidden></p>
+<form id="familyLogin" hidden><h2>Bienvenue !</h2><label>Ton code familial<input id="familyCode" type="password" autocomplete="current-password" autocapitalize="characters" spellcheck="false" maxlength="64" required placeholder="XXXX-XXXX-XXXX-XXXX"></label><button>Voir les horaires</button><p class="muted">Code oublié ? Demande à l’administration de renouveler ton accès.</p></form>
+<section id="familyContent" hidden>
+<div class="identity-bar"><div><h2 id="familyName"></h2><p class="muted">Consultation des horaires publiés</p></div><button id="refresh" class="quiet">Actualiser</button></div>
+<div id="weekControls"><div class="week-choices"><button id="currentWeek" class="week-choice current"></button><button id="nextWeek" class="week-choice next"></button></div><label id="otherWeeksLabel">Historique et autres semaines<select id="otherWeeks"></select></label><button id="returnCurrent" class="quiet" hidden>Revenir à cette semaine</button></div>
+<section id="weekBanner" class="week-banner" aria-label="Semaine consultée"></section>
+<div id="familyChoices" class="family-choices" role="group" aria-label="Choisir un enfant"></div>
+<p id="familySummary"></p><div id="familySchedule"></div>
+<button id="familyLogout" class="quiet">Se déconnecter</button>
+</section>
+<details class="home-help"><summary>Ajouter ces horaires à l’écran d’accueil</summary><p>Sur iPhone : ouvre cette page dans Safari, puis Partager → Sur l’écran d’accueil. Sur Android : ouvre le menu de Chrome, puis Ajouter à l’écran d’accueil. Nom suggéré : Horaires famille.</p></details>
+<footer class="portal-footer">Vérifie toujours les dates de la semaine. La consultation familiale ne confirme pas la lecture de l’horaire par l’employé.</footer>
+</main><script type="module" src="/family-portal.js"></script></body></html>
