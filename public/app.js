@@ -56,7 +56,7 @@ function servicePrintHTML(data){
   };
   const row=(person,jobs,group,pending=false)=>{
     const cells=dayNames.map((_,d)=>cell(person,jobs,d,pending));
-    const units=Math.max(1,Math.ceil(Math.max(...cells.map(c=>c.height),Math.ceil((person.name.length+4)/21)*11+8+(person.displayRank?9:0))/42));
+    const units=Math.max(1,Math.ceil(Math.max(...cells.map(c=>c.height),Math.ceil(person.name.length/21)*11+8)/42));
     return {person,cells,group,pending,units,minutes:jobs.reduce((n,s)=>n+paid(s),0)};
   };
   const rowsFor=group=>{
@@ -73,7 +73,7 @@ function servicePrintHTML(data){
     return {...plan,rows,units,rowUnit:Math.max(32,Math.min(42,Math.floor(588/Math.max(14,units))))};
   });
   const total=data.shifts.reduce((n,s)=>n+paid(s),0),unfilledMinutes=data.shifts.filter(s=>!assigned.has(s.id)).reduce((n,s)=>n+paid(s),0);
-  const rowHTML=r=>`<tr class="sheet-person${r.pending?' service-unfilled':''}" data-row-units="${Math.min(15,r.units)}"${r.person.id?` data-person="${r.person.id}"`:''}><th scope="row" class="sheet-name"><div class="sheet-person-label">${r.person.displayRank?`<small class="service-rank">${r.person.displayRank}.</small> `:''}${e(r.person.name)}</div></th><td class="sheet-seniority">${r.pending?'':e(seniorityText(r.person.seniority))}</td>${r.cells.map(c=>`<td class="sheet-day${c.unavailable?' service-off':''}"><div class="sheet-work">${c.content}</div><div class="sheet-day-detail"><span>${c.hours}</span><span>${e(c.availability)}</span></div></td>`).join('')}<td class="sheet-total print-hours">${r.minutes?hours(r.minutes):'—'}</td></tr>`;
+  const rowHTML=r=>`<tr class="sheet-person${r.pending?' service-unfilled':''}" data-row-units="${Math.min(15,r.units)}"${r.person.id?` data-person="${r.person.id}"`:''}><th scope="row" class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}</div></th><td class="sheet-seniority">${r.pending?'':e(seniorityText(r.person.seniority))}</td>${r.cells.map(c=>`<td class="sheet-day${c.unavailable?' service-off':''}"><div class="sheet-work">${c.content}</div><div class="sheet-day-detail"><span>${c.hours}</span><span>${e(c.availability)}</span></div></td>`).join('')}<td class="sheet-total print-hours">${r.minutes?hours(r.minutes):'—'}</td></tr>`;
   const blankRow=()=>`<tr class="sheet-person blank-row"><th class="sheet-name"><div class="sheet-person-label"></div></th><td></td>${dayNames.map(()=>'<td><div class="sheet-work"></div><div class="sheet-day-detail"><span></span><span></span></div></td>').join('')}<td></td></tr>`;
   return pages.map((page,index)=>{
     const groupNames=[...new Set(page.rows.map(r=>r.group))];if(!groupNames.length)groupNames.push(page.title);
