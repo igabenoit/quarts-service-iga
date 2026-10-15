@@ -34,6 +34,8 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',session,body:{...body,version:1,departments:[meat]}})).status,403);
     const meta=await call('/api/departments/meta',{session});assert.deepEqual(meta.body.departments.map(d=>d.id),[fruit]);
     assert.equal((await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session})).status,200);
+    assert.equal((await call(`/api/departments/${fruit}/weeks/2026-10-12/views`,{session})).status,200);
+    assert.equal((await call(`/api/departments/${meat}/weeks/2026-10-12/views`,{session})).status,403);
     for(const path of [`/api/departments/${meat}/weeks/2026-10-12`,`/api/departments/${meat}/mail`,`/api/departments/photos?departmentId=${meat}`,'/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool'])assert.equal((await call(path,{session})).status,403,path);
     assert.equal((await call(`/api/departments/${meat}/weeks/2026-10-12`,{session,method:'PUT',body:{}})).status,403);
     const p={name:'Personne test',email:'',group:'regular',active:true,availability:{},departments:[fruit]};

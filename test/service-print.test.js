@@ -7,10 +7,10 @@ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').re
 function print(data){const c=vm.createContext({serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data)',c);}
 const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
-test('Service pages keep every employee exactly once across page boundaries and preserve priorities',()=>{
+test('Service keeps exactly three team sheets with every employee once and in priority order',()=>{
  const employees=Array.from({length:31},(_,i)=>person(i+1));const html=print({employees});
  for(const p of employees)assert.equal((html.match(new RegExp(`data-person="${p.id}"`,'g'))||[]).length,1);
- assert.ok(html.indexOf('data-person="1"')<html.indexOf('data-person="2"'));assert.ok((html.match(/class="service-sheet"/g)||[]).length>3);assert.equal((html.match(/class="sheet-header"/g)||[]).length,(html.match(/class="service-sheet"/g)||[]).length);
+ assert.ok(html.indexOf('data-person="1"')<html.indexOf('data-person="2"'));assert.equal((html.match(/<article class="service-sheet/g)||[]).length,3);assert.equal((html.match(/class="sheet-header"/g)||[]).length,(html.match(/<article class="service-sheet/g)||[]).length);
 });
 test('cross-role assignments and uncovered shifts are printed once and all paid totals reconcile',()=>{
  const data={employees:[person(1,'packer'),person(2,'cashier')],shifts:[shift(1,'cashier'),shift(2,'packer',1),shift(3,'cashier',2)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:2}]};
@@ -31,4 +31,16 @@ test('paid rest breaks are never deducted, and only a one-hour meal is deducted 
   const html=print({employees:[person(1)],shifts:[{...shift(1),endMinute:480+elapsed*60,breakMinutes:30,paidMinutes:elapsed*60-30}],assignments:[{shiftId:1,employeeId:1}]});
   assert.ok(!html.includes('Pause 30 min'));assert.match(html,new RegExp('class="sheet-total print-hours">'+paid+'<'));assert.match(html,new RegExp('Service · semaine complète : '+paid+' h'));
  }
+});
+
+test('sixteen cashiers and a packer with a partial leave stay on their own single sheets',()=>{
+ const employees=[...Array.from({length:16},(_,i)=>person(i+1)),...Array.from({length:13},(_,i)=>person(i+17,'packer'))];
+ const html=print({employees,shifts:[shift(1,'packer'),shift(2,'packer',1)],assignments:[{shiftId:1,employeeId:17}],approvedLeaves:[{employee_id:17,periods:[{date:'2026-10-12',allDay:false,startMinute:420,endMinute:480}]}]});
+ const sheets=html.match(/<article[\s\S]*?<\/article>/g);
+ assert.equal(sheets.length,3);
+ assert.equal((sheets[1].match(/data-person=/g)||[]).length,16);
+ assert.equal((sheets[2].match(/data-person=/g)||[]).length,13);
+ assert.match(sheets[1],/data-row-unit="36"/);
+ assert.match(sheets[2],/À couvrir/);
+ for(const sheet of sheets)assert.match(sheet,/Feuille [123] \/ 3/);
 });

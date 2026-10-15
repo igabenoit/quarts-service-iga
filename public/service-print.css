@@ -19,22 +19,33 @@
 .service-sheet .sheet-group th{text-align:left;padding-left:6pt;text-transform:uppercase;font-size:7.5pt;color:#1a437e}
 .service-sheet .sheet-subtotal{height:16pt;background:#f2f5fa}
 .service-sheet .sheet-subtotal td:first-child{text-align:right;padding-right:7pt;text-transform:uppercase;font-size:6.8pt;font-weight:700}
-/* External row heights respect the production CSP. Unit 15 forces oversized rows to fail the page-fit check. */
-.service-sheet .sheet-person{height:var(--row-height,42pt)}
-.service-sheet .sheet-person[data-row-units="2"]{--row-height:84pt}
-.service-sheet .sheet-person[data-row-units="3"]{--row-height:126pt}
-.service-sheet .sheet-person[data-row-units="4"]{--row-height:168pt}
-.service-sheet .sheet-person[data-row-units="5"]{--row-height:210pt}
-.service-sheet .sheet-person[data-row-units="6"]{--row-height:252pt}
-.service-sheet .sheet-person[data-row-units="7"]{--row-height:294pt}
-.service-sheet .sheet-person[data-row-units="8"]{--row-height:336pt}
-.service-sheet .sheet-person[data-row-units="9"]{--row-height:378pt}
-.service-sheet .sheet-person[data-row-units="10"]{--row-height:420pt}
-.service-sheet .sheet-person[data-row-units="11"]{--row-height:462pt}
-.service-sheet .sheet-person[data-row-units="12"]{--row-height:504pt}
-.service-sheet .sheet-person[data-row-units="13"]{--row-height:546pt}
-.service-sheet .sheet-person[data-row-units="14"]{--row-height:588pt}
-.service-sheet .sheet-person[data-row-units="15"]{--row-height:630pt}
+/* Row sizes stay in the stylesheet to respect the production CSP. */
+.service-sheet .sheet-person{--row-height:calc(var(--row-unit,42pt) * var(--row-units,1));height:var(--row-height)}
+.service-sheet[data-row-unit="32"]{--row-unit:32pt}
+.service-sheet[data-row-unit="33"]{--row-unit:33pt}
+.service-sheet[data-row-unit="34"]{--row-unit:34pt}
+.service-sheet[data-row-unit="35"]{--row-unit:35pt}
+.service-sheet[data-row-unit="36"]{--row-unit:36pt}
+.service-sheet[data-row-unit="37"]{--row-unit:37pt}
+.service-sheet[data-row-unit="38"]{--row-unit:38pt}
+.service-sheet[data-row-unit="39"]{--row-unit:39pt}
+.service-sheet[data-row-unit="40"]{--row-unit:40pt}
+.service-sheet[data-row-unit="41"]{--row-unit:41pt}
+.service-sheet[data-row-unit="42"]{--row-unit:42pt}
+.service-sheet .sheet-person[data-row-units="2"]{--row-units:2}
+.service-sheet .sheet-person[data-row-units="3"]{--row-units:3}
+.service-sheet .sheet-person[data-row-units="4"]{--row-units:4}
+.service-sheet .sheet-person[data-row-units="5"]{--row-units:5}
+.service-sheet .sheet-person[data-row-units="6"]{--row-units:6}
+.service-sheet .sheet-person[data-row-units="7"]{--row-units:7}
+.service-sheet .sheet-person[data-row-units="8"]{--row-units:8}
+.service-sheet .sheet-person[data-row-units="9"]{--row-units:9}
+.service-sheet .sheet-person[data-row-units="10"]{--row-units:10}
+.service-sheet .sheet-person[data-row-units="11"]{--row-units:11}
+.service-sheet .sheet-person[data-row-units="12"]{--row-units:12}
+.service-sheet .sheet-person[data-row-units="13"]{--row-units:13}
+.service-sheet .sheet-person[data-row-units="14"]{--row-units:14}
+.service-sheet .sheet-person[data-row-units="15"]{--row-units:15}
 .service-sheet .sheet-name{text-align:left!important;font-size:9.5pt;font-weight:600}
 .service-sheet .sheet-person-label{height:calc(var(--row-height,42pt) - .55pt);padding:4pt;line-height:1.2;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
 .service-sheet .service-rank{font-size:6.5pt;font-weight:400;color:#657484}
@@ -69,3 +80,13 @@
 @page service-schedule{size:legal portrait;margin:0}
 @media print{body:not(.printing-planogram){margin:0!important;padding:0!important}#printSheet .service-sheet{page:service-schedule;margin:0;break-inside:avoid;break-after:page;box-shadow:none}#printSheet .service-sheet:last-child{break-after:auto}.service-sheet .sheet-table tr{break-inside:avoid}}
 .service-pdf-tools{padding:10px 20px;background:#f2f6fc;color:#254365}.service-pdf-tools p{margin:0;font-size:.85rem}.service-pdf-tools a{display:inline-block;margin:10px 16px 2px 0;color:#194c98;font-weight:700}#servicePdfResult[hidden]{display:none!important}#previewPdf:disabled{opacity:.5;cursor:wait}
+
+.service-sheet.compact-service{padding:.35in}
+.service-sheet.compact-service .sheet-header{min-height:72pt;padding:7pt 0}
+.service-sheet.compact-service .sheet-table{margin-top:10pt}
+.service-sheet.compact-service .sheet-work{padding:1pt}
+.service-sheet.compact-service .service-shift{padding:0}
+.service-sheet.compact-service .sheet-bottom{padding:6pt 0}
+.service-sheet.compact-service .service-week-total{margin-bottom:8pt}
+.service-sheet.compact-service .sheet-notes{min-height:40pt}
+.service-sheet.compact-service .sheet-notes p{min-height:24pt}

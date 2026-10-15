@@ -26,3 +26,18 @@ test('photos : une liste reçue après un changement de semaine est ignorée',as
 test('historique : restauration verrouillée, double clic ignoré et version actualisée',async()=>{const f=manager(),pending=deferred();let writes=0;f.setFetch(async(_url,options)=>{if(options.method==='POST'){writes++;return pending.promise;}return response({...initial(),revision:4});});const first=f.run('restoreDraft(42)');assert.equal(f.$('#managerContent').inert,true);await f.run('restoreDraft(42)');pending.resolve(response({revision:4}));await first;assert.equal(writes,1);assert.equal(f.run('current.revision'),4);assert.equal(f.$('#managerContent').inert,false);});
 test('historique : un échec d’actualisation après restauration conserve la protection contre un écrasement',async()=>{const f=manager();f.setFetch(async(_url,options)=>{if(options.method==='POST')return response({revision:4});throw Error('Hors connexion');});await f.run('restoreDraft(42)');assert.match(f.$('#appMessage').textContent,/rétablie sur le serveur/);assert.equal(f.run('current.revision'),3);});
 test('la semaine chargée est conservée dans le lien pour un rechargement cohérent',async()=>{const f=manager();let saved;f.context.window.location={href:'http://localhost/departements'};f.context.window.history={replaceState:(_a,_b,url)=>saved=String(url)};f.setFetch(async()=>response(initial()));await f.run('loadWeek()');assert.equal(saved,'http://localhost/departements?department=5&week=2026-10-19');});
+
+test('consultations : le changement de semaine recharge le suivi du département',async()=>{
+ const f=manager(),calls=[];f.run("view='views';dirty=false;");
+ f.setFetch(async url=>{calls.push(url);return response(url.endsWith('/views')?{publishedAt:'2026-10-20',employees:[{name:'Employé témoin',lastViewedAt:null}]}:{...initial(),weekStart:'2026-10-26'});});
+ await f.run("loadWeek({weekStart:'2026-10-26'})");
+ assert.ok(calls.includes('/api/departments/5/weeks/2026-10-26/views'));
+ assert.match(f.$('#departmentViews').innerHTML,/26 oct\. 2026/);
+ assert.match(f.$('#departmentViews').innerHTML,/Horaires ouverts : 0 \/ 1/);
+});
+test('consultations : une réponse de la semaine précédente ne remplace pas le suivi courant',async()=>{
+ const f=manager(),pending=deferred();f.setFetch(()=>pending.promise);
+ const first=f.run('loadViews()');f.run("current={...current,weekStart:'2026-10-26'}");f.$('#departmentViews').innerHTML='Semaine courante';
+ pending.resolve(response({publishedAt:'2026-10-10',employees:[{name:'Ancienne semaine',lastViewedAt:null}]}));await first;
+ assert.equal(f.$('#departmentViews').innerHTML,'Semaine courante');
+});

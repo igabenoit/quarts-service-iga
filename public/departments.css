@@ -269,3 +269,5 @@ body{background:white}
 .compact-sheet .sheet-notes p{min-height:20pt}
 
 .birthday-greeting{display:block;font-weight:700;color:#814000;font-size:.85em}.sheet-work .birthday-greeting{font-size:7px;line-height:1.1}
+
+.consultation-week{font-size:1.05rem}.consultation-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:16px;background:#eaf1ff;border-radius:12px;color:#214c88}.consultation-list{list-style:none;padding:0;margin:18px 0}.consultation-list li{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:12px 4px;border-bottom:1px solid #dfe5e1}.consultation-status{font-size:.9rem}.consultation-status.seen{color:#176747}.consultation-status.pending{color:#86560b}

@@ -1,6 +1,6 @@
 import {schedulePDF,sheetOverflowMessage} from './department-pdf.js';
 import {isBirthday,comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,automaticBreakMinutes,cellBreakMinutes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,PAM_POSTS,KITCHEN_POSTS,COMMON_POSTS,assignmentPost,grandMinutes,mergeIncoming,validateAssignment,cellDetail,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
-const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
+const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,viewsSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json',...options.headers}});const data=await response.json();if(!response.ok)throw Error(response.status===401?'Connectez-vous depuis le lien « Connexion » en haut de la page.':data.error||'Opération indisponible.');return data;}
 const post=(path,body)=>api(path,{method:'POST',body:JSON.stringify(body)});
@@ -28,7 +28,7 @@ async function loadWeek({departmentId=selectedDepartment,weekStart=current?.week
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
   $('#sheetManager').value=current.draft.manager;$('#sheetNotes').value=current.draft.notes;
   $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
-  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();message('');}catch(error){if(sequence===loadSequence&&current){selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;renderNavigation();}throw error;}finally{if(sequence===loadSequence){weekLoading=false;$('#managerContent').inert=weekLocks>0;}}
+  $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();if(view==='views')await loadViews();message('');}catch(error){if(sequence===loadSequence&&current){selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;renderNavigation();}throw error;}finally{if(sequence===loadSequence){weekLoading=false;$('#managerContent').inert=weekLocks>0;}}
 }
 function renderWarnings(){const warnings=current.warnings||[];$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
 function renderSchedule(){
@@ -373,6 +373,16 @@ async function switchView(next){view=next;document.querySelectorAll('.view').for
 document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===next)));if(next==='views')await loadViews();if(next==='print')renderPrint();if(next==='people'){await loadMeta();renderPeople();}if(next==='photos')await loadPhotos();if(next==='mail')await loadMailSettings();}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>switchView(b.dataset.view).catch(err=>message(err.message)));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>{if(b.dataset.close==='documentMailDialog'&&mailBusy)return;$('#'+b.dataset.close).close();});
+async function loadViews(){
+  const sequence=++viewsSequence,target=route(),label=`${current.department.name} · Du ${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;
+  $('#departmentViews').innerHTML='<p>Chargement des consultations…</p>';
+  const data=await api(target+'/views');
+  if(sequence!==viewsSequence||target!==route())return;
+  const heading=`<p class="consultation-week"><strong>${e(label)}</strong></p>`;
+  if(!data.publishedAt){$('#departmentViews').innerHTML=heading+'<p>Aucun horaire publié pour cette semaine.</p>';return;}
+  const seen=data.employees.filter(person=>person.lastViewedAt).length;
+  $('#departmentViews').innerHTML=heading+`<div class="consultation-summary"><strong>Horaires ouverts : ${seen} / ${data.employees.length}</strong><span>${data.employees.length-seen} encore à consulter</span></div><ul class="consultation-list">${data.employees.map(person=>`<li><strong>${e(person.name)}</strong><span class="consultation-status ${person.lastViewedAt?'seen':'pending'}">${person.lastViewedAt?'Consulté le '+e(new Date(person.lastViewedAt).toLocaleString('fr-CA')):'Pas encore consulté'}</span></li>`).join('')}</ul>`;
+}
 const initialSelection=new URLSearchParams(window.location?.search||'');selectedDepartment=Number(initialSelection.get('department'))||undefined;
 try{$('#weekPicker').value=monday(initialSelection.get('week')||today());}catch{$('#weekPicker').value=monday(today());}
 $('#weekPicker').onchange=async()=>{if(!$('#weekPicker').value||!mayLeave()){$('#weekPicker').value=current.weekStart;return;}try{await loadWeek({weekStart:monday($('#weekPicker').value)});}catch(err){message(err.message);}};
@@ -381,7 +391,6 @@ $('#refreshWeek').onclick=async()=>{if(!mayLeave())return;return withWeekLock(as
 for(const id of ['saveDraft','copyWeek','syncRoster','publishWeek','unpublishWeek','loadHistory']){const button=$('#'+id),handler=button.onclick;button.onclick=async event=>{if(weekLocks||weekLoading)return;return withWeekLock(()=>handler(event));};}
 try{await loadMeta();await loadWeek();$('#managerContent').hidden=false;}catch(err){message(err.message);}
 
-async function loadViews(){const data=await api(route()+'/views');$('#departmentViews').innerHTML=data.publishedAt?data.employees.map(p=>`<p><strong>${e(p.name)}</strong> — ${p.lastViewedAt?'Consulté le '+e(new Date(p.lastViewedAt).toLocaleString('fr-CA')):'Pas encore consulté'}</p>`).join(''):'Aucun horaire publié pour cette semaine.';}
 $('#refreshViews').onclick=()=>loadViews().catch(err=>message(err.message));
 
 let personalImportEntries=[];
