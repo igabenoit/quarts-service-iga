@@ -110,6 +110,11 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     }
     return [...new Set(warnings)];
   }
+  app.get('/api/departments/publication-status',requireManager,endpoint(async(req,res)=>{
+    const start=week(req.query.weekStart);
+    const rows=(await pool.query('SELECT department_id,published_at FROM schedule_department_weeks WHERE week_start=$1 AND published IS NOT NULL',[start])).rows;
+    res.json({weekStart:start,publications:rows.filter(r=>ownsDepartment(req,Number(r.department_id))).map(r=>({departmentId:Number(r.department_id),publishedAt:r.published_at}))});
+  }));
   app.get('/api/departments/meta',requireManager,endpoint(async(req,res)=>res.json({departments:(await listDepartments(pool)).filter(d=>ownsDepartment(req,d.id)),people:(await directory()).filter(p=>p.departments.some(id=>ownsDepartment(req,id))),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements',account:req.manager||{kind:'admin'}})));
   app.post('/api/departments/personal-import',requireManager,sameOrigin,endpoint(async(req,res)=>{
     if(isScoped(req))fail('Import réservé à l’administration.',403);

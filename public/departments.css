@@ -281,3 +281,14 @@ body{background:white}
 .shared-print-note{font-size:7pt;margin:2pt 0 5pt;color:#3b3f37}
 
 .schedule-conflicts{background:#fff0ee;border:2px solid #b53129;color:#7d211c}
+
+/* Publication status is independent of the department theme. */
+.publication-light{display:inline-block;width:11px;height:11px;flex:0 0 11px;border-radius:50%;background:#99a19c;border:1px solid #737d76;box-shadow:inset 0 1px 2px #0002}
+.publication-light.is-online{background:#39e878;border-color:#178841;box-shadow:0 0 0 3px #26c76124,0 0 9px #22c55e88,inset 0 1px 2px #ffffffa6}
+.publication-status{display:flex;align-items:center;gap:10px;border:1px solid #cdd5cf;background:#edf0ed;border-radius:12px;color:#505d53;max-width:320px}
+.publication-status.is-online{background:#eaf8ee;border-color:#9ad5ad;color:#175f30}
+.publication-status strong,.publication-status small{display:block}.publication-status small{margin-top:4px;font-size:.72rem;font-weight:400;line-height:1.4}
+.department-nav button{flex-direction:column;align-items:flex-start;gap:8px;max-width:240px}
+.department-publication{display:flex;align-items:center;gap:7px;font-size:.62rem;line-height:1.35;font-weight:400;text-align:left;color:#4f5f54}
+.department-publication .publication-light{width:8px;height:8px;flex-basis:8px}
+@media(max-width:650px){.week-bar{flex-wrap:wrap}.publication-status{max-width:100%;width:100%}.department-nav button{flex:1 1 140px;max-width:none}}

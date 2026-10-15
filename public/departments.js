@@ -15,13 +15,16 @@ function markDirty(){dirty=true;$('#draftStatus').textContent='Modifications à 
 function mayLeave(){return !weekLocks&&!weekLoading&&(!dirty||confirm('Des modifications ne sont pas enregistrées. Quitter cette feuille sans les enregistrer?'));}
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 function formatCell(c){return isTimedCell(c)?`${c.post==='cut_fruit'?'Fruits coupés · ':''}${cellDetail(c)?cellDetail(c)+' · ':''}${timeLabel(c.start)}–${timeLabel(c.end)}`:cellLabel(c)||'+';}
+let publicationStatus=null;
+function publicationLabel(start){return `${dateLabel(start)} au ${dateLabel(addDays(start,6))}`;}
+function publicationLight(online){return `<span class="publication-light${online?' is-online':''}" aria-hidden="true"></span>`;}
 function renderNavigation(){
-  $('#departmentNav').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<button class="theme-${e(d.key)}" data-department="${d.id}" aria-current="${d.id===selectedDepartment}">${e(d.name)}</button>`).join('');
+  $('#departmentNav').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<button class="theme-${e(d.key)}" data-department="${d.id}" aria-current="${d.id===selectedDepartment}">${e(d.name)}${publicationStatus?`<span class="department-publication">${publicationLight(publicationStatus.publications.some(p=>p.departmentId===d.id))}<span>${publicationStatus.publications.some(p=>p.departmentId===d.id)?`En ligne · ${e(publicationLabel(publicationStatus.weekStart))}`:'Non publié pour cette semaine'}</span></span>`:''}</button>`).join('');
   $('#departmentNav').querySelectorAll('button').forEach(b=>b.onclick=async()=>{if(!mayLeave())return;try{await loadWeek({departmentId:Number(b.dataset.department)});}catch(err){message(err.message);}});
 }
 async function loadMeta(){meta=await api('/api/departments/meta');if(!meta.departments.some(d=>d.id===selectedDepartment))selectedDepartment=meta.departments.find(d=>d.key==='boulangerie')?.id||meta.departments.find(d=>d.key!=='service')?.id;renderNavigation();}
 async function loadWeek({departmentId=selectedDepartment,weekStart=current?.weekStart||$('#weekPicker').value}={}){
-  const sequence=++loadSequence;weekLoading=true;$('#managerContent').inert=true;message('Chargement…');try{const loaded=await api(`/api/departments/${departmentId}/weeks/${weekStart}`);if(sequence!==loadSequence)return;
+  const sequence=++loadSequence;weekLoading=true;$('#managerContent').inert=true;message('Chargement…');try{const [loaded,publications]=await Promise.all([api(`/api/departments/${departmentId}/weeks/${weekStart}`),api(`/api/departments/publication-status?weekStart=${encodeURIComponent(weekStart)}`)]);if(sequence!==loadSequence)return;publicationStatus=publications;
   const changed=!current||current.department.id!==loaded.department.id||current.weekStart!==loaded.weekStart;
   current=loaded;selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;dirty=false;lastPaste=null;
   if(window.location?.href&&window.history){const url=new URL(window.location.href);url.searchParams.set('department',String(selectedDepartment));url.searchParams.set('week',current.weekStart);window.history.replaceState(null,'',url);}
@@ -29,7 +32,7 @@ async function loadWeek({departmentId=selectedDepartment,weekStart=current?.week
   document.body.className='theme-'+current.department.key;
   $('#weekLabel').textContent=`${dateLabel(current.weekStart)} au ${dateLabel(addDays(current.weekStart,6))}`;$('#scheduleTitle').textContent=current.department.name;
   $('#sheetManager').value=current.draft.manager;$('#sheetNotes').value=current.draft.notes;
-  $('#verified').checked=false;$('#warningsReviewed').checked=false;$('#publishStatus').textContent=current.publishedAt?'Une version est publiée':'Non publié';$('#unpublishWeek').hidden=!current.publishedAt;
+  $('#verified').checked=false;$('#warningsReviewed').checked=false;const online=Boolean(current.published);$('#publishStatus').className='status-chip publication-status'+(online?' is-online':'');$('#publishStatus').innerHTML=publicationLight(online)+`<span><strong>${online?'Horaire en ligne':'Horaire non publié'}</strong><small>${e(publicationLabel(current.weekStart))}</small></span>`;$('#unpublishWeek').hidden=!current.publishedAt;
   $('#draftStatus').textContent='Brouillon à jour.';renderNavigation();renderSchedule();renderPeople();renderPrint();renderWarnings();if(view==='photos')await loadPhotos();if(view==='mail')await loadMailSettings();if(view==='views')await loadViews();message('');}catch(error){if(sequence===loadSequence&&current){selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;renderNavigation();}throw error;}finally{if(sequence===loadSequence){weekLoading=false;$('#managerContent').inert=weekLocks>0;}}
 }
 function renderWarnings(){const warnings=current.warnings||[],conflicts=warnings.filter(w=>w.includes('chevauchement'));$('#scheduleConflicts').hidden=!conflicts.length;$('#scheduleConflicts').innerHTML='<strong>Conflits d’horaires à corriger</strong><ul>'+conflicts.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';$('#warnings').hidden=!warnings.length;$('#warningAcknowledgement').hidden=!warnings.length;$('#warnings').innerHTML='<strong>À vérifier avant publication</strong><ul>'+warnings.map(w=>`<li>${e(w)}</li>`).join('')+'</ul>';}
