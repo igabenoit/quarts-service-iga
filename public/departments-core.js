@@ -88,7 +88,7 @@ export function automaticBreakMinutes(start,end,post){
 // Nights saved with the former automatic hour now use the corrected half-hour.
 // Explicit overrides are retained, including an intentionally entered 60 minutes.
 export const cellBreakMinutes=c=>!c.breakOverride&&c.breakMinutes===60&&isNightShift(c.start,c.end,c.post)?automaticBreakMinutes(c.start,c.end,c.post):c.breakMinutes??0;
-export const cellMinutes=c=>isTimedCell(c)?c.end-c.start-cellBreakMinutes(c):0;
+export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start-cellBreakMinutes(c)):0;
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
@@ -107,10 +107,11 @@ export function normalizeCell(value){
   if(isTimedCell({kind})){
     const end=Number.isInteger(c.end)&&c.end>=0&&c.end<c.start?c.end+1440:c.end;
     if(!Number.isInteger(c.start)||!Number.isInteger(end)||c.start<0||c.start>=1440||end<=c.start||end-c.start>1440||!Number.isInteger(c.breakMinutes??0)||(c.breakMinutes??0)<0||(c.breakMinutes??0)>=end-c.start)throw Error('Vérifiez le début, la fin et la pause du quart.');
+    if(c.paidMinutesOverride!==undefined&&(!Number.isInteger(c.paidMinutesOverride)||c.paidMinutesOverride<0||c.paidMinutesOverride>1440))throw Error('Les heures payées doivent être comprises entre 0 et 24 h, à la minute près.');
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,start:c.start,end,breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    return {kind,start:c.start,end,...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};
