@@ -1,3 +1,4 @@
+import {installDepartmentHoursSummary} from './department-hours-summary.js';
 import {prepareSharedDraft} from './public/department-buffet.js';
 import {installDepartmentMail} from './department-mail.js';
 import {isScoped,ownsDepartment,assertDepartment} from './manager-access.js';
@@ -216,6 +217,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(changed.size)await client.query('UPDATE schedule_store_people SET version=version+1,updated_at=clock_timestamp() WHERE id=ANY($1::bigint[])',[[...changed]]);
     return {ok:true,id:Number(saved.id)};
   });}
+  await installDepartmentHoursSummary(app,pool,{requireManager,sameOrigin,getWeek,weekFor:week,departmentFor:async id=>{const found=(await listDepartments(pool)).find(d=>d.id===integer(id));if(!found)fail('Département inconnu.');return found;}});
   app.get('/api/departments/:id/weeks/:week',requireManager,endpoint(async(req,res)=>{const current=await getWeek(integer(req.params.id),week(req.params.week));res.json({...current,warnings:await warningsFor(current)});}));
   app.put('/api/departments/:id/weeks/:week',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);return saveWeek(client,current,normalizeDraft(req.body.draft,current.people),'save');}))));
   app.post('/api/departments/:id/weeks/:week/copy',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
@@ -357,3 +359,4 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
   return {directory,getWeek,warningsFor,employeePortal,familyPortal};
 }
+

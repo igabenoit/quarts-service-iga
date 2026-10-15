@@ -7,7 +7,8 @@ export const DEPARTMENT_STYLES=[
   {key:'charcuterie',name:'Charcuterie',color:'#b65380',pale:'#fbe9f1'},
   {key:'pam',name:'Prêt-à-manger',color:'#c46620',pale:'#fff0df'},
   {key:'poissonnerie',name:'Poissonnerie',color:'#287c9c',pale:'#e4f4fc'},
-  {key:'epicerie',name:'Épicerie',color:'#344351',pale:'#e9edf1'}
+  {key:'epicerie',name:'Épicerie',color:'#344351',pale:'#e9edf1'},
+  {key:'administration',name:'Administration',color:'#665489',pale:'#eee9f6'}
 ];
 export const escapeHTML=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 export const nameKey=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -219,3 +220,4 @@ export function orderDraft(draft,people,departmentId){
   const byId=new Map(people.map(p=>[p.id,p]));
   return {...draft,rows:[...draft.rows].sort((a,b)=>comparePeople(byId.get(a.personId),byId.get(b.personId),departmentId))};
 }
+

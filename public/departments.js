@@ -1,5 +1,5 @@
 import {prepareSharedDraft} from './department-buffet.js';
-import {controlReport,controlPages,controlCSV} from './department-control.js';
+import {summaryPage,summaryCSV,parseSummaryHours,summaryDelta} from './department-summary.js';
 import {schedulePagesPDF,schedulePDF,sheetOverflowMessage} from './department-pdf.js';
 import {isBirthday,comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,automaticBreakMinutes,cellBreakMinutes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,PAM_POSTS,KITCHEN_POSTS,COMMON_POSTS,assignmentPost,grandMinutes,mergeIncoming,validateAssignment,cellDetail,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
 const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,viewsSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
@@ -13,8 +13,8 @@ const route=()=>`/api/departments/${current.department.id}/weeks/${current.weekS
 let weekLocks=0,weekLoading=false,savingDraft;
 async function withWeekLock(action){weekLocks++;$('#managerContent').inert=true;try{return await action();}finally{weekLocks--;$('#managerContent').inert=weekLocks>0||weekLoading;}}
 function markDirty(){dirty=true;$('#draftStatus').textContent='Modifications à enregistrer.';$('#verified').checked=false;$('#warningsReviewed').checked=false;}
-function mayLeave(){return !weekLocks&&!weekLoading&&(!dirty||confirm('Des modifications ne sont pas enregistrées. Quitter cette feuille sans les enregistrer?'));}
-window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
+function mayLeave(){return !weekLocks&&!weekLoading&&(!(dirty||summaryDirty.size)||confirm('Des modifications ne sont pas enregistrées. Quitter cette feuille sans les enregistrer?'));}
+window.addEventListener('beforeunload',event=>{if(dirty||summaryDirty.size){event.preventDefault();event.returnValue='';}});
 function formatCell(c){return isTimedCell(c)?`${c.post==='cut_fruit'?'Fruits coupés · ':''}${cellDetail(c)?cellDetail(c)+' · ':''}${timeLabel(c.start)}–${timeLabel(c.end)}`:cellLabel(c)||'+';}
 let publicationStatus=null;
 function publicationLabel(start){return `${dateLabel(start)} au ${dateLabel(addDays(start,6))}`;}
@@ -393,50 +393,84 @@ async function loadViews(){
   const seen=data.employees.filter(person=>person.lastViewedAt).length;
   $('#departmentViews').innerHTML=heading+`<div class="consultation-summary"><strong>Horaires ouverts : ${seen} / ${data.employees.length}</strong><span>${data.employees.length-seen} encore à consulter</span></div><ul class="consultation-list">${data.employees.map(person=>`<li><strong>${e(person.name)}</strong><span class="consultation-status ${person.lastViewedAt?'seen':'pending'}">${person.lastViewedAt?'Consulté le '+e(new Date(person.lastViewedAt).toLocaleString('fr-CA')):'Pas encore consulté'}</span></li>`).join('')}</ul>`;
 }
-let controlReports=[],controlPdfUrl,controlCsvUrl;
+
+let controlReports=[],controlPdfUrl,controlCsvUrl,summaryDirty=new Set(),lastControlScope='all';
 function invalidateControl(){
-  controlReports=[];$('#controlPreview').innerHTML='';$('#controlPreview').hidden=true;
-  $('#controlPdf').disabled=true;$('#controlCsv').disabled=true;$('#controlResults').hidden=true;$('#controlStatus').textContent='';
+  controlReports=[];summaryDirty.clear();$('#summaryTable').innerHTML='';$('#controlPreview').innerHTML='';$('#controlPreview').hidden=true;
+  $('#saveSummary').disabled=true;$('#controlPdf').disabled=true;$('#controlCsv').disabled=true;$('#controlResults').hidden=true;$('#controlStatus').textContent='';
   if(controlPdfUrl){URL.revokeObjectURL(controlPdfUrl);controlPdfUrl=null;}
   if(controlCsvUrl){URL.revokeObjectURL(controlCsvUrl);controlCsvUrl=null;}
 }
-$('#controlScope').onchange=invalidateControl;
+function summaryRealLabel(value){return value===null?'—':hoursLabel(value)+' h';}
+function summaryVariance(row){const delta=summaryDelta(row);return delta===null?'—':(delta>0?'+':'')+hoursLabel(delta)+' h';}
+function renderSummaryTable(){
+  $('#summaryTable').innerHTML='<table class="summary-editor"><thead><tr><th>Département</th><th>Régulier prévu</th><th>Formation prévue</th><th>Buffet prévu</th><th>Cuisine prévue</th><th>Total prévu</th><th>Total réel (h)</th><th>Écart</th><th>Justification</th></tr></thead><tbody>'+controlReports.map(row=>'<tr><th>'+e(row.department.name)+(row.empty?'<small>Aucun horaire saisi</small>':'')+(row.detail?'<small>'+e(row.detail)+'</small>':'')+'</th>'+['shift','training','buffet','kitchen'].map(key=>'<td>'+hoursLabel(row.totals[key])+' h</td>').join('')+'<td><strong>'+hoursLabel(row.total)+' h</strong></td><td><input data-summary-real="'+row.department.id+'" aria-label="Heures réelles '+e(row.department.name)+'" inputmode="decimal" placeholder="Non saisi" value="'+(row.actual.minutes===null?'':Math.floor(row.actual.minutes/60)+':'+String(row.actual.minutes%60).padStart(2,'0'))+'"></td><td data-summary-delta="'+row.department.id+'">'+summaryVariance(row)+'</td><td><input data-summary-note="'+row.department.id+'" aria-label="Justification '+e(row.department.name)+'" maxlength="240" value="'+e(row.actual.note)+'"></td></tr>').join('')+'</tbody><tfoot><tr><th colspan="5">Total des départements sélectionnés</th><td>'+hoursLabel(controlReports.reduce((n,row)=>n+row.total,0))+' h</td><td id="summaryActualTotal"></td><td id="summaryDeltaTotal"></td><td id="summaryCompletion"></td></tr></tfoot></table><p>Écart = réel − prévu. Une valeur positive signifie plus d’heures travaillées. 0 est une valeur réelle; une case vide signifie « non saisi ». Le Service inclut caissières, superviseurs et emballeurs, avec les quarts à couvrir; le soutien des autres départements est exclu.</p>';
+  $('#summaryTable').querySelectorAll('input').forEach(input=>input.oninput=()=>{
+    summaryDirty.add(Number(input.dataset.summaryReal||input.dataset.summaryNote));$('#saveSummary').disabled=false;$('#controlPdf').disabled=true;$('#controlCsv').disabled=true;$('#controlResults').hidden=true;$('#controlPreview').hidden=true;$('#controlStatus').textContent='Heures réelles à enregistrer.';updateSummaryTotals();
+  });updateSummaryTotals();
+}
+function pendingSummary(){
+  return controlReports.map(row=>({...row,actual:{minutes:parseSummaryHours($('#summaryTable [data-summary-real="'+row.department.id+'"]').value),note:$('#summaryTable [data-summary-note="'+row.department.id+'"]').value}}));
+}
+function updateSummaryTotals(){
+  try{const rows=pendingSummary(),total=rows.reduce((n,r)=>n+(r.actual.minutes??0),0),filled=rows.filter(r=>r.actual.minutes!==null).length;
+    rows.forEach(row=>$('#summaryTable [data-summary-delta="'+row.department.id+'"]').textContent=summaryVariance(row));
+    $('#summaryActualTotal').textContent=filled?hoursLabel(total)+' h'+(filled<rows.length?' (partiel)':''):'—';
+    $('#summaryDeltaTotal').textContent=filled===rows.length?summaryVariance({total:rows.reduce((n,r)=>n+r.total,0),actual:{minutes:total}}):'—';
+    $('#summaryCompletion').textContent=filled+'/'+rows.length+' renseignés';
+  }catch{ $('#summaryActualTotal').textContent='À vérifier';$('#summaryDeltaTotal').textContent='—'; }
+}
+function refreshSummaryPreview(){
+  $('#controlPreview').innerHTML=summaryPage(controlReports);$('#controlPreview').hidden=false;
+  $('#controlPdf').disabled=false;$('#controlCsv').disabled=false;$('#saveSummary').disabled=true;
+}
+$('#controlScope').onchange=()=>{if(summaryDirty.size&&!confirm('Abandonner les heures réelles non enregistrées?')){$('#controlScope').value=lastControlScope;return;}lastControlScope=$('#controlScope').value;invalidateControl();};
 $('#buildControl').onclick=async()=>{
   if(weekLocks||weekLoading)return;
-  const scope=$('#controlScope').value,departmentId=current.department.id,start=current.weekStart;
+  if(summaryDirty.size&&!confirm('Recharger et abandonner les heures réelles non enregistrées?'))return;
+  const scope=$('#controlScope').value,start=current.weekStart;
   await withWeekLock(async()=>{
-    invalidateControl();$('#controlStatus').textContent='Chargement des horaires enregistrés…';
+    invalidateControl();$('#controlStatus').textContent='Chargement du sommaire…';
     try{
       if(dirty)await saveDraft();
-      const departments=scope==='all'?meta.departments.filter(d=>d.key!=='service'&&d.active!==false):[current.department];
-      const results=await Promise.all(departments.map(d=>api(`/api/departments/${d.id}/weeks/${start}`)));
-      if(current.department.id!==departmentId||current.weekStart!==start)throw Error('La semaine ou le département a changé. Recommencez la préparation.');
-      const reports=results.map(controlReport);
-      $('#controlPreview').innerHTML=controlPages(reports);$('#controlPreview').hidden=false;
-      await document.fonts.ready;
-      const sheets=[...$('#controlPreview').querySelectorAll('.control-sheet')];
-      for(const sheet of sheets){const overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);}
-      controlReports=reports;$('#controlPdf').disabled=false;$('#controlCsv').disabled=false;
-      $('#controlStatus').textContent=reports.length+' département(s) · '+reports.reduce((n,r)=>n+r.rows.length,0)+' lignes employés · '+sheets.length+' page(s) légales. Totaux de semaine complets sur chaque page de détail.';
-    }catch(error){invalidateControl();$('#controlStatus').textContent='Le contrôle n’a pas été préparé. '+error.message;}
+      const departments=scope==='all'?meta.departments.filter(d=>d.active!==false):[current.department];
+      controlReports=await Promise.all(departments.map(d=>api(`/api/departments/${d.id}/weeks/${start}/hours-summary`)));
+      renderSummaryTable();refreshSummaryPreview();
+      $('#controlStatus').textContent=controlReports.length+' département(s) · sommaire seulement. Les heures réelles sont enregistrées séparément des horaires.';
+    }catch(error){invalidateControl();$('#controlStatus').textContent='Le sommaire n’a pas été chargé. '+error.message;}
+  });
+};
+$('#saveSummary').onclick=async()=>{
+  if(weekLocks||weekLoading||!summaryDirty.size)return;
+  await withWeekLock(async()=>{
+    $('#controlStatus').textContent='Enregistrement des heures réelles…';
+    try{
+      const pending=pendingSummary();
+      for(const row of pending.filter(row=>summaryDirty.has(row.department.id))){
+        const saved=await api(`/api/departments/${row.department.id}/weeks/${row.weekStart}/hours-summary`,{method:'PUT',body:JSON.stringify({version:row.version,actual:row.actual})});
+        controlReports[controlReports.findIndex(item=>item.department.id===row.department.id)]=saved;summaryDirty.delete(row.department.id);
+      }
+      renderSummaryTable();refreshSummaryPreview();$('#controlStatus').textContent='Heures réelles enregistrées. Les écarts et le sommaire sont à jour.';
+    }catch(error){$('#saveSummary').disabled=!summaryDirty.size;$('#controlStatus').textContent='Enregistrement incomplet. '+error.message;}
   });
 };
 $('#controlPdf').onclick=async()=>{
-  if(!controlReports.length||weekLocks||weekLoading)return;
+  if(!controlReports.length||summaryDirty.size||weekLocks||weekLoading)return;
   await withWeekLock(async()=>{
-    $('#controlResults').hidden=true;$('#controlStatus').textContent='Création du PDF de contrôle…';
+    $('#controlResults').hidden=true;$('#controlStatus').textContent='Création du sommaire PDF…';
     try{
-      const blob=await schedulePagesPDF([...$('#controlPreview').querySelectorAll('.control-sheet')],{previewSelector:'#controlPreview .control-sheet'});
+      await document.fonts.ready;const sheet=$('#controlPreview .control-sheet'),overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);
+      const blob=await schedulePagesPDF([sheet],{previewSelector:'#controlPreview .control-sheet'});
       if(controlPdfUrl)URL.revokeObjectURL(controlPdfUrl);controlPdfUrl=URL.createObjectURL(blob);
-      $('#controlOpen').href=controlPdfUrl;$('#controlDownload').href=controlPdfUrl;$('#controlDownload').download='Controle-heures-'+current.weekStart+'.pdf';
-      $('#controlResults').hidden=false;$('#controlStatus').textContent='PDF de contrôle prêt. Chaque département commence sur une nouvelle page légale.';
+      $('#controlOpen').href=controlPdfUrl;$('#controlDownload').href=controlPdfUrl;$('#controlDownload').download='Sommaire-heures-'+current.weekStart+'.pdf';
+      $('#controlResults').hidden=false;$('#controlStatus').textContent='Sommaire PDF prêt : une page légale, sans feuilles de détail.';
     }catch(error){$('#controlStatus').textContent='Le PDF n’a pas été créé. '+error.message;}
   });
 };
 $('#controlCsv').onclick=()=>{
-  if(!controlReports.length)return;
-  if(controlCsvUrl)URL.revokeObjectURL(controlCsvUrl);controlCsvUrl=URL.createObjectURL(new Blob([controlCSV(controlReports)],{type:'text/csv;charset=utf-8'}));
-  const link=document.createElement('a');link.href=controlCsvUrl;link.download='Controle-heures-detail-'+current.weekStart+'.csv';link.click();
+  if(!controlReports.length||summaryDirty.size)return;
+  if(controlCsvUrl)URL.revokeObjectURL(controlCsvUrl);controlCsvUrl=URL.createObjectURL(new Blob([summaryCSV(controlReports)],{type:'text/csv;charset=utf-8'}));
+  const link=document.createElement('a');link.href=controlCsvUrl;link.download='Sommaire-heures-'+current.weekStart+'.csv';link.click();
 };
 
 const initialSelection=new URLSearchParams(window.location?.search||'');selectedDepartment=Number(initialSelection.get('department'))||undefined;
@@ -465,6 +499,4 @@ $('#previewPersonalImport').onclick=async()=>{try{
   $('#applyPersonalImport').disabled=errors.length>0||!personalImportEntries.length;
 }catch(err){$('#personalImportReview').textContent=err.message;}};
 $('#applyPersonalImport').onclick=async()=>{const button=$('#applyPersonalImport');button.disabled=true;try{const result=await post('/api/departments/personal-import',{entries:personalImportEntries});$('#personalImportReview').textContent=result.updated+' fiches mises à jour.';personalImportEntries=[];await loadMeta();renderPeople();}catch(err){$('#personalImportReview').textContent=err.message;}};
-
-
 
