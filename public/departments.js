@@ -1,5 +1,6 @@
 import {prepareSharedDraft} from './department-buffet.js';
-import {schedulePDF,sheetOverflowMessage} from './department-pdf.js';
+import {controlReport,controlPages,controlCSV} from './department-control.js';
+import {schedulePagesPDF,schedulePDF,sheetOverflowMessage} from './department-pdf.js';
 import {isBirthday,comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,automaticBreakMinutes,cellBreakMinutes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,PAM_POSTS,KITCHEN_POSTS,COMMON_POSTS,assignmentPost,grandMinutes,mergeIncoming,validateAssignment,cellDetail,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
 const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,viewsSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
@@ -26,7 +27,7 @@ async function loadMeta(){meta=await api('/api/departments/meta');if(!meta.depar
 async function loadWeek({departmentId=selectedDepartment,weekStart=current?.weekStart||$('#weekPicker').value}={}){
   const sequence=++loadSequence;weekLoading=true;$('#managerContent').inert=true;message('Chargement…');try{const [loaded,publications]=await Promise.all([api(`/api/departments/${departmentId}/weeks/${weekStart}`),api(`/api/departments/publication-status?weekStart=${encodeURIComponent(weekStart)}`)]);if(sequence!==loadSequence)return;publicationStatus=publications;
   const changed=!current||current.department.id!==loaded.department.id||current.weekStart!==loaded.weekStart;
-  current=loaded;selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;dirty=false;lastPaste=null;
+  invalidateControl();current=loaded;selectedDepartment=current.department.id;$('#weekPicker').value=current.weekStart;dirty=false;lastPaste=null;
   if(window.location?.href&&window.history){const url=new URL(window.location.href);url.searchParams.set('department',String(selectedDepartment));url.searchParams.set('week',current.weekStart);window.history.replaceState(null,'',url);}
   if(changed){activePhoto=null;photoLoadSequence++;clearTimeout(photoPollTimer);$('#photoReview').hidden=true;$('#historyList').innerHTML='';}
   document.body.className='theme-'+current.department.key;
@@ -392,6 +393,52 @@ async function loadViews(){
   const seen=data.employees.filter(person=>person.lastViewedAt).length;
   $('#departmentViews').innerHTML=heading+`<div class="consultation-summary"><strong>Horaires ouverts : ${seen} / ${data.employees.length}</strong><span>${data.employees.length-seen} encore à consulter</span></div><ul class="consultation-list">${data.employees.map(person=>`<li><strong>${e(person.name)}</strong><span class="consultation-status ${person.lastViewedAt?'seen':'pending'}">${person.lastViewedAt?'Consulté le '+e(new Date(person.lastViewedAt).toLocaleString('fr-CA')):'Pas encore consulté'}</span></li>`).join('')}</ul>`;
 }
+let controlReports=[],controlPdfUrl,controlCsvUrl;
+function invalidateControl(){
+  controlReports=[];$('#controlPreview').innerHTML='';$('#controlPreview').hidden=true;
+  $('#controlPdf').disabled=true;$('#controlCsv').disabled=true;$('#controlResults').hidden=true;$('#controlStatus').textContent='';
+  if(controlPdfUrl){URL.revokeObjectURL(controlPdfUrl);controlPdfUrl=null;}
+  if(controlCsvUrl){URL.revokeObjectURL(controlCsvUrl);controlCsvUrl=null;}
+}
+$('#controlScope').onchange=invalidateControl;
+$('#buildControl').onclick=async()=>{
+  if(weekLocks||weekLoading)return;
+  const scope=$('#controlScope').value,departmentId=current.department.id,start=current.weekStart;
+  await withWeekLock(async()=>{
+    invalidateControl();$('#controlStatus').textContent='Chargement des horaires enregistrés…';
+    try{
+      if(dirty)await saveDraft();
+      const departments=scope==='all'?meta.departments.filter(d=>d.key!=='service'&&d.active!==false):[current.department];
+      const results=await Promise.all(departments.map(d=>api(`/api/departments/${d.id}/weeks/${start}`)));
+      if(current.department.id!==departmentId||current.weekStart!==start)throw Error('La semaine ou le département a changé. Recommencez la préparation.');
+      const reports=results.map(controlReport);
+      $('#controlPreview').innerHTML=controlPages(reports);$('#controlPreview').hidden=false;
+      await document.fonts.ready;
+      const sheets=[...$('#controlPreview').querySelectorAll('.control-sheet')];
+      for(const sheet of sheets){const overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);}
+      controlReports=reports;$('#controlPdf').disabled=false;$('#controlCsv').disabled=false;
+      $('#controlStatus').textContent=reports.length+' département(s) · '+reports.reduce((n,r)=>n+r.rows.length,0)+' lignes employés · '+sheets.length+' page(s) légales. Totaux de semaine complets sur chaque page de détail.';
+    }catch(error){invalidateControl();$('#controlStatus').textContent='Le contrôle n’a pas été préparé. '+error.message;}
+  });
+};
+$('#controlPdf').onclick=async()=>{
+  if(!controlReports.length||weekLocks||weekLoading)return;
+  await withWeekLock(async()=>{
+    $('#controlResults').hidden=true;$('#controlStatus').textContent='Création du PDF de contrôle…';
+    try{
+      const blob=await schedulePagesPDF([...$('#controlPreview').querySelectorAll('.control-sheet')],{previewSelector:'#controlPreview .control-sheet'});
+      if(controlPdfUrl)URL.revokeObjectURL(controlPdfUrl);controlPdfUrl=URL.createObjectURL(blob);
+      $('#controlOpen').href=controlPdfUrl;$('#controlDownload').href=controlPdfUrl;$('#controlDownload').download='Controle-heures-'+current.weekStart+'.pdf';
+      $('#controlResults').hidden=false;$('#controlStatus').textContent='PDF de contrôle prêt. Chaque département commence sur une nouvelle page légale.';
+    }catch(error){$('#controlStatus').textContent='Le PDF n’a pas été créé. '+error.message;}
+  });
+};
+$('#controlCsv').onclick=()=>{
+  if(!controlReports.length)return;
+  if(controlCsvUrl)URL.revokeObjectURL(controlCsvUrl);controlCsvUrl=URL.createObjectURL(new Blob([controlCSV(controlReports)],{type:'text/csv;charset=utf-8'}));
+  const link=document.createElement('a');link.href=controlCsvUrl;link.download='Controle-heures-detail-'+current.weekStart+'.csv';link.click();
+};
+
 const initialSelection=new URLSearchParams(window.location?.search||'');selectedDepartment=Number(initialSelection.get('department'))||undefined;
 try{$('#weekPicker').value=monday(initialSelection.get('week')||today());}catch{$('#weekPicker').value=monday(today());}
 $('#weekPicker').onchange=async()=>{if(!$('#weekPicker').value||!mayLeave()){$('#weekPicker').value=current.weekStart;return;}try{await loadWeek({weekStart:monday($('#weekPicker').value)});}catch(err){message(err.message);}};
@@ -418,3 +465,6 @@ $('#previewPersonalImport').onclick=async()=>{try{
   $('#applyPersonalImport').disabled=errors.length>0||!personalImportEntries.length;
 }catch(err){$('#personalImportReview').textContent=err.message;}};
 $('#applyPersonalImport').onclick=async()=>{const button=$('#applyPersonalImport');button.disabled=true;try{const result=await post('/api/departments/personal-import',{entries:personalImportEntries});$('#personalImportReview').textContent=result.updated+' fiches mises à jour.';personalImportEntries=[];await loadMeta();renderPeople();}catch(err){$('#personalImportReview').textContent=err.message;}};
+
+
+
