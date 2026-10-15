@@ -1,5 +1,5 @@
 const dayNames=["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
-const roleNames={supervisor:"Supervision",orders:"Commandes téléphoniques",cashier:"Caisse",packer:"Emballage"};
+const roleNames={manager:"Gérante",supervisor:"Supervision",orders:"Commandes téléphoniques",cashier:"Caisse",packer:"Emballage"};
 const escapeHtml=value=>String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const searchText=value=>String(value).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLocaleLowerCase("fr-CA");
 const hour=minutes=>`${String(Math.floor(minutes/60)).padStart(2,"0")}:${String(minutes%60).padStart(2,"0")}`;

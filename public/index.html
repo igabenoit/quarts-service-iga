@@ -46,7 +46,7 @@
       </section>
 
       <section class="summary-grid">
-        <article class="metric card combined-total"><span>Total des heures planifiées · caissières, superviseurs et emballeurs</span><strong id="combinedPlanned">0 h</strong><small id="combinedBreakdown"></small></article>
+        <article class="metric card combined-total"><span>Total des heures planifiées · gérante, caissières, superviseurs et emballeurs</span><strong id="combinedPlanned">0 h</strong><small id="combinedBreakdown"></small></article>
         <article class="metric card"><span>Budget caisse et supervision</span><label><input id="frontBudget" type="number" min="0" step="0.25"> h</label></article>
         <article class="metric card"><span>Quarts planifiés</span><strong id="frontPlanned">0 h</strong><small id="frontVariance"></small></article>
         <article class="metric card"><span>Budget emballeurs</span><label><input id="packerBudget" type="number" min="0" step="0.25"> h</label></article>
@@ -71,7 +71,7 @@
         <form id="employeeForm">
           <input id="employeeId" type="hidden">
           <label>Nom<input id="employeeName" required maxlength="100"></label><label>Code employé (6 derniers chiffres)<input id="employeeCode" pattern="[0-9]{6}" maxlength="6" inputmode="numeric" autocomplete="off"></label><label>Date de naissance (gestion seulement)<input id="employeeBirthday" type="date"></label>
-          <label>Fonction<select id="employeeRole"><option value="supervisor">Superviseur</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option></select></label>
+          <label>Fonction<select id="employeeRole"><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option></select></label>
           <fieldset class="employee-other-roles"><legend>Autres postes possibles</legend><div id="employeeOtherRoles"></div></fieldset>
           <label>Ancienneté<input id="employeeSeniority" type="date"></label>
           <label>Rang d’affichage (1 en premier)<input id="employeeDisplayRank" type="number" min="1" max="500" step="1" placeholder="À la suite"></label>
@@ -98,7 +98,7 @@
         <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
         <form id="shiftForm">
           <input id="shiftId" type="hidden">
-          <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
+          <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
           <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
           <label>Début<input id="startTime" type="time" value="08:00" required></label>
           <label>Fin<input id="endTime" type="time" value="16:00" required></label>

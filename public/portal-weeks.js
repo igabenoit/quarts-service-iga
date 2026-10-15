@@ -21,7 +21,7 @@ export function personalDays(week,results){
   const days=DAY_NAMES.map((name,index)=>({name,date:addDays(week,index),entries:[]}));
   const seenBuffet=new Set();
   const origins=new Set(results.filter(r=>r.kind==='department').map(r=>r.data.department.key));
-  const roles={supervisor:'Supervision',orders:'Commandes téléphoniques',cashier:'Caisse',packer:'Emballage',support:'Aide autre département'};
+  const roles={manager:'Gérante',supervisor:'Supervision',orders:'Commandes téléphoniques',cashier:'Caisse',packer:'Emballage',support:'Aide autre département'};
   for(const result of results){
     const data=result.data;
     if(data.weekStart!==week)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');

@@ -7,6 +7,15 @@ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').re
 function print(data){const c=vm.createContext({serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data)',c);}
 const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
+
+test('manager stays on the first Service sheet with her title and all existing supervision shifts',()=>{
+ const html=print({employees:[{...person(1,'manager'),name:'Gérante témoin'}],shifts:[shift(1,'supervisor'),shift(2,'manager',1)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}]});
+ const sheets=html.match(/<article[\s\S]*?<\/article>/g);
+ assert.equal(sheets.length,3);assert.match(sheets[0],/Gérante témoin<\/div><small>Gérante/);
+ assert.equal((html.match(/data-person="1"/g)||[]).length,1);
+ assert.equal((sheets[0].match(/class="print-start"/g)||[]).length,2);
+ assert.match(sheets[0],/Cette feuille : 14 h/);
+});
 test('Service keeps exactly three team sheets with every employee once and in priority order',()=>{
  const employees=Array.from({length:31},(_,i)=>person(i+1));const html=print({employees});
  for(const p of employees)assert.equal((html.match(new RegExp(`data-person="${p.id}"`,'g'))||[]).length,1);

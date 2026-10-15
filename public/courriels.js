@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s),escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labels={ready:'Courriel obtenu',missing:'Courriel manquant',review:'Adresse à choisir'};
-const roleLabels={cashier:'Caissière',packer:'Emballeur',supervisor:'Superviseur',orders:'Commandes téléphoniques'};
+const roleLabels={manager:'Gérante',cashier:'Caissière',packer:'Emballeur',supervisor:'Superviseur',orders:'Commandes téléphoniques'};
 let directory=null,loading=false,saving=false;
 const drafts=new Map();
 async function api(url,options={}){

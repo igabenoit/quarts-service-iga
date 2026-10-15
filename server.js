@@ -88,10 +88,10 @@ await pool.query(`
 await pool.query(`
   ALTER TABLE schedule_shifts DROP CONSTRAINT IF EXISTS schedule_shifts_role_check;
   ALTER TABLE schedule_shifts ADD CONSTRAINT schedule_shifts_role_check
-    CHECK (role IN ('cashier','supervisor','support','packer','orders'));
+    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager'));
   ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
   ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
-    CHECK (role IN ('cashier','supervisor','packer','orders'));
+    CHECK (role IN ('cashier','supervisor','packer','orders','manager'));
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS display_rank INTEGER;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS assignment_rank INTEGER;
   ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS is_minor BOOLEAN NOT NULL DEFAULT FALSE;
@@ -228,7 +228,7 @@ function parseMinutes(value, name, min, max) {
 }
 function normalizeShift(body) {
   const role = String(body.role || "");
-  if (!["cashier", "supervisor", "support", "packer", "orders"].includes(role)) throw new Error("Fonction invalide.");
+  if (!["cashier", "supervisor", "support", "packer", "orders", "manager"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
   const {breakMinutes} = serviceShiftTiming(startMinute,endMinute);
@@ -265,8 +265,8 @@ function mapShift(row) {
 function normalizeEmployee(body) {
   const name = String(body.name || "").trim().slice(0, 100);
   const role = String(body.role || "");
-  if (!name || !["cashier", "supervisor", "packer", "orders"].includes(role)) throw new Error("Nom ou fonction invalide.");
-  const allowedRoles = ["cashier", "supervisor", "packer", "orders"];
+  if (!name || !["cashier", "supervisor", "packer", "orders", "manager"].includes(role)) throw new Error("Nom ou fonction invalide.");
+  const allowedRoles = ["cashier", "supervisor", "packer", "orders", "manager"];
   if (body.roles !== undefined && !Array.isArray(body.roles)) throw new Error("Fonctions invalides.");
   if (body.roles?.some(value => !allowedRoles.includes(value))) throw new Error("Fonctions invalides.");
   const roles = [...new Set([role, ...(body.roles || [])])];
@@ -346,7 +346,7 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
       `INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
-    for (const role of ["supervisor","cashier","packer","orders"]) {
+    for (const role of ["manager","supervisor","cashier","packer","orders"]) {
       await client.query(`WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
         FROM schedule_employees WHERE role=$1
