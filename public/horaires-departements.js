@@ -14,6 +14,7 @@ function failed(error){
   if(error.unauthorized){listing=null;week=null;$('#accessForm').hidden=false;$('#staffContent').hidden=true;}
 }
 function renderNavigation(){
+  $('#weekBanner').hidden=false;
   const current=monday(listing.today),next=addDays(current,7),available=availableWeeks(listing);
   for(const [id,value] of [['currentWeek',current],['nextWeek',next]]){
     const info=weekInfo(value,listing.today),button=$('#'+id);

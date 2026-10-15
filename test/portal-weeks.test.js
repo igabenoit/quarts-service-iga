@@ -35,6 +35,8 @@ test('a late response cannot put the previous week under the new week banner',as
 test('failed refresh and wrong-week payload clear displayed shifts instead of retaining stale data',async()=>{
  const f=fixture();f.fetch(async path=>response(path.endsWith('department-schedules')?listing():published('2026-10-12')));await f.run('load()');assert.match(f.$('#personalSchedule').innerHTML,/22:00/);
  f.fetch(async()=>{throw Error('Hors connexion');});await f.run('load()');assert.equal(f.$('#personalSchedule').innerHTML,'');assert.match(f.$('#status').textContent,/Hors connexion/);
+ f.fetch(async()=>response(published('2026-10-19')));await f.run("chooseWeek('2026-10-19')");assert.equal(f.$('#weekBanner').hidden,false);assert.match(f.$('#weekBanner').innerHTML,/Semaine prochaine/);
+ f.run("week='2026-10-12'");
  f.fetch(async()=>response(published('2026-10-19')));await f.run('loadSchedule()');assert.equal(f.$('#personalSchedule').innerHTML,'');assert.match(f.$('#status').textContent,/ne correspond pas/);
 });
 test('all departments and Service are loaded only for the selected week; partial failures show no incomplete schedule',async()=>{
