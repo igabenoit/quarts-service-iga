@@ -52,7 +52,7 @@ test('PostgreSQL: same employee full print schedule, draft warnings, published-o
   assert.equal((await save(p,{rows:[{personId:id,cells:cells({0:shift(420,960,{kind:'buffet'}),1:shift(390,930,{post:'rs_ss'})})},{personId:outsider,cells:cells({0:shift()})}]})).code,200);
   const current=await get(c);assert.equal(current.people[0].buffetPamPriority,true);assert.ok(current.related.every(r=>r.personId===id));assert.equal(current.warnings.filter(w=>w.includes('chevauchement')).length,0);
   const display=prepareSharedDraft(mergeIncoming(current.draft,current.incoming),current.related,current.people,c.key);
-  const html=sheetHTML({department:c,weekStart:week,people:current.people,...display});assert.match(html,/Commandes Sandwich/);assert.doesNotMatch(html,/Autre personne/);assert.match(html,/Sem\. 16 h/);
+  const html=sheetHTML({department:c,weekStart:week,people:current.people,...display});assert.match(html,/Commandes Sandwich/);assert.doesNotMatch(html,/Autre personne/);assert.match(html,/Sem\. 16 h/);assert.match(html,/sheet-person multi-shift-row/,'long department/post labels receive flexible height');
   assert.equal(buffetMinutes(display.draft.rows[0]),0);assert.equal(totalMinutes(display.draft.rows[0]),0);
   assert.equal((await f.call('get','/api/leave/department-schedules/:id/:week',{params:{id:c.id,week}})).code,404);
   for(const d of [c,p])assert.equal((await f.call('post',route+'/publish',{params:{id:d.id,week},body:{revision:1,verified:true,warningsReviewed:true}})).code,200);

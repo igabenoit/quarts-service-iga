@@ -185,7 +185,8 @@ export function sheetHTML({department,weekStart,people,draft,blank=false,related
       const extra=blank?[]:related.filter(i=>i.personId===row.personId&&i.day===day).map(i=>({...i.cell,printDepartment:i.cell.workDepartment||i.sourceDepartment}));
       return [...(isTimedCell(c)?[{...c,printDepartment:c.workDepartment||department.key}]:extra.length?[]:[c]),...extra].sort((a,b)=>(a.start??0)-(b.start??0));
     });
-    row.printUnits=Math.max(1,...row.printDays.map(day=>day.length));
+    const longPost=row.shared&&row.printDays.some(day=>day.some(c=>isTimedCell(c)&&shiftAssignment(c,c.printDepartment||department.key).length>20));
+    row.printUnits=Math.max(longPost?2:1,...row.printDays.map(day=>day.length));
     row.allMinutes=row.printDays.flat().reduce((n,c)=>n+cellMinutes(c),0);
   }
   const printDay=(r,c,d)=>{
