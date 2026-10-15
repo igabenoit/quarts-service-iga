@@ -23,14 +23,14 @@ function render({periods=[],manual=false,shift=false}={}) {
 }
 test('la grille affiche le congé approuvé même sans heures attribuées',()=>{
   const html=render({periods:[{date:'2026-10-12',allDay:true,startMinute:0,endMinute:1440}]});
-  assert.match(html,/<td class=""><strong class="print-leave">CONGÉ APPROUVÉ<\/strong><\/td>/);
-  assert.match(html,/<td class="print-hours">—<\/td>/);
+  assert.match(html,/<strong class="print-leave">CONGÉ APPROUVÉ<\/strong>/);
+  assert.match(html,/<td class="sheet-total print-hours">—<\/td>/);
 });
 test('un congé partiel conserve le quart compatible et son total',()=>{
   const html=render({periods:[{date:'2026-10-12',allDay:false,startMinute:600,endMinute:720}],shift:true});
-  assert.match(html,/CONGÉ APPROUVÉ<br>10 h–12 h/);
-  assert.match(html,/<span class="print-start">8 h<\/span>/);
-  assert.match(html,/<td class="print-hours">2 h<\/td>/);
+  assert.match(html,/CONGÉ APPROUVÉ<br>10:00–12:00/);
+  assert.match(html,/<span class="print-start">08:00<\/span>/);
+  assert.match(html,/<td class="sheet-total print-hours">2<\/td>/);
 });
 test('les congés manuels restent affichés et les autres semaines sont exclues',()=>{
   const html=render({manual:true,periods:[{date:'2026-10-19',allDay:true,startMinute:0,endMinute:1440}]});

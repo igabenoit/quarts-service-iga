@@ -1,0 +1,56 @@
+/* Same legal sheet model as departments; scoped to the Service printout. */
+.service-sheet{--accent:#2458a4;--pale:#eaf1ff;width:8.5in;height:14in;padding:.5in;background:#fff;margin:0 auto;color:#282e29;display:flex;flex-direction:column;font-family:Arial,Helvetica,sans-serif;line-height:1.2;box-sizing:border-box;flex-shrink:0}
+.service-sheet *{box-sizing:border-box}
+.preview-pages .service-sheet{box-shadow:0 5px 20px #28332322}
+.service-sheet .sheet-header{display:flex;justify-content:space-between;align-items:center;border-top:5pt solid var(--accent);border-bottom:.55pt solid #aab3b9;padding:9pt 0 10pt;min-height:79pt;flex-shrink:0;gap:10pt}
+.service-sheet .sheet-header img{width:130pt;height:auto}
+.service-sheet .sheet-header>div{text-align:right}
+.service-sheet .sheet-header h1{font-size:21pt;color:var(--accent);text-transform:uppercase;margin:0 0 5pt;line-height:1.1}
+.service-sheet .sheet-header p{font-size:6.7pt;letter-spacing:.6pt;margin:0 0 8pt;color:#282e29}
+.service-sheet .sheet-header strong{font-size:8.5pt}
+.service-sheet .sheet-header small{display:block;font-size:6pt;color:#586572;margin-top:5pt}
+.service-sheet .sheet-table{width:100%;border-collapse:collapse;table-layout:fixed;flex:none;font-size:8pt;margin-top:14pt}
+.service-sheet .sheet-table td,.service-sheet .sheet-table th{border:.55pt solid #aab3b9;padding:0;text-align:center;overflow-wrap:anywhere;vertical-align:middle}
+.service-sheet .col-name{width:23%}.service-sheet .col-seniority{width:11.5%}.service-sheet .col-total{width:5.7%}
+.service-sheet .sheet-table thead{height:29pt;background:#eff2f7}
+.service-sheet .sheet-table thead th{font-size:7.6pt;text-transform:uppercase}
+.service-sheet .sheet-table thead small{font-size:6pt;font-weight:400;text-transform:none}
+.service-sheet .sheet-group{height:16pt;background:var(--pale)}
+.service-sheet .sheet-group th{text-align:left;padding-left:6pt;text-transform:uppercase;font-size:7.5pt;color:#1a437e}
+.service-sheet .sheet-subtotal{height:16pt;background:#f2f5fa}
+.service-sheet .sheet-subtotal td:first-child{text-align:right;padding-right:7pt;text-transform:uppercase;font-size:6.8pt;font-weight:700}
+.service-sheet .sheet-person{height:var(--row-height,42pt)}
+.service-sheet .sheet-name{text-align:left!important;font-size:9.5pt;font-weight:600}
+.service-sheet .sheet-person-label{height:calc(var(--row-height,42pt) - .55pt);padding:4pt;line-height:1.2;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+.service-sheet .service-rank{font-size:6.5pt;font-weight:400;color:#657484}
+.service-sheet .sheet-seniority{font-size:6.5pt;padding:2pt!important}
+.service-sheet .sheet-work{height:calc(var(--row-height,42pt) - 11.55pt);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2pt;font-size:8pt;line-height:1.2;overflow:hidden}
+.service-sheet .sheet-day-detail{display:grid;grid-template-columns:1fr 1fr;height:11pt;border-top:.5pt solid #aab3b9;font-size:5pt;line-height:1.1}
+.service-sheet .sheet-day-detail span{display:flex;justify-content:center;align-items:center;overflow-wrap:anywhere;padding:0 1pt}
+.service-sheet .sheet-day-detail span+span{background:var(--pale);border-left:.5pt solid #aab3b9}
+.service-sheet .sheet-total{font-weight:700;font-size:8pt;background:#f5f8fd;white-space:normal}
+.service-sheet .service-shift{font-size:8pt;font-weight:700;line-height:1.15;width:100%;padding:1pt 0}
+.service-sheet .service-shift+.service-shift{border-top:.5pt solid #c6d1e0;margin-top:2pt;padding-top:2pt}
+.service-sheet .print-start,.service-sheet .print-end{display:block;white-space:nowrap}
+.service-sheet .service-shift small{display:block;font-size:5.5pt;font-weight:400;line-height:1.1;margin:1pt 0 0;color:inherit}
+.service-sheet .service-shift.cross-role{background:#eaf1ff;color:#183e75}
+.service-sheet .service-shift .service-role{font-weight:700;margin:0 0 1pt}
+.service-sheet .print-leave{color:#a12628;display:block;font-size:6pt;line-height:1.15;font-weight:700}
+.service-sheet .service-off .sheet-work{background:#edf0f3}
+.service-sheet .service-unavailable{font-size:5.7pt;color:#586572}
+.service-sheet .service-unfilled th,.service-sheet .service-unfilled td,.service-sheet .service-unfilled .sheet-day-detail span{background:#fff1cd}
+.service-sheet .service-unfilled .service-shift{color:#6b4300}
+.service-sheet .birthday-greeting{font-size:5.7pt;line-height:1.1;color:#814000;display:block}
+.service-sheet .sheet-bottom{display:flex;justify-content:space-between;gap:8pt;padding:9pt 0;font-size:6pt;line-height:1.4;flex-shrink:0}
+.service-sheet .sheet-totals{text-align:right;flex-shrink:0}
+.service-sheet .sheet-totals strong{display:block;font-size:9pt}
+.service-sheet .sheet-totals span{font-size:6.5pt}
+.service-sheet .service-week-total{display:flex;justify-content:space-between;gap:8pt;align-items:center;background:var(--pale);border-top:.7pt solid #adc0dc;padding:7pt;margin-bottom:12pt;flex-shrink:0}
+.service-sheet .service-week-total strong{font-size:8pt;color:#1a437e}
+.service-sheet .service-week-total span{font-size:6pt;text-align:right}
+.service-sheet .sheet-notes{font-size:7pt;min-height:49pt}
+.service-sheet .sheet-notes strong{text-transform:uppercase;font-size:7pt}
+.service-sheet .sheet-notes p{margin:5pt 0 0;border-bottom:.5pt solid #aab3b9;min-height:30pt}
+@page service-schedule{size:legal portrait;margin:0}
+@media print{body:not(.printing-planogram){margin:0!important;padding:0!important}#printSheet .service-sheet{page:service-schedule;margin:0;break-inside:avoid;break-after:page;box-shadow:none}#printSheet .service-sheet:last-child{break-after:auto}.service-sheet .sheet-table tr{break-inside:avoid}}
+.service-pdf-tools{padding:10px 20px;background:#f2f6fc;color:#254365}.service-pdf-tools p{margin:0;font-size:.85rem}.service-pdf-tools a{display:inline-block;margin:10px 16px 2px 0;color:#194c98;font-weight:700}#servicePdfResult[hidden]{display:none!important}#previewPdf:disabled{opacity:.5;cursor:wait}

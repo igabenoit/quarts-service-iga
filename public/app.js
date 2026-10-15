@@ -35,33 +35,56 @@ function assignedName(id){const a=state.assignments.find(a=>a.shiftId===id);retu
 function shiftCard(shift){const detail=shift.role==="support"&&shift.sourceDepartment?` · ${escapeHtml(shift.sourceDepartment)}`:"";const name=assignedName(shift.id);return `<button class="shift-card ${shift.role}" data-id="${shift.id}"><b>${roleNames[shift.role]}${detail}</b><span>${timeText(shift.startMinute)} à ${timeText(shift.endMinute)}</span><small>${durationText(shift.paidMinutes)} payées${shift.breakMinutes?` · pause ${shift.breakMinutes} min`:""}${shift.notes?` · ${escapeHtml(shift.notes)}`:""}</small>${name?`<strong>${escapeHtml(name)}</strong>`:""}</button>`;}
 function renderBoard(area,target){$(target).innerHTML=dayNames.map((day,index)=>{const date=addDays(state.weekStart,index);const shifts=state.shifts.filter(s=>s.area===area&&s.dayIndex===index).sort((a,b)=>a.startMinute-b.startMinute);return `<article class="day-column"><div class="day-head"><strong>${day}</strong><small>${fmtDate.format(new Date(`${date}T12:00:00Z`))}</small></div><div class="shift-list">${shifts.length?shifts.map(shiftCard).join(""):'<div class="empty">Aucun quart</div>'}</div><div class="day-total">${durationText(dayTotal(area,index))}</div></article>`;}).join("");document.querySelectorAll(`${target} .shift-card`).forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));}
 function renderWarnings(){const warnings=[];for(let day=0;day<7;day++){const front=state.shifts.filter(s=>s.area==="front"&&s.dayIndex===day);if(front.length&&!front.some(s=>s.role==="supervisor"))warnings.push(`${shortDays[day]} sans superviseur`);}$("#frontWarnings").innerHTML=warnings.map(w=>`<span class="warning">${w}</span>`).join("");}
-function renderPrint(){
-  const shiftText=(s,homeRole)=>`<div class="print-shift${homeRole&&s.role!==homeRole?` print-cross-${s.role}`:""}">${homeRole&&s.role!==homeRole?`<small class="print-role-label">${roleNames[s.role]}</small>`:""}<span class="print-start">${timeText(s.startMinute)}</span><span class="print-end">${timeText(s.endMinute)}</span>${s.breakMinutes&&s.breakMinutes!==60?`<small>Pause ${s.breakMinutes} min</small>`:""}${s.role==="support"&&s.sourceDepartment?`<small>${escapeHtml(s.sourceDepartment)}</small>`:""}</div>`;
-  const buildSection=group=>{
-    const groupShifts=state.shifts.filter(s=>group.roles.includes(s.role));
-    const employees=state.employees.filter(e=>group.roles.includes(e.role)&&(e.active||state.assignments.some(a=>a.employeeId===e.id))).sort((a,b)=>(a.displayRank??9999)-(b.displayRank??9999)||a.seniority.localeCompare(b.seniority)||a.id-b.id);
-    const employeeRows=employees.map(e=>{
-      const jobs=state.shifts.filter(s=>state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id));
-      const paid=jobs.reduce((sum,s)=>sum+s.paidMinutes,0);
-      return `<tr><th scope="row" class="print-name">${e.displayRank??"—"}. ${escapeHtml(e.name)}<small class="print-seniority">Ancienneté : ${seniorityText(e.seniority)}</small></th>${dayNames.map((_,day)=>{
-        const leave=state.timeOff.some(x=>x.employeeId===e.id&&x.dayIndex===day);
-        const approved=approvedForDay(e.id,day);
-        const shifts=jobs.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute);
-        const unavailable=!e.availability?.[day]?.length;
-        const labels=approved.map(p=>`<strong class="print-leave">CONGÉ APPROUVÉ${p.allDay?"":`<br>${timeText(p.startMinute)}–${timeText(p.endMinute)}`}</strong>`).join("");
-        const manual=leave?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':"";
-        const work=shifts.map(s=>shiftText(s,e.role)).join("");
-        return `<td class="${!leave&&!approved.length&&unavailable&&!shifts.length?"print-unavailable":""}">${e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)?'<small class="birthday-greeting">Bonne fête !</small>':''}${labels}${manual}${work}${!labels&&!manual&&!work&&unavailable?'<span class="print-unavailable-label">Indisponible</span>':""}</td>`;
-      }).join("")}<td class="print-hours">${paid?durationText(paid):"—"}</td></tr>`;
-    }).join("");
-    const unfilled=groupShifts.filter(s=>!state.assignments.some(a=>a.shiftId===s.id));
-    const pendingRow=unfilled.length?`<tr class="print-unfilled"><th scope="row" class="print-name">À couvrir</th>${dayNames.map((_,day)=>`<td>${unfilled.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(shiftText).join("")}</td>`).join("")}<td class="print-hours">${durationText(unfilled.reduce((sum,s)=>sum+s.paidMinutes,0))}</td></tr>`:"";
-    const total=groupShifts.reduce((sum,s)=>sum+s.paidMinutes,0);
-    return `<section class="print-section"><h2>${group.title}</h2><table class="print-table"><thead><tr><th>Employé</th>${dayNames.map(n=>`<th>${n}</th>`).join("")}<th>Total</th></tr></thead><tbody>${employeeRows||`<tr><td colspan="9">Aucun employé</td></tr>`}${pendingRow}</tbody></table><div class="print-section-summary">Heures planifiées : ${durationText(total)} · ${unfilled.length} quart${unfilled.length>1?"s":""} à couvrir</div></section>`;
+function servicePrintHTML(data){
+  const e=escapeHtml,hours=n=>(n/60).toLocaleString('fr-CA',{maximumFractionDigits:2}),time=n=>n>1440?time(n%1440)+' +1':`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
+  const shortTime=n=>`${Math.floor(n/60)}${n%60?'h'+String(n%60).padStart(2,'0'):''}`;
+  const paid=s=>s.paidMinutes??s.endMinute-s.startMinute-(s.breakMinutes||0);
+  const assigned=new Map(data.assignments.map(a=>[a.shiftId,a.employeeId]));
+  const shiftHTML=(s,role)=>`<div class="service-shift${role&&s.role!==role?' cross-role':''}">${role&&s.role!==role?`<small class="service-role">${e(roleNames[s.role]||s.role)}</small>`:''}<span class="print-start">${time(s.startMinute)}</span><span class="print-end">${time(s.endMinute)}</span>${s.role==='support'&&s.sourceDepartment?`<small>${e(s.sourceDepartment)}</small>`:''}</div>`;
+  const availability=(person,day)=>{const windows=person.availability?.[day]||[];return !windows.length?'0':windows.some(([a,b])=>a===0&&b===1440)?'J':windows.map(([a,b])=>shortTime(a)+'–'+shortTime(b)).join(' / ');};
+  const approved=(id,day)=>data.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(data.weekStart,day));
+  const cell=(person,jobs,day,pending=false)=>{
+    const shifts=jobs.filter(s=>s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute),periods=pending?[]:approved(person.id,day);
+    const manual=!pending&&data.timeOff.some(t=>t.employeeId===person.id&&t.dayIndex===day);
+    const birthday=!pending&&person.birthday&&person.birthday.slice(5)===addDays(data.weekStart,day).slice(5);
+    const labels=periods.map(p=>`<strong class="print-leave">CONGÉ APPROUVÉ${p.allDay?'':`<br>${time(p.startMinute)}–${time(p.endMinute)}`}</strong>`).join('')+(manual?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':'');
+    const unavailable=!pending&&!person.availability?.[day]?.length&&!shifts.length&&!labels;
+    const content=(birthday?'<small class="birthday-greeting">Bonne fête !</small>':'')+labels+shifts.map(s=>shiftHTML(s,person.role)).join('')+(unavailable?'<small class="service-unavailable">Indisponible</small>':'');
+    const workHeight=shifts.reduce((n,s)=>n+21+(person.role&&s.role!==person.role?Math.ceil((roleNames[s.role]||s.role).length/10)*6:0)+(s.sourceDepartment?Math.ceil(s.sourceDepartment.length/10)*7:0),0)+periods.reduce((n,p)=>n+(p.allDay?16:25),0)+(manual?16:0)+(birthday?9:0);
+    return {content,unavailable,hours:shifts.length?hours(shifts.reduce((n,s)=>n+paid(s),0)):'',availability:pending?'':availability(person,day),height:workHeight+13};
   };
-  const buildPage=(title,groups)=>`<article class="print-page"><div class="print-title"><div><p>IGA EXTRA FAMILLE BENOIT</p><h1>${title}</h1></div><div class="print-period"><span>SEMAINE DU</span><b>${formatWeek(state.weekStart)}</b><small>Horaire par employé</small></div></div>${groups.map(buildSection).join("")}<div class="print-footer">Imprimé le ${new Date().toLocaleDateString("fr-CA")}</div></article>`;
-  $("#printSheet").innerHTML=[buildPage("Superviseurs et commandes",[scheduleGroups[0],scheduleGroups[3]]),buildPage("Caissières",[scheduleGroups[1]]),buildPage("Emballeurs",[scheduleGroups[2]])].join("");
+  const row=(person,jobs,group,pending=false)=>{
+    const cells=dayNames.map((_,d)=>cell(person,jobs,d,pending));
+    const units=Math.max(1,Math.ceil(Math.max(...cells.map(c=>c.height),Math.ceil((person.name.length+4)/21)*11+8+(person.displayRank?9:0))/42));
+    return {person,cells,group,pending,units,minutes:jobs.reduce((n,s)=>n+paid(s),0)};
+  };
+  const rowsFor=group=>{
+    const people=data.employees.filter(p=>group.roles.includes(p.role)&&(p.active||data.assignments.some(a=>a.employeeId===p.id))).sort((a,b)=>(a.displayRank??9999)-(b.displayRank??9999)||(a.seniority||'9999').localeCompare(b.seniority||'9999')||a.id-b.id);
+    const rows=people.map(p=>row(p,data.shifts.filter(s=>assigned.get(s.id)===p.id),group.title));
+    const unfilled=data.shifts.filter(s=>group.roles.includes(s.role)&&!assigned.has(s.id)).sort((a,b)=>a.startMinute-b.startMinute);
+    const byDay=dayNames.map((_,d)=>unfilled.filter(s=>s.dayIndex===d));
+    for(let i=0;i<Math.max(0,...byDay.map(day=>day.length));i++)rows.push(row({name:'À couvrir',role:null},byDay.map(day=>day[i]).filter(Boolean),group.title,true));
+    return rows;
+  };
+  const plans=[{title:'Superviseurs et commandes',groups:[scheduleGroups[0],scheduleGroups[3]]},{title:'Caissières',groups:[scheduleGroups[1]]},{title:'Emballeurs',groups:[scheduleGroups[2]]}];
+  const pages=[];
+  for(const plan of plans){
+    const rows=plan.groups.flatMap(rowsFor);let chunk=[],used=0;
+    for(const r of rows){if(chunk.length&&used+r.units>14){pages.push({...plan,rows:chunk,units:used});chunk=[];used=0;}chunk.push(r);used+=r.units;}
+    pages.push({...plan,rows:chunk,units:used});
+  }
+  const total=data.shifts.reduce((n,s)=>n+paid(s),0),unfilledMinutes=data.shifts.filter(s=>!assigned.has(s.id)).reduce((n,s)=>n+paid(s),0);
+  const rowHTML=r=>`<tr class="sheet-person${r.pending?' service-unfilled':''}" style="--row-height:${r.units*42}pt"${r.person.id?` data-person="${r.person.id}"`:''}><th scope="row" class="sheet-name"><div class="sheet-person-label">${r.person.displayRank?`<small class="service-rank">${r.person.displayRank}.</small> `:''}${e(r.person.name)}</div></th><td class="sheet-seniority">${r.pending?'':e(seniorityText(r.person.seniority))}</td>${r.cells.map(c=>`<td class="sheet-day${c.unavailable?' service-off':''}"><div class="sheet-work">${c.content}</div><div class="sheet-day-detail"><span>${c.hours}</span><span>${e(c.availability)}</span></div></td>`).join('')}<td class="sheet-total print-hours">${r.minutes?hours(r.minutes):'—'}</td></tr>`;
+  const blankRow=()=>`<tr class="sheet-person blank-row" style="--row-height:42pt"><th class="sheet-name"><div class="sheet-person-label"></div></th><td></td>${dayNames.map(()=>'<td><div class="sheet-work"></div><div class="sheet-day-detail"><span></span><span></span></div></td>').join('')}<td></td></tr>`;
+  return pages.map((page,index)=>{
+    const groupNames=[...new Set(page.rows.map(r=>r.group))];if(!groupNames.length)groupNames.push(page.title);
+    const subtotal=page.rows.reduce((n,r)=>n+r.minutes,0),vacant=page.rows.filter(r=>r.pending).reduce((n,r)=>n+r.minutes,0);
+    const table=groupNames.map((name,i)=>{const rows=page.rows.filter(r=>r.group===name),sum=rows.reduce((n,r)=>n+r.minutes,0);return `<tbody><tr class="sheet-group"><th colspan="10">${e(name)}</th></tr>${rows.map(rowHTML).join('')}${i===groupNames.length-1?Array.from({length:Math.max(0,14-page.units)},blankRow).join(''):''}<tr class="sheet-subtotal"><td colspan="9">Sous-total sur cette feuille · ${e(name)}</td><td>${hours(sum)}</td></tr></tbody>`;}).join('');
+    return `<article class="service-sheet" data-page="${index+1}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>Service</h1><p>HORAIRE HEBDOMADAIRE · ${e(page.title)}</p><strong>Du ${formatWeek(data.weekStart)}</strong><small>Feuille ${index+1} / ${pages.length}</small></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${dayNames.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(data.weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div>Petites cases : heures payées à gauche · disponibilité à droite.<br>J : journée · 0 : indisponible. Pauses déduites des totaux.<br>Un poste indiqué dans une case signale un changement de fonction.</div><div class="sheet-totals"><strong>Cette feuille : ${hours(subtotal)} h</strong><span>dont ${hours(vacant)} h à couvrir</span></div></div><div class="service-week-total"><strong>Service · semaine complète : ${hours(total)} h</strong><span>dont ${hours(unfilledMinutes)} h à couvrir · Total identique sur chaque feuille</span></div><div class="sheet-notes"><strong>Notes / précisions</strong><p></p></div></article>`;
+  }).join('');
 }
+function renderPrint(){$('#printSheet').innerHTML=servicePrintHTML(state);}
+
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
 async function loadWeek(start){$("#assignmentMessage").hidden=true;$("#assignmentMessage").textContent="";state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.employees=(await api(`/api/employees?weekStart=${state.weekStart}`)).employees;renderEmployees();state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();$("#saveStatus").textContent="Tout est enregistré";undoControl.refresh();}
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
@@ -148,10 +171,38 @@ $("#role").onchange=e=>{$("#departmentWrap").hidden=e.target.value!=="support";}
 $("#shiftForm").onsubmit=async event=>{event.preventDefault();try{const id=Number($("#shiftId").value)||null;const days=[...document.querySelectorAll("#dayChoices input:checked")].map(x=>Number(x.value));const body={role:$("#role").value,startMinute:minutes($("#startTime").value),endMinute:minutes($("#endTime").value),breakMinutes:Number($("#breakMinutes").value),sourceDepartment:$("#sourceDepartment").value,notes:$("#shiftNotes").value};if(id){body.dayIndex=days[0];const result=await api(`/api/shifts/${id}`,{method:"PUT",body:JSON.stringify(body)});state.shifts=state.shifts.map(s=>s.id===id?result.shift:s);}else{const result=await api(`/api/weeks/${state.weekStart}/shifts`,{method:"POST",body:JSON.stringify({...body,days})});state.shifts.push(...result.shifts);}resetForm(days[0]||0);render();toast(id?"Quart modifié":"Quart ajouté");}catch(error){showError(error);}};
 $("#cancelEdit").onclick=()=>resetForm();$("#deleteShift").onclick=async()=>{const id=Number($("#shiftId").value);if(!id||!confirm("Supprimer ce quart?"))return;try{await api(`/api/shifts/${id}`,{method:"DELETE"});state.shifts=state.shifts.filter(s=>s.id!==id);resetForm();render();toast("Quart supprimé");}catch(error){showError(error);}};
 for(const id of ["frontBudget","packerBudget","weekNotes"])$("#"+id).oninput=queueSave;
-$("#printBtn").onclick=()=>{document.body.classList.remove("printing-planogram");renderPrint();$("#printPreview").close();window.print();};
-$("#previewBtn").onclick=()=>{renderPrint();$("#previewPages").innerHTML=$("#printSheet").innerHTML;$("#printPreview").showModal();};
-$("#previewClose").onclick=()=>$("#printPreview").close();
-$("#previewPrint").onclick=()=>{document.body.classList.remove("printing-planogram");$("#printPreview").close();window.print();};
+let servicePdfUrl=null,servicePdfBusy=false;
+function showServicePreview(){
+  renderPrint();$('#previewPages').innerHTML=$('#printSheet').innerHTML;$('#servicePdfStatus').textContent='Format légal · 8½ × 14 po · Portrait';$('#servicePdfResult').hidden=true;
+  if(!$('#printPreview').open)$('#printPreview').showModal();
+}
+async function checkedServiceSheets(){
+  await document.fonts.ready;const sheets=[...document.querySelectorAll('#previewPages .service-sheet')];
+  await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
+  const {sheetOverflowMessage}=await import('./department-pdf.js');
+  for(const sheet of sheets){const error=sheetOverflowMessage(sheet);if(error)throw Error(error);}
+  return sheets;
+}
+async function printService(){
+  document.body.classList.remove('printing-planogram');showServicePreview();
+  try{await checkedServiceSheets();$('#printPreview').close();window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
+}
+$('#printBtn').onclick=printService;
+$('#previewBtn').onclick=showServicePreview;
+$('#previewClose').onclick=()=>$('#printPreview').close();
+$('#previewPrint').onclick=printService;
+$('#printPreview').addEventListener('cancel',event=>{if(servicePdfBusy)event.preventDefault();});
+$('#previewPdf').onclick=async()=>{
+  if(servicePdfBusy)return;
+  const weekStart=state.weekStart,buttons=[$('#previewPdf'),$('#previewPrint'),$('#previewClose')];servicePdfBusy=true;buttons.forEach(button=>button.disabled=true);$('#servicePdfResult').hidden=true;$('#servicePdfStatus').textContent='Préparation du PDF…';
+  try{
+    const sheets=await checkedServiceSheets(),{schedulePagesPDF}=await import('./department-pdf.js');
+    const blob=await schedulePagesPDF(sheets,{previewSelector:'#previewPages .service-sheet'});
+    if(servicePdfUrl)URL.revokeObjectURL(servicePdfUrl);servicePdfUrl=URL.createObjectURL(blob);
+    $('#servicePdfDownload').href=servicePdfUrl;$('#servicePdfDownload').download='Horaire-Service-'+weekStart+'.pdf';$('#servicePdfOpen').href=servicePdfUrl;
+    $('#servicePdfResult').hidden=false;$('#servicePdfStatus').textContent='PDF prêt : '+sheets.length+' feuilles légales, sans adresse Web ni date d’impression.';
+  }catch(error){$('#servicePdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}finally{servicePdfBusy=false;buttons.forEach(button=>button.disabled=false);}
+};
 $("#planoBtn").onclick=()=>{$("#planoPrintSheet").innerHTML=window.createPlanogram(state);$("#planoPreviewPages").innerHTML=$("#planoPrintSheet").innerHTML;$("#planoPreview").showModal();};
 $("#planoClose").onclick=()=>$("#planoPreview").close();
 $("#planoPrint").onclick=()=>{$("#planoPreview").close();document.body.classList.add("printing-planogram");window.print();};

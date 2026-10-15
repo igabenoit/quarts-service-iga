@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d71920'/%3E%3Cpath d='M17 17h8v30h-8zm11 9h8v21h-8zm11-5h8v26h-8z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="print.css" media="print">
+  <link rel="stylesheet" href="service-print.css">
 <link rel="stylesheet" href="/brand.css"></head>
 <body>
   <section id="loginView" class="login-shell">
@@ -115,7 +116,8 @@
     <section id="printSheet" aria-hidden="true"></section>
     <section id="planoPrintSheet" aria-hidden="true"></section>
     <dialog id="printPreview" aria-label="Aperçu de l’horaire avant impression">
-      <div class="preview-toolbar"><strong>Aperçu de l’horaire</strong><div><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
+      <div class="preview-toolbar"><strong>Horaire Service · Bleu</strong><div><button id="previewPdf" type="button">Préparer le PDF</button><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
+      <div class="service-pdf-tools"><p id="servicePdfStatus" role="status"></p><div id="servicePdfResult" hidden><a id="servicePdfDownload" download>Télécharger le PDF</a><a id="servicePdfOpen" target="_blank" rel="noopener">Ouvrir pour imprimer</a></div></div>
       <div id="previewPages" class="preview-pages"></div>
     </dialog>
     <dialog id="planoPreview" aria-label="Aperçu du planogramme des pauses">
