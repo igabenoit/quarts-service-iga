@@ -19,7 +19,7 @@ test('cross-role assignments and uncovered shifts are printed once and all paid 
 });
 test('two shifts, availability, birthday and partial approved leave all survive in a larger cell',()=>{
  const p={...person(1),birthday:'1995-10-12'};const data={employees:[p],shifts:[{...shift(1),endMinute:600,paidMinutes:120,breakMinutes:0},{...shift(2),startMinute:840,endMinute:960,paidMinutes:120,breakMinutes:0}],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}],approvedLeaves:[{employee_id:1,periods:[{date:'2026-10-12',allDay:false,startMinute:600,endMinute:840}]}]};
- const html=print(data);assert.equal((html.match(/class="print-start"/g)||[]).length,2);assert.match(html,/Bonne fête !/);assert.match(html,/10:00–14:00/);assert.match(html,/<span>4<\/span><span>8–17<\/span>/);assert.match(html,/--row-height:(84|126)pt" data-person="1"/);assert.match(html,/<span>J<\/span>/);
+ const html=print(data);assert.equal((html.match(/class="print-start"/g)||[]).length,2);assert.match(html,/Bonne fête !/);assert.match(html,/10:00–14:00/);assert.match(html,/<span>4<\/span><span>8–17<\/span>/);assert.match(html,/data-row-units="(2|3)" data-person="1"/);assert.match(html,/<span>J<\/span>/);assert.doesNotMatch(html,/ style=/);
 });
 test('names and department labels are escaped and internal planning notes stay off the printout',()=>{
  const html=print({week:{notes:'Internal planning note'},employees:[{...person(1),name:'<script>alert(1)</script>'}],shifts:[{...shift(1,'support'),sourceDepartment:'<img src=x>'}],assignments:[{shiftId:1,employeeId:1}]});

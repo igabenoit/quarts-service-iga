@@ -19,7 +19,22 @@
 .service-sheet .sheet-group th{text-align:left;padding-left:6pt;text-transform:uppercase;font-size:7.5pt;color:#1a437e}
 .service-sheet .sheet-subtotal{height:16pt;background:#f2f5fa}
 .service-sheet .sheet-subtotal td:first-child{text-align:right;padding-right:7pt;text-transform:uppercase;font-size:6.8pt;font-weight:700}
+/* External row heights respect the production CSP. Unit 15 forces oversized rows to fail the page-fit check. */
 .service-sheet .sheet-person{height:var(--row-height,42pt)}
+.service-sheet .sheet-person[data-row-units="2"]{--row-height:84pt}
+.service-sheet .sheet-person[data-row-units="3"]{--row-height:126pt}
+.service-sheet .sheet-person[data-row-units="4"]{--row-height:168pt}
+.service-sheet .sheet-person[data-row-units="5"]{--row-height:210pt}
+.service-sheet .sheet-person[data-row-units="6"]{--row-height:252pt}
+.service-sheet .sheet-person[data-row-units="7"]{--row-height:294pt}
+.service-sheet .sheet-person[data-row-units="8"]{--row-height:336pt}
+.service-sheet .sheet-person[data-row-units="9"]{--row-height:378pt}
+.service-sheet .sheet-person[data-row-units="10"]{--row-height:420pt}
+.service-sheet .sheet-person[data-row-units="11"]{--row-height:462pt}
+.service-sheet .sheet-person[data-row-units="12"]{--row-height:504pt}
+.service-sheet .sheet-person[data-row-units="13"]{--row-height:546pt}
+.service-sheet .sheet-person[data-row-units="14"]{--row-height:588pt}
+.service-sheet .sheet-person[data-row-units="15"]{--row-height:630pt}
 .service-sheet .sheet-name{text-align:left!important;font-size:9.5pt;font-weight:600}
 .service-sheet .sheet-person-label{height:calc(var(--row-height,42pt) - .55pt);padding:4pt;line-height:1.2;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
 .service-sheet .service-rank{font-size:6.5pt;font-weight:400;color:#657484}
