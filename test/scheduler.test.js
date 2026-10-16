@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {assignmentConflict,canAssign,generateAssignments} from '../scheduler.js';
 import {conflictsWithLeave} from '../leave-rules.js';
+import {applyServiceRoleDefault} from '../service-role-defaults.js';
 
 const employee=(extra={})=>({id:1,name:'Employée test',active:true,role:'cashier',seniority:'2020-01-01',
   targetMinutes:900,maxMinutes:2400,allowExtraHours:true,
@@ -81,7 +82,7 @@ test('la route manuelle accepte le dépassement souhaité et renvoie le motif ex
     }};
     const context=vm.createContext({app:{put(_path,...handlers){handler=handlers.at(-1);}},
       pool:{connect:async()=>client},requireManager(){},sameOrigin(){},beginUndo:async()=>{},isoDate:d=>d,
-      mapShift:s=>s,mapEmployee:e=>({...e}),approvedLeave:async()=>[],conflictsWithLeave,assignmentConflict});
+      mapShift:s=>s,mapEmployee:e=>({...e}),approvedLeave:async()=>[],conflictsWithLeave,assignmentConflict,applyServiceRoleDefault});
     vm.runInContext(route,context);
     const response={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
     await handler({params:{id:'3'},body:{employeeId:1}},response);

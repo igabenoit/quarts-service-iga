@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {backupBeforeRegeneration,installScheduleBackup,restorationPreview} from '../schedule-backup.js';
 import {beginUndo} from '../undo.js';
+import {applyServiceRoleDefault} from '../service-role-defaults.js';
 
 const week='2026-10-12';
 const shift=(id,day=0)=>({id:String(id),area:'front',role:'cashier',day_index:day,start_minute:675,end_minute:1035,break_minutes:0});
@@ -114,6 +115,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       if(sql.startsWith('INSERT INTO schedule_undo_actions'))return {rows:[{id:'1'}]};
       if(sql==='ROLLBACK'){stored=null;current=original().assignments;}
       if(sql.startsWith('SELECT')&&sql.includes('FROM schedule_shifts WHERE week_start='))return {rows:original().shifts};
+      if(sql==='SELECT * FROM schedule_employees')return {rows:[{id:8,role:'cashier'}]};
       if(sql.includes('SELECT a.shift_id, a.employee_id'))return {rows:current};
       if(sql.startsWith('INSERT INTO schedule_regeneration_backups'))stored=JSON.parse(args[1]);
       if(sql.includes('DELETE FROM schedule_assignments')){assert.deepEqual(stored,original());current=[];}
@@ -124,7 +126,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       return {rows:[]};
     }};
     const context=vm.createContext({app:{post(_path,...handlers){handler=handlers.at(-1);}},pool:{connect:async()=>client},requireManager(){},sameOrigin(){},validDate:()=>true,
-      mapShift:r=>r,mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
+      mapShift:r=>({...r,id:Number(r.id)}),mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,applyServiceRoleDefault,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
     vm.runInContext(route,context);
     const res={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
     await handler({params:{weekStart:week},body:{replaceAll:true}},res);
