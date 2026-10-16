@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
-import {calendarEvents,familyEventColors,encryptToken,decryptToken,installFamilyGoogleCalendar} from '../family-google-calendar.js';
+import {calendarEvents,familyEventColors,familyEventLabels,encryptToken,decryptToken,installFamilyGoogleCalendar} from '../family-google-calendar.js';
 import {today,monday,addDays} from '../public/departments-core.js';
 const secret='test-secret-never-production',env={SESSION_SECRET:secret,GOOGLE_CALENDAR_CLIENT_ID:'client',GOOGLE_CALENDAR_CLIENT_SECRET:'secret'};
 
 test('family colors cover the seven requested people without affecting other calendars or unknown names',()=>{
   const date=addDays(today(),1),names=['Édouard Benoit','Antoine Benoit','Charles Benoit','Émile Benoit','Laura Benoit','Cassandra Corriveau','Marc-André Benoit','Autre Benoit'];
   const weeks=[{people:names.map((name,id)=>({id,name,days:[{date,entries:[{start:480,end:960,department:'Service'}]}]}))}];
-  assert.deepEqual(calendarEvents(weeks,today(),familyEventColors).map(e=>e.body.colorId),['7','11','3','10','1','4','9',undefined]);
+  assert.deepEqual(calendarEvents(weeks,today(),familyEventColors).map(e=>e.body.colorId),['7','11','3','10',undefined,'4','9',undefined]);
+  const laura=calendarEvents(weeks,today(),familyEventColors,familyEventLabels)[4].body;
+  assert.equal(laura.eventLabelId,'504ca736-ddc3-4a13-bc7c-bc71b503296b');assert.ok(!('colorId' in laura));
   assert.ok(calendarEvents(weeks).every(e=>!('colorId' in e.body)));
 });
 test('published shifts use presence times, overnight dates and DST-aware timezone; tokens are encrypted',()=>{
