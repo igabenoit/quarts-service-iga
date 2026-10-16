@@ -7,6 +7,7 @@ import {installLeave} from '../leave.js';
 import {installUndoSchema,undoLast} from '../undo.js';
 import {localDate,earliestLeaveDate} from '../public/leave-calendar.js';
 import {employeeNoticePayload,installEmployeeNotices,queueEmployeeNotice} from '../leave-employee-notices.js';
+import {DEPARTMENT_STYLES} from '../public/departments-core.js';
 
 const snapshot={employee_name:'Camille <Exemple>',email:'employee@example.com',recipient:'manager@example.com',is_test:false,department_name:'Service',submitted_at:'2026-10-11T23:07:00Z',periods:[{date:'2026-10-16',allDay:true,startMinute:0,endMinute:1440}],decision_note:'Effectif insuffisant.\n<script>alert("non")</script>',was_late:true,reason:'motif privé à ne pas partager'};
 test('avis lisibles en HTML et texte : échéance réelle, raison exacte échappée et destinataire unique',()=>{
@@ -22,6 +23,21 @@ test('avis lisibles en HTML et texte : échéance réelle, raison exacte échapp
   const fake=employeeNoticePayload({kind:'refused',request_id:29,snapshot:{...snapshot,is_test:true}},{testRecipient:'test@example.com'});
   assert.deepEqual(fake.to,['test@example.com']);assert.equal(fake.reply_to,undefined);assert.doesNotMatch(fake.html,/mailto:/);assert.match(fake.subject,/^\[TEST\]/);
   assert.throws(()=>employeeNoticePayload({kind:'refused',request_id:26,snapshot:{...snapshot,decision_note:''}}),/raison/);
+});
+
+test('refus et conditions : couleurs du département, décision explicite et périodes à statut distinct',()=>{
+  for(const style of [{key:'service',name:'Service',color:'#245a9a'},...DEPARTMENT_STYLES]){
+    for(const kind of ['refused','conditional']){
+      const payload=employeeNoticePayload({kind,request_id:42,snapshot:{...snapshot,department_key:style.key,department_name:'Nom modifié',was_late:false}});
+      assert.ok(payload.html.includes('background:'+style.color));
+      assert.match(payload.html,new RegExp('<h1[^>]*>Congé '+(kind==='refused'?'refusé':'sous conditions')+'</h1>'));
+      assert.match(payload.html,kind==='refused'?/PÉRIODES REFUSÉES/:/PÉRIODES DEMANDÉES — À CONFIRMER/);
+      assert.match(payload.html,/horaire actuel reste en vigueur/);
+      assert.doesNotMatch(payload.html,/APPROBATION DÉFINITIVE|<h1[^>]*>Congé confirmé|DATES ET HEURES CONFIRMÉES/);
+      assert.doesNotMatch(payload.html,/<script>|motif privé/);
+      if(kind==='conditional')assert.match(payload.html,/Votre congé n’est pas encore confirmé/);
+    }
+  }
 });
 
 const response=()=>({code:200,body:null,set(){return this;},status(n){this.code=n;return this;},json(body){this.body=body;return this;}});
@@ -59,6 +75,7 @@ test('PostgreSQL : avis automatiques atomiques, refus annulable, reprises figée
       const note='Notre effectif est insuffisant pour ces dates.\nMerci de contacter la gestion.';
       const refused=await call('patch','/api/leave/requests/:id',{params:{id:onTimeId},body:{status:'refused',version:1,note}});assert.equal(refused.code,200);assert.equal(refused.body.confirmationQueued,true);
       const record=(await notices()).at(-1);assert.equal(record.kind,'refused');assert.equal(record.snapshot.decision_note,note);assert.equal(record.snapshot.reason,undefined);
+      assert.equal(record.snapshot.department_key,'service');
       const action=(await pool.query('SELECT MAX(id) AS id FROM schedule_undo_actions')).rows[0].id;
       await pool.query('BEGIN');await undoLast(pool,action);await pool.query('COMMIT');await due();await run();
       assert.equal(sends.length,1);assert.equal((await notices()).at(-1).status,'cancelled');

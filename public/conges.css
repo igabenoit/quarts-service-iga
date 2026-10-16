@@ -5,3 +5,4 @@
 .badge.conditional{background:#ffedba;color:#744700}.notice.conditional-notice{border-left-color:#a96a00;background:#fff9e9}
 
 button[data-standard-conditions],button[data-current-conditions]{margin:6px 8px 0 0}
+.leave-acknowledgement{padding:16px 20px;margin:18px 0;border:1px solid #dce3e9;border-left:5px solid #9a751f;border-radius:8px;background:#fff9e9}.leave-acknowledgement.seen{border-left-color:#287644;background:#eff9f2}.leave-acknowledgement p{margin:0;line-height:1.6}.leave-acknowledgement small{display:block;color:#52616d;line-height:1.5}.leave-acknowledgement details{margin-top:12px}

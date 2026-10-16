@@ -6,6 +6,7 @@ import {installLeave} from '../leave.js';
 import {installUndoSchema} from '../undo.js';
 import {approvalPayload,installApprovalMail,queueApprovalMail} from '../leave-approval-mail.js';
 import {loadContactDirectory} from '../employee-contacts.js';
+import {DEPARTMENT_STYLES} from '../public/departments-core.js';
 
 const full={date:'2030-10-18',allDay:true,startMinute:0,endMinute:1440};
 const part={date:'2030-10-19',allDay:false,startMinute:675,endMinute:1035};
@@ -16,9 +17,31 @@ test('confirmation limitée au destinataire et aux périodes approuvées, sans m
   const payload=approvalPayload(job,{from:'Horaires <hours@example.com>'});
   assert.deepEqual(payload.to,['employee@example.com']);assert.equal(payload.reply_to,'manager@example.com');assert.equal(payload.cc,undefined);
   assert.match(payload.text,/19 octobre 2030/);assert.match(payload.text,/11 h 15 à 17 h 15/);assert.doesNotMatch(payload.text,/18 octobre|confidentiel|privé/);
+  assert.match(payload.html,/19 octobre 2030/);assert.match(payload.html,/11 h 15 à 17 h 15/);assert.doesNotMatch(payload.html,/18 octobre|confidentiel|privé/);
+  assert.match(payload.html,/PÉRIODES AJOUTÉES PAR CETTE APPROBATION/);assert.match(payload.html,/restent rattachées à votre demande précédente/);
   const fake=approvalPayload({...job,is_test:true},{testRecipient:'test@example.com'});
   assert.deepEqual(fake.to,['test@example.com']);assert.equal(fake.reply_to,undefined);assert.match(fake.subject,/^\[TEST\]/);
+  assert.match(fake.html,/ESSAI — aucun congé réel ni changement d’horaire/);
   assert.throws(()=>approvalPayload({...job,is_test:true}),/test à configurer/);
+});
+
+test('confirmation visuelle aux couleurs des huit départements, même si leur nom est modifié',()=>{
+  for(const style of [{key:'service',name:'Service',color:'#245a9a',pale:'#eaf1ff'},...DEPARTMENT_STYLES]){
+    for(const identity of [{department_key:style.key,department_name:'Département renommé'},{department_name:style.name}]){
+      const payload=approvalPayload({request_id:42,email:'employee@example.com',employee_name:'Camille',periods:[full],...identity});
+      assert.match(payload.subject,/^Congé confirmé/);assert.match(payload.text,/CONGÉ CONFIRMÉ/);
+      assert.match(payload.html,/<h1[^>]*>Congé confirmé<\/h1>/);
+      assert.ok(payload.html.includes('background:'+style.color));assert.ok(payload.html.includes('background:'+style.pale));
+      assert.match(payload.html,/Journée complète/);assert.match(payload.html,/APPROBATION DÉFINITIVE/);
+    }
+  }
+});
+
+test('confirmation HTML échappe les noms et références et garde les notes privées hors du message',()=>{
+  const payload=approvalPayload({request_id:'42<img src=x>',email:'employee@example.com',employee_name:'Camille <script>alert(1)</script>',department_name:'Autre & <Département>',periods:[full],decision_note:'note confidentielle',reason:'motif privé'});
+  assert.match(payload.html,/Camille &lt;script&gt;/);assert.match(payload.html,/Autre &amp; &lt;Département&gt;/);assert.match(payload.html,/42&lt;img src=x&gt;/);
+  assert.doesNotMatch(payload.html,/<script|<img|note confidentielle|motif privé/);
+  assert.ok(payload.html.includes('background:#344351'));
 });
 
 test('PostgreSQL : file transactionnelle, décision, annulation avant envoi, reprises et annuaire privé',async t=>{
@@ -51,6 +74,7 @@ test('PostgreSQL : file transactionnelle, décision, annulation avant envoi, rep
       await queueApprovalMail(pool,1);await queueApprovalMail(pool,1);assert.equal((await mails()).length,1);
       process.env.RESEND_API_KEY='fake-key-for-mocked-provider';await worker.run();assert.equal(calls.length,0);
       await due();await worker.run();assert.equal(calls.length,1);assert.equal((await mails())[0].status,'sent');
+      assert.match(calls[0].payload.html,/<h1[^>]*>Congé confirmé<\/h1>/);assert.match(calls[0].payload.html,/background:#245a9a/);
       await worker.run();assert.equal(calls.length,1);assert.deepEqual(calls[0].payload.to,['employee@example.com']);
     });
     await t.test('annulation ou version changée empêche l’envoi en attente',async()=>{

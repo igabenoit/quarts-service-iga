@@ -114,6 +114,14 @@ Le statut conditional ne bloque aucune date et ne libère aucune affectation : l
 
 La file schedule_leave_employee_notices accepte aussi conditional, une seule fois par version. Un nouvel accord ou une modification envoie les conditions à jour; une décision modifiée ou annulée avant envoi arrête l’ancien avis en attente. Les mêmes protections de reprise, d’idempotence, d’isolation des tests et d’archivage s’appliquent. Une migration idempotente élargit les contraintes SQL sans modifier les demandes existantes.
 
+## Prise de connaissance des courriels de congé
+
+Les nouveaux courriels de confirmation, de refus et d’accord sous conditions reprennent la couleur du département et le bouton « J’ai pris connaissance ». Le lien ouvre `/conge-lecture`, qui présente la décision et exige une case cochée puis une validation explicite. Ouvrir le courriel ou son lien ne confirme rien. Cette action ne modifie ni la décision, ni les conditions, ni l’horaire.
+
+La première confirmation est conservée avec la date et l’heure du Québec, visibles dans la demande après actualisation. Chaque version de décision possède son propre lien; une modification invalide les liens précédents, tout en conservant les confirmations antérieures dans le suivi. Un lien archivé ne permet plus de confirmer. Les anciens courriels déjà figés ne sont ni modifiés ni renvoyés.
+
+Le jeton aléatoire de 256 bits reste dans le fragment du lien, puis est transmis par POST de même origine. Seul son condensat est enregistré dans la table de suivi; le lien complet reste dans le message figé pour les reprises d’envoi. La confirmation atteste l’action du détenteur du lien, sans vérifier son identité par connexion. Aucun pixel d’ouverture ni service de suivi supplémentaire n’est utilisé. `PUBLIC_BASE_URL`, puis `RENDER_EXTERNAL_URL`, peuvent définir l’origine HTTPS; par défaut, les liens utilisent `https://quarts-service-iga.onrender.com`. HTTP est permis uniquement pour les démonstrations locales.
+
 ## Horaires des départements
 
 La gestion ouvre /departements depuis la barre du Service. Le répertoire commun permet une saisie progressive, plusieurs départements par personne et une date d’ancienneté reconnue avec source et confirmation. Les données inconnues restent vides. La durée d’ancienneté est calculée à la date affichée, jamais stockée comme un nombre d’années figé. Les employés du Service restent reliés à leurs fiches existantes; le lien logique conserve leur identité lors d’un retour Annuler. Une fiche Service absente est inactive dans le nouveau répertoire. Les tables Service et leurs affectations restent inchangées.

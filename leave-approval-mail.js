@@ -1,6 +1,10 @@
 import {normalizeEmail} from './employee-contacts.js';
+import {escapeHTML as escape} from './public/departments-core.js';
+import {leaveMailFrame,leavePeriodPanel,acknowledgementText} from './leave-mail-layout.js';
+import {installAcknowledgementSchema,createAcknowledgement} from './leave-acknowledgements.js';
 
 export async function installApprovalMailSchema(pool){
+  await installAcknowledgementSchema(pool);
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_approval_mail (
     id BIGSERIAL PRIMARY KEY,request_id BIGINT NOT NULL REFERENCES schedule_leave_requests(id),request_version INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',payload JSONB,attempts INTEGER NOT NULL DEFAULT 0,
@@ -18,11 +22,20 @@ export function approvalPayload(job,{testRecipient='',from='Quarts Service <onbo
   if(!to)throw new Error(job.is_test?'Destinataire de test à configurer.':'Courriel de la demande invalide. Vérifiez l’adresse avant tout envoi.');
   const date=d=>new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeZone:'UTC'}).format(new Date(d+'T12:00:00Z'));
   const time=m=>String(Math.floor(m/60)).padStart(2,'0')+' h '+String(m%60).padStart(2,'0');
-  const periods=(job.effective_periods??job.periods).map(p=>`${date(p.date)} : ${p.allDay?'journée complète':time(p.startMinute)+' à '+time(p.endMinute)}`).join('\n');
+  const approved=job.effective_periods??job.periods;
+  const periods=approved.map(p=>`${date(p.date)} : ${p.allDay?'journée complète':time(p.startMinute)+' à '+time(p.endMinute)}`).join('\n');
   const partial=job.effective_periods&&JSON.stringify(job.effective_periods)!==JSON.stringify(job.periods);
+  const subject=`${job.is_test?'[TEST] ':''}Congé confirmé — demande n° ${job.request_id}`;
+  const heading=partial?'Périodes ajoutées par cette approbation':'Dates et heures confirmées';
+  const html=leaveMailFrame({identity:job,requestId:job.request_id,subject,
+    preheader:'Votre congé est confirmé. Retrouvez les dates et heures approuvées dans ce courriel.',
+    eyebrow:'APPROBATION DÉFINITIVE',title:'Congé confirmé',summary:'Les périodes ci-dessous sont approuvées.',
+    content:`<tr><td style="padding:26px 26px 20px"><p style="margin:0 0 12px;font-size:17px;line-height:1.6;overflow-wrap:anywhere">Bonjour ${escape(job.employee_name)},</p><p style="margin:0;font-size:16px;line-height:1.65">Votre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.</p></td></tr>
+<tr><td style="padding:0 26px 26px">${leavePeriodPanel(job,approved,heading)}${partial?'<p style="margin:15px 0 0;font-size:14px;line-height:1.6;color:#4b5965">Les périodes déjà approuvées restent rattachées à votre demande précédente.</p>':''}</td></tr>
+<tr><td style="padding:0 26px 24px"><p style="margin:0;font-size:15px;line-height:1.6">Pour toute question, communiquez avec votre responsable.</p></td></tr>`});
   return {from,to:[to],...(!job.is_test&&normalizeEmail(job.recipient)?{reply_to:normalizeEmail(job.recipient)}:{}),
-    subject:`${job.is_test?'[TEST] ':''}Congé approuvé — demande n° ${job.request_id}`,
-    text:`${job.is_test?'ESSAI — aucun congé réel ni changement d’horaire.\n\n':''}Bonjour ${job.employee_name},\n\nVotre demande de congé a été approuvée.\n\n${partial?'PÉRIODES AJOUTÉES PAR CETTE APPROBATION':'DATES ET HEURES APPROUVÉES'}\n${periods}\n${partial?'\nLes périodes déjà approuvées restent rattachées à votre demande précédente.\n':''}\nDépartement : ${job.department_name}\nRéférence : ${job.request_id}\n\nPour toute question, communiquez avec votre responsable.\n\nIGA extra Famille Benoit`};
+    subject,html,
+    text:`${job.is_test?'ESSAI — aucun congé réel ni changement d’horaire.\n\n':''}CONGÉ CONFIRMÉ\nAPPROBATION DÉFINITIVE\n\nBonjour ${job.employee_name},\n\nVotre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.\n\n${heading.toLocaleUpperCase('fr-CA')}\n${periods}\n${partial?'\nLes périodes déjà approuvées restent rattachées à votre demande précédente.\n':''}\nDépartement : ${job.department_name}\nRéférence : ${job.request_id}\n\nPour toute question, communiquez avec votre responsable.${acknowledgementText(job)}\n\nIGA extra Famille Benoit`};
 }
 
 // Approvals are queued only at decision time. Historical approvals are never backfilled.
@@ -46,7 +59,7 @@ export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}=
         const client=await pool.connect();
         try{
           await client.query('BEGIN');
-          const row=(await client.query(`SELECT m.*,r.status AS request_status,r.version,r.archived_at,r.is_test,r.employee_name,r.email,r.periods,r.effective_periods,r.department_name,d.recipient
+          const row=(await client.query(`SELECT m.*,r.status AS request_status,r.version,r.archived_at,r.is_test,r.employee_name,r.email,r.periods,r.effective_periods,r.department_name,d.recipient,COALESCE(to_jsonb(d)->>'schedule_key',d.code) AS department_key
             FROM schedule_leave_approval_mail m JOIN schedule_leave_requests r ON r.id=m.request_id
             LEFT JOIN schedule_leave_departments d ON d.id=r.department_id WHERE m.id=$1 AND
             ((m.status IN ('pending','error') AND (m.last_attempt_at IS NULL OR m.last_attempt_at<clock_timestamp()-interval '1 minute'))
@@ -57,8 +70,12 @@ export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}=
           }
           let payload=row.payload;
           if(!payload){
-            try{payload=approvalPayload(row,{testRecipient:settings.test_recipient||process.env.LEAVE_TEST_NOTIFY_EMAIL,
-              from:process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'Quarts Service <onboarding@resend.dev>'});}
+            try{
+              const options={testRecipient:settings.test_recipient||process.env.LEAVE_TEST_NOTIFY_EMAIL,from:process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'Quarts Service <onboarding@resend.dev>'};
+              approvalPayload(row,options);
+              const acknowledgement_url=await createAcknowledgement(client,row,'approved',row);
+              payload=approvalPayload({...row,acknowledgement_url},options);
+            }
             catch(error){await client.query("UPDATE schedule_leave_approval_mail SET status='review',error=$2 WHERE id=$1",[job.id,error.message]);await client.query('COMMIT');continue;}
           }
           // Commit the frozen payload and retry clock before attempting an external send.

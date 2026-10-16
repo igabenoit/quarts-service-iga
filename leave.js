@@ -6,6 +6,7 @@ import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
 import {installApprovalMail} from './leave-approval-mail.js';
 import {installEmployeeNotices} from './leave-employee-notices.js';
+import {installLeaveAcknowledgements} from './leave-acknowledgements.js';
 import {installAvailability} from './availability.js';
 import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
@@ -43,6 +44,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   await installLeaveArchive(app,pool,{requireManager,sameOrigin});
   const departments=await installDepartments(app,pool,{requireManager,sameOrigin});
   const requireStoreStaff=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
+  await installLeaveAcknowledgements(app,pool,{sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
   const employeeNotices=await installEmployeeNotices(pool);
@@ -121,13 +123,14 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       const start=req.query.start||'2000-01-01',end=req.query.end||'2099-12-31';
       if(!isDate(start)||!isDate(end)||end<start)return res.status(400).json({error:'Période invalide.'});
       const rows=(await pool.query(`SELECT r.*,m.status AS notification_status,m.error AS notification_error,
-        a.status AS confirmation_status,a.error AS confirmation_error,a.last_attempt_at AS confirmation_attempt_at,
+        a.status AS confirmation_status,a.error AS confirmation_error,a.last_attempt_at AS confirmation_attempt_at,COALESCE(ack.items,'[]'::jsonb) AS acknowledgements,
         ln.status AS late_notice_status,ln.error AS late_notice_error,rn.status AS refusal_notice_status,rn.error AS refusal_notice_error,cn.status AS conditional_notice_status,cn.error AS conditional_notice_error
         FROM schedule_leave_requests r LEFT JOIN schedule_leave_mail m ON m.request_id=r.id
         LEFT JOIN LATERAL (SELECT status,error,last_attempt_at FROM schedule_leave_approval_mail WHERE request_id=r.id ORDER BY request_version DESC LIMIT 1) a ON TRUE
         LEFT JOIN schedule_leave_employee_notices ln ON ln.request_id=r.id AND ln.kind='late'
         LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='refused' ORDER BY request_version DESC LIMIT 1) rn ON TRUE
         LEFT JOIN LATERAL (SELECT status,error FROM schedule_leave_employee_notices WHERE request_id=r.id AND kind='conditional' ORDER BY request_version DESC LIMIT 1) cn ON TRUE
+        LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('kind',kind,'version',request_version,'acknowledgedAt',acknowledged_at) ORDER BY request_version DESC) AS items FROM schedule_leave_acknowledgements WHERE request_id=r.id) ack ON TRUE
         WHERE is_test=$1 AND (r.archived_at IS NOT NULL)=$4
         AND first_date<=$3 AND last_date>=$2 ORDER BY submitted_at DESC,r.id DESC`,[test,start,end,req.query.archived==='true'])).rows.filter(r=>ownsDepartment(req,r.department_id)&&r.periods.some(p=>p.date>=start&&p.date<=end)&&(!req.query.department||String(r.department_id)===req.query.department));
       const events=(await pool.query(`SELECT e.* FROM schedule_leave_events e JOIN schedule_leave_requests r ON r.id=e.request_id
