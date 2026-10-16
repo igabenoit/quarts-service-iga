@@ -7,7 +7,7 @@ import {blankCell,DEPARTMENT_STYLES} from '../public/departments-core.js';
 test('productive hours exclude kitchen and Service includes a separate orders subtotal; actuals persist with authorization and version checks',async()=>{
 const db=new PGlite();try{const pool={async query(sql,args){const r=args?await db.query(sql,args):(await db.exec(sql)).at(-1)||{rows:[]};return {...r,rowCount:r.affectedRows??r.rows.length};}};
 await pool.query('CREATE TABLE schedule_leave_departments(id BIGINT PRIMARY KEY); INSERT INTO schedule_leave_departments VALUES(1),(2),(3); CREATE TABLE schedule_shifts(week_start DATE,role TEXT,start_minute INTEGER,end_minute INTEGER);');
-await pool.query("INSERT INTO schedule_shifts VALUES('2026-10-19','cashier',480,1020),('2026-10-19','supervisor',480,960),('2026-10-19','packer',480,720),('2026-10-19','orders',480,960),('2026-10-19','support',480,1020)");
+await pool.query("INSERT INTO schedule_shifts VALUES('2026-10-19','cashier',480,1020),('2026-10-19','supervisor',480,960),('2026-10-19','packer',480,720),('2026-10-19','manager',480,1020),('2026-10-19','orders',480,960),('2026-10-19','support',480,1020)");
 const people=[{id:1,name:'Sylvain Malo'}];const data={department:{id:2,key:'viande',name:'Viande'},weekStart:'2026-10-19',revision:4,people,draft:{rows:[{personId:1,cells:[{kind:'shift',start:480,end:900,breakMinutes:0,paidMinutesOverride:480},...Array.from({length:6},blankCell)]}]}};
 const routes=new Map(),app={};for(const method of ['get','put'])app[method]=(path,...handlers)=>routes.set(method,handlers.at(-1));
 const deps={1:{id:1,key:'service',name:'Service'},2:data.department,3:{id:3,key:'administration',name:'Administration'}};
@@ -21,7 +21,7 @@ assert.equal((await call('put',2,{version:0,actual:{minutes:0,note:''}})).code,4
 assert.equal((await call('get',2)).body.actual.minutes,450);
 assert.equal((await call('put',2,{version:1,actual:{minutes:0,note:''}})).body.actual.minutes,0);
 assert.equal((await call('get',1,{}, {kind:'account',departments:[2]})).code,403);
-const service=await call('get',1);assert.equal(service.body.total,1560);assert.equal(service.body.totals.shift,1560);assert.equal(service.body.serviceBreakdown.checkout,1140);assert.equal(service.body.serviceBreakdown.orders,420);assert.equal(service.body.serviceBreakdown.checkout+service.body.serviceBreakdown.orders,service.body.total);
+const service=await call('get',1);assert.equal(service.body.total,2040);assert.equal(service.body.totals.shift,1620);assert.equal(service.body.totals.orders,420);assert.equal(service.body.serviceBreakdown.manager,480);assert.equal(service.body.serviceBreakdown.checkout,1620);assert.equal(service.body.serviceBreakdown.orders,420);assert.equal(service.body.serviceBreakdown.checkout+service.body.serviceBreakdown.orders,service.body.total);
 const admin=await call('get',3);assert.equal(admin.body.total,0);assert.equal(admin.body.empty,true);assert.ok(DEPARTMENT_STYLES.some(d=>d.key==='administration'));
 const rows=[service.body,saved.body,admin.body];assert.equal((summaryPage(rows).match(/<article/g)||[]).length,1);assert.equal(summaryCSV(rows).split('\r\n').length,7);
 const pam={department:{id:9,key:'pam',name:'Prêt-à-manger'},weekStart:'2026-10-19',totals:{shift:373*60,training:18*60,buffet:16*60,kitchen:80*60},total:487*60,actual:{minutes:480*60,kitchenMinutes:75*60,note:''}};
