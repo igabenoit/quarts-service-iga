@@ -39,7 +39,7 @@ test('PostgreSQL : répertoire, brouillons, publication privée et photos',async
   try{
     await t.test('migration réexécutable et routes protégées',async()=>{
       await installDepartmentSchedules(f.app,pool,f.options);
-      const meta=(await call('get','/api/departments/meta')).body;assert.equal(meta.departments.length,8);assert.equal(meta.visionConfigured,false);dept=meta.departments.find(d=>d.key==='boulangerie').id;other=meta.departments.find(d=>d.key==='fruits').id;
+      const meta=(await call('get','/api/departments/meta')).body;assert.equal(meta.departments.length,9);assert.ok(meta.departments.some(d=>d.key==='administration'));assert.equal(meta.visionConfigured,false);dept=meta.departments.find(d=>d.key==='boulangerie').id;other=meta.departments.find(d=>d.key==='fruits').id;
       for(const [path,handlers] of f.routes){if(path.includes('/api/departments/')){assert.equal(handlers[0],f.options.requireManager,path);if(!path.startsWith('get'))assert.equal(handlers[1],f.options.sameOrigin,path);}if(path.includes('/api/leave/department-schedules'))assert.equal(handlers[0].name,'requireEmployee');}
     });
     await t.test('dates confirmées, aucune identité inventée, départements partagés',async()=>{

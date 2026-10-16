@@ -26,7 +26,7 @@ test('nuit : poste commun, feuille et lecture photo cohérents',()=>{
   for(const department of DEPARTMENT_STYLES){
     assert.doesNotThrow(()=>validateAssignment(night(),department.key));
     const html=sheetHTML({department,weekStart:'2030-10-14',people:[{id:1,name:'Camille Nuit',group:'regular',availability:{}}],draft:{rows:[{personId:1,cells:cells(night())}],notes:''}});
-    assert.match(html,/06:30 \+1/);assert.match(html,/>Nuit<\/small>/);assert.match(html,/Grand total : 8 h/);assert.match(html,/\+1 : fin le lendemain/);assert.doesNotMatch(html,/30:30/);
+    assert.match(html,/06:30 \+1/);assert.match(html,/>Nuit<\/small>/);assert.match(html,/Grand total : 8 h/);assert.doesNotMatch(html,/\+1 : fin le lendemain/);assert.doesNotMatch(html,/30:30/);
   }
   assert.equal(cellDetail(night()),'Nuit');
   assert.ok(photoSchema.properties.rows.items.properties.days.items.properties.post.enum.includes('night'));

@@ -21,14 +21,14 @@ test('PDF eligibility follows measured content, not employee count; real overflo
   const previous=globalThis.getComputedStyle;
   globalThis.getComputedStyle=()=>({paddingBottom:'29'});
   try{
-    let bottom=1300,paragraphBottom=1300;
+    let bottom=1300,footerBottom=1300;
     const text={scrollHeight:40,clientHeight:40,scrollWidth:90,clientWidth:90};
-    const paragraph={getBoundingClientRect:()=>({bottom:paragraphBottom})};
-    const notes={getBoundingClientRect:()=>({bottom}),querySelector:()=>paragraph};
-    const sheet={scrollHeight:1344,clientHeight:1344,getBoundingClientRect:()=>({width:816,height:1344,bottom:1344}),querySelector:()=>notes,querySelectorAll:()=>Array(17).fill(text)};
+    const table={getBoundingClientRect:()=>({bottom})};
+    const totals={getBoundingClientRect:()=>({bottom:footerBottom})};
+    const sheet={scrollHeight:1344,clientHeight:1344,children:[table,totals],getBoundingClientRect:()=>({width:816,height:1344,top:0,bottom:1344}),querySelectorAll:()=>Array(17).fill(text)};
     assert.equal(sheetOverflowMessage(sheet),'');
     bottom=1320;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);bottom=1300;
-    paragraphBottom=1400;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);paragraphBottom=1300;
+    footerBottom=1400;assert.match(sheetOverflowMessage(sheet),/dépasse la page/);footerBottom=1300;
     text.scrollHeight=50;assert.match(sheetOverflowMessage(sheet),/dépasse une case/);
     text.closest=()=>({querySelector:()=>({childNodes:[{textContent:' Alexandra Exemple '}]})});
     assert.match(sheetOverflowMessage(sheet),/pour « Alexandra Exemple »/);text.scrollHeight=40;

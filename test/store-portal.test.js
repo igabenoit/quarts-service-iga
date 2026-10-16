@@ -43,7 +43,7 @@ test('store portal: existing admin only, published Service and departments, shar
       assert.equal((await call(path,null)).status,401);
       assert.equal((await call(path,{role:'manager',accountId:a.id,accountVersion:a.version})).status,403);
     }
-    const listing=await call('/api/store-portal');assert.equal(listing.status,200);assert.equal(listing.cache,'no-store');assert.equal(listing.body.departments.length,8);assert.deepEqual(listing.body.weeks,[week]);
+    const listing=await call('/api/store-portal');assert.equal(listing.status,200);assert.equal(listing.cache,'no-store');assert.equal(listing.body.departments.length,9);assert.ok(listing.body.departments.some(d=>d.key==='administration'));assert.deepEqual(listing.body.weeks,[week]);
     const before=(await f.pool.query('SELECT * FROM schedule_department_weeks ORDER BY department_id')).rows;
     const result=await call('/api/store-portal/weeks/'+week);assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.cache,'no-store');
     const camille=result.body.employees.find(p=>p.id===owner.id);assert.equal(result.body.employees.some(p=>p.id===alias),false);assert.equal(camille.days[0].entries.length,1,'transfer only once');assert.equal(camille.days[1].entries[0].department,'Service');assert.equal(camille.days[1].entries[0].minutes,420);
