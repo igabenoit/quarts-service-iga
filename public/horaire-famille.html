@@ -10,8 +10,19 @@
 <section id="weekBanner" class="week-banner" aria-label="Semaine consultée"></section>
 <div id="familyChoices" class="family-choices" role="group" aria-label="Choisir un enfant"></div>
 <p id="familySummary"></p><div id="familySchedule"></div>
+<section class="portal-day" aria-labelledby="googleHeading">
+<h2 id="googleHeading">Votre calendrier Google familial</h2>
+<p>Les quarts publiés de tous les enfants de cet accès sont ajoutés au calendrier choisi. Les changements et les annulations suivent automatiquement, en général dans les deux minutes. Les quarts passés sont conservés.</p>
+<p id="googleStatus" role="status">Vérification de la connexion Google…</p>
+<button id="googleConnect" hidden>Connecter Google</button>
+<div id="googleChoose" hidden><label>Calendrier familial<select id="googleCalendar"></select></label><p>En activant, vous autorisez l’ajout et la mise à jour des quarts, ainsi que le retrait des quarts futurs annulés. Vos autres événements restent conservés.</p><button id="googleEnable">Activer la synchronisation vers ce calendrier</button></div>
+<button id="googleSync" hidden>Synchroniser maintenant</button>
+<button id="googleDisconnect" class="quiet" hidden>Arrêter la synchronisation</button>
+<p class="muted">Arrêter la synchronisation conserve les événements déjà ajoutés dans Google.</p>
+</section>
 <button id="familyLogout" class="quiet">Se déconnecter</button>
 </section>
 <details class="home-help"><summary>Ajouter ces horaires à l’écran d’accueil</summary><p>Sur iPhone : ouvre cette page dans Safari, puis Partager → Sur l’écran d’accueil. Sur Android : ouvre le menu de Chrome, puis Ajouter à l’écran d’accueil. Nom suggéré : Horaires famille.</p></details>
 <footer class="portal-footer">Vérifie toujours les dates de la semaine. La consultation familiale ne confirme pas la lecture de l’horaire par l’employé.</footer>
 </main><script type="module" src="/family-portal.js"></script></body></html>
+

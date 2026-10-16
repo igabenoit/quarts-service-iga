@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {installFamilyGoogleCalendar} from './family-google-calendar.js';
 import {isDate,monday,today} from './public/departments-core.js';
 import {personalDays} from './public/portal-weeks.js';
 import {serviceShiftTiming} from './public/service-rules.js';
@@ -58,9 +59,9 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
     if(group.people.some(p=>p.serviceEmployeeId))weeks.push(...(await pool.query('SELECT week_start FROM schedule_public_links')).rows.map(w=>iso(w.week_start)));
     res.json({name:req.family.name,today:today(),people:group.roots.map(({id,name})=>({id,name})),weeks:[...new Set(weeks)].sort().reverse()});
   }));
-  app.get('/api/family-portal/weeks/:week',requireFamily(async(req,res)=>{
-    const start=req.params.week;if(!isDate(start)||monday(start)!==start)fail('Choisissez le lundi de la semaine.');
-    const all=await directory(pool,start),group=await members(req.family,all),published=await readPublishedWeek(start,all),service=[];
+  async function readFamilyWeek(family,start){
+    if(!isDate(start)||monday(start)!==start)fail('Choisissez le lundi de la semaine.');
+    const all=await directory(pool,start),group=await members(family,all),published=await readPublishedWeek(start,all),service=[];
     const serviceIds=group.people.map(p=>p.serviceEmployeeId).filter(Boolean);
     if(serviceIds.length&&(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[start])).rows.length){
       const records=(await pool.query(`SELECT e.id,s.day_index,s.start_minute,s.end_minute,s.role
@@ -76,8 +77,10 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
       return {id:person.id,name:person.name,published:results.length>0,days:personalDays(start,results)};
     });
     // Deliberately no writes to employee consultation tracking.
-    res.json({name:req.family.name,today:today(),weekStart:start,people});
-  }));
+    return {name:family.name,today:today(),weekStart:start,people};
+  }
+  app.get('/api/family-portal/weeks/:week',requireFamily(async(req,res)=>res.json(await readFamilyWeek(req.family,req.params.week))));
+  const googleCalendar=await installFamilyGoogleCalendar(app,pool,{requireFamily,sameOrigin,readFamilyWeek});
 
   app.get('/api/family-accounts',requireManager,admin(async(_req,res)=>{
     const accounts=(await pool.query(`SELECT a.id,a.name,a.active,a.version,COALESCE(jsonb_agg(m.person_id ORDER BY m.person_id) FILTER(WHERE m.person_id IS NOT NULL),'[]') AS "personIds"
@@ -108,5 +111,6 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
     const code=newCode(),saved=await pool.query('UPDATE schedule_family_access SET code_hash=$1,version=version+1 WHERE id=$2 AND version=$3 RETURNING id',[hash(code),req.params.id,req.body.version]);
     if(!saved.rows.length)fail('Cet accès a changé. Actualisez la liste.',409);res.json({code});
   }));
-  return {identity};
+  return {identity,googleCalendar};
 }
+
