@@ -21,6 +21,16 @@ test('Service keeps exactly three team sheets with every employee once and in pr
  for(const p of employees)assert.equal((html.match(new RegExp(`data-person="${p.id}"`,'g'))||[]).length,1);
  assert.ok(html.indexOf('data-person="1"')<html.indexOf('data-person="2"'));assert.equal((html.match(/<article class="service-sheet/g)||[]).length,3);assert.equal((html.match(/class="sheet-header"/g)||[]).length,(html.match(/<article class="service-sheet/g)||[]).length);
 });
+
+test('managers print before supervisors regardless of their per-role rank or seniority',()=>{
+ const employees=[{...person(1,'supervisor'),displayRank:1,seniority:'1990-01-01'},
+   {...person(2,'manager'),displayRank:9,seniority:'2025-01-01'},
+   {...person(3,'supervisor'),displayRank:2,seniority:'1980-01-01'},
+   {...person(4,'manager'),displayRank:1,seniority:'2026-01-01'}];
+ const html=print({employees});
+ assert.deepEqual([...html.matchAll(/data-person="(\d+)"/g)].map(m=>Number(m[1])),[4,2,1,3]);
+ assert.equal((html.match(/<article class="service-sheet/g)||[]).length,3);
+});
 test('cross-role assignments and uncovered shifts are printed once and all paid totals reconcile',()=>{
  const data={employees:[person(1,'packer'),person(2,'cashier')],shifts:[shift(1,'cashier'),shift(2,'packer',1),shift(3,'cashier',2)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:2}]};
  const html=print(data),totals=[...html.matchAll(/Cette feuille : ([0-9,]+) h/g)].map(m=>Number(m[1].replace(',','.')));
