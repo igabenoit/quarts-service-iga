@@ -77,6 +77,7 @@ export function normalizeAvailability(value={}){
 export const blankCell=()=>({kind:'blank',start:null,end:null,breakMinutes:0,note:''});
 export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Commandes Sandwich',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs'});
 export const KITCHEN_POSTS=Object.freeze({kitchen_salads:'Cuisine Salades'});
+export const BAKERY_POSTS=Object.freeze({bakery_oven:'Four',bakery_cakes:'Gâteaux',bakery_production:'Production',bakery_floor:'Plancher'});
 export const COMMON_POSTS=Object.freeze({night:'Nuit'});
 export const assignmentPost=c=>c.post||(c.kind==='kitchen'&&/\bsalades?\b/i.test(c.note||'')?'kitchen_salads':'');
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
@@ -93,7 +94,7 @@ export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start
 export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
-export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||'',transferLabel(c)].filter(Boolean).join(' · ');
+export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',transferLabel(c)].filter(Boolean).join(' · ');
 export const shiftAssignment=(c,key)=>c.buffetAllocation?[c.buffetAllocation.pam&&`PAM${c.buffetAllocation.charcuterie?' '+hoursLabel(c.buffetAllocation.pam)+' h':''}`,c.buffetAllocation.charcuterie&&`Charcuterie${c.buffetAllocation.pam?' '+hoursLabel(c.buffetAllocation.charcuterie)+' h':''}`].filter(Boolean).join(' / ')+' · Buffet':[c.workDepartment==='pam'||!c.workDepartment&&key==='pam'?'PAM':departmentLabel(c.workDepartment||key),c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
@@ -110,7 +111,7 @@ export function normalizeCell(value){
     if(!Number.isInteger(c.start)||!Number.isInteger(end)||c.start<0||c.start>=1440||end<=c.start||end-c.start>1440||!Number.isInteger(c.breakMinutes??0)||(c.breakMinutes??0)<0||(c.breakMinutes??0)>=end-c.start)throw Error('Vérifiez le début, la fin et la pause du quart.');
     if(c.paidMinutesOverride!==undefined&&(!Number.isInteger(c.paidMinutesOverride)||c.paidMinutesOverride<0||c.paidMinutesOverride>1440))throw Error('Les heures payées doivent être comprises entre 0 et 24 h, à la minute près.');
     const post=assignmentPost(c);
-    if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post))throw Error('Poste invalide.');
+    if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post)&&!Object.hasOwn(BAKERY_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
     return {kind,start:c.start,end,...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
@@ -139,6 +140,7 @@ export function validateAssignment(c,departmentKey){
   const target=c.workDepartment||departmentKey;
   if(c.workDepartment===departmentKey)throw Error('Choisissez un autre département pour une affectation interdépartements.');
   if(c.post==='cut_fruit'&&target!=='fruits')throw Error('Le poste Fruits coupés appartient aux Fruits & Légumes.');
+  if(Object.hasOwn(BAKERY_POSTS,c.post)&&target!=='boulangerie')throw Error('Ce poste appartient à la Boulangerie.');
   if(c.kind==='buffet'&&!['charcuterie','pam'].includes(target))throw Error('Le poste Buffet appartient à la Charcuterie ou au PAM.');
   if((c.kind==='kitchen'||Object.hasOwn(PAM_POSTS,c.post)||Object.hasOwn(KITCHEN_POSTS,c.post))&&target!=='pam')throw Error('Ce poste appartient au PAM.');
   if(Object.hasOwn(KITCHEN_POSTS,c.post)&&!['kitchen','training'].includes(c.kind))throw Error('Cuisine Salades doit être compté en Cuisine ou en Formation.');
