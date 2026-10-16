@@ -59,12 +59,12 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
       try{
         const family=(await client.query('SELECT id,name FROM schedule_family_access WHERE id=$1 AND active',[id])).rows[0];
         family.personIds=(await client.query('SELECT person_id FROM schedule_family_members WHERE access_id=$1',[id])).rows.map(r=>Number(r.person_id));
-        const from=today(),first=monday(from),until=addDays(first,91);
-        const starts=(await client.query('SELECT week_start FROM schedule_department_weeks WHERE published IS NOT NULL AND week_start BETWEEN $1 AND $2 UNION SELECT week_start FROM schedule_public_links WHERE week_start BETWEEN $1 AND $2 ORDER BY week_start',[first,until])).rows.map(r=>r.week_start instanceof Date?r.week_start.toISOString().slice(0,10):String(r.week_start).slice(0,10));
+        const from=today(),first=monday(from);
+        const starts=(await client.query('SELECT week_start FROM schedule_department_weeks WHERE published IS NOT NULL AND week_start>=$1 UNION SELECT week_start FROM schedule_public_links WHERE week_start>=$1 ORDER BY week_start',[first])).rows.map(r=>r.week_start instanceof Date?r.week_start.toISOString().slice(0,10):String(r.week_start).slice(0,10));
         const weeks=[];for(const start of starts)weeks.push(await readFamilyWeek(family,start));
         // Reconcile only after every source week has been read successfully.
         const desired=calendarEvents(weeks,from),token=await accessToken(row),base='/calendars/'+encodeURIComponent(row.calendar_id)+'/events';
-        const previous=(await client.query('SELECT * FROM schedule_family_google_events WHERE access_id=$1 AND shift_date>=$2 AND shift_date<=$3',[id,from,addDays(until,6)])).rows;
+        const previous=(await client.query('SELECT * FROM schedule_family_google_events WHERE access_id=$1 AND shift_date>=$2',[id,from])).rows;
         for(const event of desired){
           const marker=sha(`family:${id}`),body={...event.body,extendedProperties:{private:{igaFamily:marker,igaShift:sha(event.key)}}},hash=sha(JSON.stringify(body)),old=previous.find(r=>r.shift_key===event.key);
           if(old?.body_hash===hash)continue;
