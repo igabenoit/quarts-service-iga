@@ -13,8 +13,15 @@ export async function readSchedule(client, weekStart) {
 
 export async function backupBeforeRegeneration(client, weekStart) {
   const snapshot=await readSchedule(client,weekStart);
-  await client.query(`INSERT INTO schedule_regeneration_backups (week_start,snapshot)
-    VALUES ($1,$2::jsonb)`,[weekStart,JSON.stringify(snapshot)]);
+  const saved=await client.query(`INSERT INTO schedule_regeneration_backups (week_start,snapshot)
+    VALUES ($1,$2::jsonb) RETURNING id`,[weekStart,JSON.stringify(snapshot)]);
+  return saved.rows[0]?.id;
+}
+
+// Automatic role defaults are part of regeneration and must be reversible too.
+export async function finishRegenerationBackup(client,backupId,weekStart){
+  const {shifts}=await readSchedule(client,weekStart);
+  await client.query(`UPDATE schedule_regeneration_backups SET snapshot=snapshot||jsonb_build_object('generatedShifts',$1::jsonb) WHERE id=$2`,[JSON.stringify(shifts),backupId]);
 }
 
 // Stable even after PostgreSQL JSONB has reordered object keys.
@@ -29,7 +36,7 @@ const digest=value=>createHash('sha256').update(serialized(value)).digest('hex')
 export function restorationPreview(backup,current,{weekStart,employees,leaves,timeOff}) {
   const token=digest({backupId:String(backup.id),current,employees,leaves,timeOff});
   const issues=[];
-  if(serialized(backup.snapshot.shifts)!==serialized(current.shifts))
+  if(serialized(backup.snapshot.generatedShifts||backup.snapshot.shifts)!==serialized(current.shifts))
     issues.push('Des besoins de quarts ont été ajoutés, supprimés ou modifiés depuis cette recréation. La restauration des affectations est bloquée pour éviter de les appliquer aux mauvais quarts.');
   const names=new Map(employees.map(e=>[String(e.id),e.name]));
   const shifts=new Map(backup.snapshot.shifts.map(s=>[String(s.id),s]));
@@ -90,6 +97,10 @@ export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}
       }
       if(!preview.canRestore){await client.query('ROLLBACK');return res.status(409).json({error:preview.issues.join(' ')});}
       await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN (SELECT id FROM schedule_shifts WHERE week_start=$1)`,[weekStart]);
+      if(backup.snapshot.generatedShifts)for(const shift of backup.snapshot.shifts){
+        const now=current.shifts.find(s=>String(s.id)===String(shift.id));
+        if(now.role!==shift.role)await client.query('UPDATE schedule_shifts SET role=$1,updated_at=NOW() WHERE id=$2',[shift.role,shift.id]);
+      }
       for(const a of backup.snapshot.assignments)await client.query('INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)',[a.shift_id,a.employee_id]);
       await client.query(`UPDATE schedule_regeneration_backups SET restored_at=clock_timestamp(),replaced_snapshot=$1::jsonb WHERE id=$2`,[JSON.stringify(current),backup.id]);
       await client.query('COMMIT');

@@ -1,11 +1,12 @@
 import {conflictsWithLeave} from "./leave-rules.js";
+import {defaultServiceRole} from './service-role-defaults.js';
 const hoursText = minutes => `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${String(minutes % 60).padStart(2, "0")}` : ""}`;
 
 export function assignmentConflict(employee, shift, shifts, assigned = []) {
   if (conflictsWithLeave(shift,employee.leavePeriods)) return "Un congé approuvé chevauche ce quart.";
   if (!employee.active) return "Cet employé est inactif.";
   if (shift.role === "support") return "Ce quart est réservé à l’aide d’un autre département.";
-  if (!(employee.roles || [employee.role]).includes(shift.role)) return "Ce poste ne fait pas partie des fonctions de cet employé.";
+  if (![employee.role,...(employee.roles||[])].includes(defaultServiceRole(shift.role,employee.role))) return "Ce poste ne fait pas partie des fonctions de cet employé.";
   const windows = employee.availability?.[shift.dayIndex] || [];
   if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute))
     return `Les disponibilités de cet employé ne couvrent pas le quart complet de ${hoursText(shift.startMinute)} à ${hoursText(shift.endMinute)}.`;
@@ -52,7 +53,7 @@ export function generateAssignments(shifts, employees, existing = []) {
       s.dayIndex === day && s.paidMinutes <= limit && canAssign(employee, s, shifts, assigned)));
     const memo = new Map();
     function solve(day, remaining, daysUsed, weekdaysUsed) {
-      if (day === 7 || remaining <= 0) return { minutes: 0, jobs: [] };
+      if (day === 7 || remaining <= 0) return { minutes: 0, managerMinutes: 0, jobs: [] };
       const key = `${day}:${remaining}:${daysUsed}:${weekdaysUsed}`;
       if (memo.has(key)) return memo.get(key);
       let best = solve(day + 1, remaining, daysUsed, weekdaysUsed);
@@ -62,7 +63,10 @@ export function generateAssignments(shifts, employees, existing = []) {
           const rest = solve(day + 1, remaining - shift.paidMinutes,
             daysUsed + 1, weekdaysUsed + (day < 5 ? 1 : 0));
           const minutes = shift.paidMinutes + rest.minutes;
-          if (minutes > best.minutes) best = { minutes, jobs: [shift, ...rest.jobs] };
+          // At equal hours, keep the manager on her dedicated copied needs.
+          const managerMinutes = rest.managerMinutes + (employee.role==='manager'&&shift.role==='manager'?shift.paidMinutes:0);
+          if (minutes > best.minutes || minutes === best.minutes && managerMinutes > best.managerMinutes)
+            best = { minutes, managerMinutes, jobs: [shift, ...rest.jobs] };
         }
       }
       memo.set(key, best);

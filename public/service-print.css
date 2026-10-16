@@ -48,6 +48,7 @@
 .service-sheet .sheet-person[data-row-units="15"]{--row-units:15}
 .service-sheet .sheet-name{text-align:left!important;font-size:9.5pt;font-weight:600}
 .service-sheet .sheet-person-label{height:calc(var(--row-height,42pt) - .55pt);padding:4pt;line-height:1.2;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+.service-sheet .sheet-job-title{display:block;font-size:6.5pt;font-weight:400;line-height:1.15;margin-top:2pt;overflow-wrap:anywhere}
 .service-sheet .service-rank{font-size:6.5pt;font-weight:400;color:#657484}
 .service-sheet .sheet-seniority{font-size:6.5pt;padding:2pt!important}
 .service-sheet .sheet-work{height:calc(var(--row-height,42pt) - 11.55pt);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2pt;font-size:8pt;line-height:1.2;overflow:hidden}

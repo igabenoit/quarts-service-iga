@@ -11,10 +11,18 @@ const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,e
 test('manager stays on the first Service sheet with her title and all existing supervision shifts',()=>{
  const html=print({employees:[{...person(1,'manager'),name:'Gérante témoin'}],shifts:[shift(1,'supervisor'),shift(2,'manager',1)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}]});
  const sheets=html.match(/<article[\s\S]*?<\/article>/g);
- assert.equal(sheets.length,3);assert.match(sheets[0],/Gérante témoin<\/div><small>Gérante/);
+ assert.equal(sheets.length,3);assert.match(sheets[0],/Gérante témoin<small class="sheet-job-title">Gérante<\/small><\/div>/);
  assert.equal((html.match(/data-person="1"/g)||[]).length,1);
  assert.equal((sheets[0].match(/class="print-start"/g)||[]).length,2);
  assert.match(sheets[0],/Cette feuille : 14 h/);
+});
+
+test('default manager work prints hours without repeating the title in the shift cells',()=>{
+ const html=print({employees:[person(1,'manager')],shifts:[shift(1,'manager')],assignments:[{shiftId:1,employeeId:1}]});
+ assert.match(html,/sheet-person-label">Employé témoin 1<small class="sheet-job-title">Gérante<\/small><\/div>/);
+ assert.doesNotMatch(html,/class="service-role"/);
+ assert.equal((html.match(/class="sheet-job-title"/g)||[]).length,1);
+ assert.match(html,/class="print-start">08:00/);assert.match(html,/class="print-end">16:00/);
 });
 test('Service keeps exactly three team sheets with every employee once and in priority order',()=>{
  const employees=Array.from({length:31},(_,i)=>person(i+1));const html=print({employees});

@@ -14,7 +14,8 @@ import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
 import { assignmentConflict, generateAssignments } from "./scheduler.js";
-import {backupBeforeRegeneration, installScheduleBackup} from './schedule-backup.js';
+import {backupBeforeRegeneration,finishRegenerationBackup,installScheduleBackup} from './schedule-backup.js';
+import {applyServiceRoleDefault,copyServiceShifts} from './service-role-defaults.js';
 
 const { Pool } = pg;
 const app = express();
@@ -522,8 +523,9 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     if (conflict) throw new Error(conflict);
     await client.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
+    const savedShift=await applyServiceRoleDefault(client,s,e);
     await client.query("COMMIT");
-    response.json({ ok:true });
+    response.json({ ok:true,shift:savedShift });
   } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(400).json({ error:error.message }); } finally { client.release(); }
 });
 app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (request, response) => {
@@ -544,15 +546,20 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
       const employee=employees.find(e=>e.id===Number(leave.employee_id));
       if (employee) employee.availability={...employee.availability,[leave.day_index]:[]};
     }
+    let backupId;
     if (request.body?.replaceAll === true) {
-      await backupBeforeRegeneration(client,request.params.weekStart);
+      backupId=await backupBeforeRegeneration(client,request.params.weekStart);
       await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN
         (SELECT id FROM schedule_shifts WHERE week_start=$1)`, [request.params.weekStart]);
     }
     const current = (await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
       WHERE s.week_start=$1`, [request.params.weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
     const result = generateAssignments(shifts, employees, current);
-    for (const a of result.assignments) await client.query("INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)", [a.shiftId,a.employeeId]);
+    for (const a of result.assignments) {
+      await client.query("INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)", [a.shiftId,a.employeeId]);
+      await applyServiceRoleDefault(client,shifts.find(s=>s.id===a.shiftId),employees.find(e=>e.id===a.employeeId));
+    }
+    if(backupId)await finishRegenerationBackup(client,backupId,request.params.weekStart);
     await client.query("COMMIT");
     response.json({ ...result, preserved:current.length });
   } catch (error) {
@@ -799,7 +806,7 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
     const previousCount = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [previous]);
     if (previousCount.rows[0].count === 0) throw new Error("La semaine précédente ne contient aucun quart.");
     await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes='', updated_at=NOW() WHERE week_start=$3`, [previousWeek.rows[0].cashier_budget_minutes, previousWeek.rows[0].packer_budget_minutes, weekStart]);
-    await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, sort_order) SELECT $1, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, sort_order FROM schedule_shifts WHERE week_start=$2`, [weekStart, previous]);
+    await copyServiceShifts(client,weekStart,previous);
     await client.query("COMMIT");
     response.json({ copiedFrom: previous });
   } catch (error) {
