@@ -6,13 +6,18 @@ const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});}
 const scopes=['https://www.googleapis.com/auth/calendar.events','https://www.googleapis.com/auth/calendar.calendarlist.readonly'];
 const callbackPath='/api/family-portal/google/callback';
 const zone='America/Toronto';
+// Event palette IDs, scoped to the family's chosen calendar (not other families).
+const familyCalendarId='family13902481660091316519@group.calendar.google.com';
+const normalizeName=value=>value.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().trim().replace(/\s+/g,' ');
+export const familyEventColors=Object.freeze({'edouard benoit':'7','antoine benoit':'11','charles benoit':'3','emile benoit':'10','laura benoit':'1','cassandra corriveau':'4','marc-andre benoit':'9','marc benoit':'9'});
 const dateTime=(date,minutes)=>`${addDays(date,Math.floor(minutes/1440))}T${String(Math.floor(minutes%1440/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')}:00`;
-export function calendarEvents(weeks,from=today()){
+export function calendarEvents(weeks,from=today(),colors={}){
   const events=[];
   for(const week of weeks)for(const person of week.people)for(const day of person.days){
     if(day.date<from)continue;
     const entries=day.entries.filter(c=>Number.isInteger(c.start)&&Number.isInteger(c.end)&&c.end>c.start).sort((a,b)=>a.start-b.start||a.end-b.end||a.department.localeCompare(b.department));
-    entries.forEach((c,index)=>events.push({key:`${person.id}:${day.date}:${index}`,date:day.date,body:{summary:`${person.name} · Travail`,description:[c.department,c.detail,'Horaire publié · IGA Famille Benoit','Les heures correspondent à la présence au travail.'].filter(Boolean).join('\n'),start:{dateTime:dateTime(day.date,c.start),timeZone:zone},end:{dateTime:dateTime(day.date,c.end),timeZone:zone}}}));
+    const colorId=colors[normalizeName(person.name)];
+    entries.forEach((c,index)=>events.push({key:`${person.id}:${day.date}:${index}`,date:day.date,body:{summary:`${person.name} · Travail`,...(colorId?{colorId}:{}),description:[c.department,c.detail,'Horaire publié · IGA Famille Benoit','Les heures correspondent à la présence au travail.'].filter(Boolean).join('\n'),start:{dateTime:dateTime(day.date,c.start),timeZone:zone},end:{dateTime:dateTime(day.date,c.end),timeZone:zone}}}));
   }
   return events;
 }
@@ -63,7 +68,7 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
         const starts=(await client.query('SELECT week_start FROM schedule_department_weeks WHERE published IS NOT NULL AND week_start>=$1 UNION SELECT week_start FROM schedule_public_links WHERE week_start>=$1 ORDER BY week_start',[first])).rows.map(r=>r.week_start instanceof Date?r.week_start.toISOString().slice(0,10):String(r.week_start).slice(0,10));
         const weeks=[];for(const start of starts)weeks.push(await readFamilyWeek(family,start));
         // Reconcile only after every source week has been read successfully.
-        const desired=calendarEvents(weeks,from),token=await accessToken(row),base='/calendars/'+encodeURIComponent(row.calendar_id)+'/events';
+        const desired=calendarEvents(weeks,from,row.calendar_id===familyCalendarId?familyEventColors:{}),token=await accessToken(row),base='/calendars/'+encodeURIComponent(row.calendar_id)+'/events';
         const previous=(await client.query('SELECT * FROM schedule_family_google_events WHERE access_id=$1 AND shift_date>=$2',[id,from])).rows;
         for(const event of desired){
           const marker=sha(`family:${id}`),body={...event.body,extendedProperties:{private:{igaFamily:marker,igaShift:sha(event.key)}}},hash=sha(JSON.stringify(body)),old=previous.find(r=>r.shift_key===event.key);
