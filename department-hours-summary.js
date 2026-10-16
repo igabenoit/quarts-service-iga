@@ -8,10 +8,10 @@ export async function installDepartmentHoursSummary(app,pool,{requireManager,sam
   async function planned(req){
     const department=await departmentFor(req.params.id),start=weekFor(req.params.week);assertDepartment(req,department.id);
     if(department.key!=='service')return plannedSummary(await getWeek(department.id,start));
-    const shifts=(await pool.query('SELECT role,start_minute,end_minute FROM schedule_shifts WHERE week_start=$1',[start])).rows.filter(row=>['cashier','supervisor','packer'].includes(row.role));
+    const shifts=(await pool.query('SELECT role,start_minute,end_minute FROM schedule_shifts WHERE week_start=$1',[start])).rows.filter(row=>['cashier','supervisor','packer','orders'].includes(row.role));
     const byRole=role=>shifts.filter(s=>s.role===role).reduce((n,s)=>n+serviceShiftTiming(Number(s.start_minute),Number(s.end_minute)).paidMinutes,0);
-    const total=byRole('cashier')+byRole('supervisor')+byRole('packer');
-    return {department,weekStart:start,totals:{shift:total,training:0,buffet:0,kitchen:0},total,empty:!shifts.length,detail:'Caissières '+(byRole('cashier')/60)+' h · Superviseurs '+(byRole('supervisor')/60)+' h · Emballeurs '+(byRole('packer')/60)+' h'};
+    const checkout=byRole('cashier')+byRole('supervisor')+byRole('packer'),orders=byRole('orders'),total=checkout+orders;
+    return {department,weekStart:start,totals:{shift:total,training:0,buffet:0,kitchen:0},total,serviceBreakdown:{checkout,orders,cashier:byRole('cashier'),supervisor:byRole('supervisor'),packer:byRole('packer')},empty:!shifts.length,detail:'Caissières '+(byRole('cashier')/60)+' h · Superviseurs '+(byRole('supervisor')/60)+' h · Emballeurs '+(byRole('packer')/60)+' h'};
   }
   async function read(summary){const row=(await pool.query('SELECT actual,version,updated_at FROM schedule_department_hour_summaries WHERE department_id=$1 AND week_start=$2',[summary.department.id,summary.weekStart])).rows[0];return {...summary,actual:row?.actual||{minutes:null,note:''},version:row?.version||0,updatedAt:row?.updated_at||null};}
   app.get('/api/departments/:id/weeks/:week/hours-summary',requireManager,endpoint(async(req,res)=>res.json(await read(await planned(req)))));
