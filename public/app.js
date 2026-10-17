@@ -43,7 +43,7 @@ function servicePrintHTML(data){
   const shortTime=n=>`${Math.floor(n/60)}${n%60?'h'+String(n%60).padStart(2,'0'):''}`;
   const paid=s=>s.external?s.paidMinutes:serviceShiftTiming(s.startMinute,s.endMinute).paidMinutes;
   const assigned=new Map(data.assignments.map(a=>[a.shiftId,a.employeeId]));
-  const shiftHTML=(s,role)=>`<div class="service-shift${role&&!s.external&&s.role!==role?' cross-role':''}">${role&&!s.external&&s.role!==role?`<small class="service-role">${e(roleNames[s.role]||s.role)}</small>`:''}<span class="print-start">${time(s.startMinute)}</span><span class="print-end">${time(s.endMinute)}</span>${(s.sharedDay||s.external||s.role==='support')&&s.sourceDepartment?`<small>${e(s.sourceDepartment)}</small>`:''}</div>`;
+  const shiftHTML=(s,role)=>`<div class="service-shift shift-theme-${e(s.external?s.department:'service')} ${s.post==='cut_fruit'?'status-cut-fruit':s.kind==='training'?'status-training':''}${role&&!s.external&&s.role!==role?' cross-role':''}">${role&&!s.external&&s.role!==role?`<small class="service-role">${e(roleNames[s.role]||s.role)}</small>`:''}${(s.sharedDay||s.external||s.role==='support')&&s.sourceDepartment?`<small class="assignment-label">${e(s.sourceDepartment)}</small>`:''}<span class="printed-shift-range"><span class="print-start">${time(s.startMinute)}</span><span>–</span><span class="print-end">${time(s.endMinute)}</span></span></div>`;
   const availability=(person,day)=>{const windows=person.availability?.[day]||[];return !windows.length?'0':windows.some(([a,b])=>a===0&&b===1440)?'J':windows.map(([a,b])=>shortTime(a)+'–'+shortTime(b)).join(' / ');};
   const approved=(id,day)=>data.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(data.weekStart,day));
   const cell=(person,jobs,day,pending=false)=>{
@@ -53,7 +53,7 @@ function servicePrintHTML(data){
     const birthday=!pending&&person.birthday&&person.birthday.slice(5)===addDays(data.weekStart,day).slice(5);
     const labels=periods.map(p=>`<strong class="print-leave">CONGÉ APPROUVÉ${p.allDay?'':`<br>${time(p.startMinute)}–${time(p.endMinute)}`}</strong>`).join('')+(manual?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':'');
     const unavailable=!pending&&!person.availability?.[day]?.length&&!shifts.length&&!labels;
-    const content=(birthday?'<small class="birthday-greeting">Bonne fête !</small>':'')+labels+shifts.map(s=>shiftHTML(s,person.role)).join('')+(unavailable?'<small class="service-unavailable">Indisponible</small>':'');
+    const content=(birthday?'<small class="birthday-greeting">Bonne fête !</small>':'')+labels+(external.length?'<small class="printed-day-total">Quart complet · '+hours(shifts.reduce((n,s)=>n+paid(s),0))+' h</small>':'')+shifts.map(s=>shiftHTML(s,person.role)).join('')+(unavailable?'<small class="service-unavailable">Indisponible</small>':'');
     const workHeight=shifts.reduce((n,s)=>n+21+(person.role&&s.role!==person.role?Math.ceil((roleNames[s.role]||s.role).length/10)*6:0)+(s.sourceDepartment?Math.ceil(s.sourceDepartment.length/10)*7:0),0)+periods.reduce((n,p)=>n+(p.allDay?16:25),0)+(manual?16:0)+(birthday?9:0);
     return {content,unavailable,hours:shifts.length?(external.length?hours(own.reduce((n,s)=>n+paid(s),0))+' Serv. / '+hours(shifts.reduce((n,s)=>n+paid(s),0))+' total':hours(shifts.reduce((n,s)=>n+paid(s),0))):'',availability:pending?'':availability(person,day),height:workHeight+13};
   };

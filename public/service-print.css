@@ -91,3 +91,24 @@
 .service-sheet.compact-service .service-week-total{margin-bottom:8pt}
 .service-sheet.compact-service .sheet-notes{min-height:40pt}
 .service-sheet.compact-service .sheet-notes p{min-height:24pt}
+
+/* Individual colored work portions; also retained in PDF rasterization. */
+.service-sheet .service-shift{box-sizing:border-box;border:.7pt solid #738178;border-left:2pt solid #738178;border-radius:3pt;background:#f1f4f0;padding:3pt 1pt;margin:1.5pt 0;width:100%;gap:2pt;color:#222;break-inside:avoid;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.service-sheet .printed-shift-range{display:flex;justify-content:center;align-items:center;gap:1.5pt;white-space:nowrap;font-size:7pt;font-weight:700;line-height:1.2}
+.service-sheet .assignment-label{display:block;font-size:5.5pt;font-weight:600;line-height:1.15;text-align:center;overflow-wrap:anywhere}
+.service-sheet .printed-day-total{display:block;font-size:5.5pt;font-weight:700;line-height:1.2;margin-bottom:1.5pt;color:#384d3d}
+.service-sheet .shift-theme-boulangerie{--shift-color:#b88a00;border-color:#b88a00;background:#fff4c6}
+.service-sheet .shift-theme-service{--shift-color:#2458a4;border-color:#2458a4;background:#eaf1ff}
+.service-sheet .shift-theme-fruits{--shift-color:#34824d;border-color:#34824d;background:#e9f4e7}
+.service-sheet .shift-theme-viande{--shift-color:#b62b32;border-color:#b62b32;background:#fae8e7}
+.service-sheet .shift-theme-charcuterie{--shift-color:#b65380;border-color:#b65380;background:#fbe9f1}
+.service-sheet .shift-theme-pam{--shift-color:#c46620;border-color:#c46620;background:#fff0df}
+.service-sheet .shift-theme-poissonnerie{--shift-color:#287c9c;border-color:#287c9c;background:#e4f4fc}
+.service-sheet .shift-theme-epicerie{--shift-color:#344351;border-color:#344351;background:#e9edf1}
+.service-sheet .shift-theme-administration{--shift-color:#665489;border-color:#665489;background:#eee9f6}
+.service-sheet .status-training{border-color:#176354;background:#e0f0e9;color:#176354!important}
+.service-sheet .status-cut-fruit{border-color:#34824d;background:#b8dfb0;color:#282e29!important}
+
+.service-sheet .service-shift{flex-shrink:0}
+.service-sheet .printed-shift-range{font-size:6pt;gap:.5pt}
+.service-sheet .service-shift+.service-shift{border-top:.7pt solid var(--shift-color,#738178); padding-top:3pt}

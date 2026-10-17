@@ -302,3 +302,28 @@ body{background:white}
 .editor-table .shared-workday-part{display:flex;flex-direction:column;gap:2px;padding:5px 2px;border-radius:4px;background:#f0f5ee;line-height:1.3}
 .editor-table .shared-workday-department{display:block;font-size:.65rem;font-weight:600;color:#4d584e}
 .editor-table .shared-workday-part strong{display:block;font-size:.8rem;white-space:nowrap}
+
+/* Individual colored work portions; also retained in PDF rasterization. */
+.department-sheet .printed-shift{box-sizing:border-box;border:.7pt solid #738178;border-left:2pt solid #738178;border-radius:3pt;background:#f1f4f0;padding:3pt 1pt;margin:1.5pt 0;width:100%;gap:2pt;color:#222;break-inside:avoid;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.department-sheet .printed-shift-range{display:flex;justify-content:center;align-items:center;gap:1.5pt;white-space:nowrap;font-size:7pt;font-weight:700;line-height:1.2}
+.department-sheet .assignment-label{display:block;font-size:5.5pt;font-weight:600;line-height:1.15;text-align:center;overflow-wrap:anywhere}
+.department-sheet .printed-day-total{display:block;font-size:5.5pt;font-weight:700;line-height:1.2;margin-bottom:1.5pt;color:#384d3d}
+.department-sheet .shift-theme-boulangerie{--shift-color:#b88a00;border-color:#b88a00;background:#fff4c6}
+.department-sheet .shift-theme-service{--shift-color:#2458a4;border-color:#2458a4;background:#eaf1ff}
+.department-sheet .shift-theme-fruits{--shift-color:#34824d;border-color:#34824d;background:#e9f4e7}
+.department-sheet .shift-theme-viande{--shift-color:#b62b32;border-color:#b62b32;background:#fae8e7}
+.department-sheet .shift-theme-charcuterie{--shift-color:#b65380;border-color:#b65380;background:#fbe9f1}
+.department-sheet .shift-theme-pam{--shift-color:#c46620;border-color:#c46620;background:#fff0df}
+.department-sheet .shift-theme-poissonnerie{--shift-color:#287c9c;border-color:#287c9c;background:#e4f4fc}
+.department-sheet .shift-theme-epicerie{--shift-color:#344351;border-color:#344351;background:#e9edf1}
+.department-sheet .shift-theme-administration{--shift-color:#665489;border-color:#665489;background:#eee9f6}
+.department-sheet .status-training{border-color:#176354;background:#e0f0e9;color:#176354!important}
+.department-sheet .status-cut-fruit{border-color:#34824d;background:#b8dfb0;color:#282e29!important}
+
+.department-sheet .multiple-shifts .printed-shift+.printed-shift{border-top:.7pt solid var(--shift-color,#738178); padding-top:3pt}
+
+.department-sheet .multi-shift-row .sheet-day{vertical-align:top;padding-bottom:11pt}
+.department-sheet .multi-shift-row .sheet-day-detail{position:absolute;bottom:0;left:0;right:0}
+.department-sheet .printed-shift,.department-sheet .printed-day-total{flex-shrink:0}
+.department-sheet .printed-shift-range{font-size:6pt;gap:.5pt}
+.department-sheet .multiple-shifts .printed-shift{padding:2pt 1pt;margin:0}

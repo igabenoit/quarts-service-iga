@@ -22,7 +22,7 @@ export function departmentPortionsForService(weeks,people){
       if(!isTimedCell(c))return;
       const department=c.workDepartment||week.key,id=JSON.stringify([service.serviceEmployeeId,day,c.start,c.end,department]);
       if(seen.has(id))return;seen.add(id);
-      result.push({employeeId:service.serviceEmployeeId,dayIndex:day,startMinute:c.start,endMinute:c.end,paidMinutes:cellMinutes(c),department,label:shiftAssignment(c,week.key)});
+      result.push({employeeId:service.serviceEmployeeId,dayIndex:day,startMinute:c.start,endMinute:c.end,paidMinutes:cellMinutes(c),department,kind:c.kind,post:c.post,label:shiftAssignment(c,week.key)});
     });
   }
   return result;
