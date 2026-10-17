@@ -183,6 +183,31 @@ async function restoreDraft(historyId){
   }catch(err){message(restored?'La version est rétablie sur le serveur, mais son affichage n’a pas pu être actualisé. Actualisez la feuille avant de poursuivre. '+err.message:err.message);}});
 }
 $('#loadHistory').onclick=async()=>{try{const data=await api(route()+'/history');$('#historyList').innerHTML=data.history.map(h=>`<p>Version ${h.revision} · ${e(new Date(h.created_at).toLocaleString('fr-CA'))} <button class="quiet" data-restore="${h.id}">Rétablir ce brouillon</button></p>`).join('')||'<p>Aucune version précédente.</p>';$('#historyList').querySelectorAll('button').forEach(b=>b.onclick=()=>restoreDraft(Number(b.dataset.restore)));}catch(err){message(err.message);}};
+let availablePeople=[],attachingPerson=false;
+function renderExistingPeople(){
+  const query=nameKey($('#existingPersonSearch').value),people=availablePeople.filter(p=>!query||nameKey(p.name).includes(query));
+  $('#existingPersonChoice').innerHTML='<option value="">Choisir un employé…</option>'+people.map(p=>`<option value="${p.id}">${e(p.name)} · ${e(p.departments.join(' / '))}</option>`).join('');
+  $('#existingPersonStatus').textContent=people.length?`${people.length} employés disponibles. Les renseignements communs ne sont pas modifiés.`:'Aucun employé actif correspondant à ajouter.';
+}
+async function openExistingPerson(){
+  if(weekLocks||weekLoading)return;
+  $('#existingPersonSearch').value='';$('#existingPersonChoice').innerHTML='';$('#existingPersonStatus').textContent='Chargement…';$('#confirmExistingPerson').disabled=true;$('#existingPersonDialog').showModal();
+  try{availablePeople=(await api(`/api/departments/${current.department.id}/available-people`)).people;renderExistingPeople();$('#confirmExistingPerson').disabled=false;}catch(error){$('#existingPersonStatus').textContent=error.message;}
+}
+$('#addExistingPerson').onclick=openExistingPerson;$('#addExistingToSchedule').onclick=openExistingPerson;$('#existingPersonSearch').oninput=renderExistingPeople;
+$('#existingPersonForm').onsubmit=async event=>{
+  event.preventDefault();if(attachingPerson)return;
+  const person=availablePeople.find(p=>p.id===Number($('#existingPersonChoice').value));if(!person)return;
+  if(current.draft.rows.length>=32&&!current.draft.rows.some(r=>r.personId===person.id)){$('#existingPersonStatus').textContent='Cette feuille contient déjà 32 employés.';return;}
+  attachingPerson=true;$('#existingPersonDialog').inert=true;let attached=false;
+  await withWeekLock(async()=>{try{
+    await post(`/api/departments/${current.department.id}/people`,{personId:person.id,version:person.version});attached=true;
+    await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;current.related=fresh.related;current.warnings=fresh.warnings;
+    if(!current.draft.rows.some(r=>r.personId===person.id))current.draft.rows.push({personId:person.id,cells:Array.from({length:7},blankCell)});
+    markDirty();await saveDraft();$('#existingPersonDialog').close();renderPeople();renderSchedule();renderPrint();renderWarnings();message(person.name+' ajouté à '+current.department.name+'. Vous pouvez maintenant saisir ses quarts.');
+  }catch(error){$('#existingPersonStatus').textContent=(attached?'Le rattachement est enregistré. Actualisez la liste avant de réessayer; le brouillon peut encore nécessiter un enregistrement. ':'')+error.message;}
+  finally{attachingPerson=false;$('#existingPersonDialog').inert=false;}});
+};
 function renderPeople(){
   const query=nameKey($('#personSearch').value),people=meta.people.filter(p=>query?nameKey(p.name+' '+(p.jobTitle||'')+' '+(p.specification||'')+' '+p.email).includes(query):p.departments.includes(selectedDepartment)).sort((a,b)=>comparePeople(a,b,selectedDepartment));
   $('#peopleList').innerHTML=people.map(p=>`<article class="person-card"><h3>${e(p.name)}</h3>${p.jobTitle?`<p class="person-job-title">${e(p.jobTitle)}</p>`:''}${p.specification?`<p class="person-specification">${e(p.specification)}</p>`:''}<p>${p.portalPersonId?'Accès personnel partagé avec '+e(meta.people.find(owner=>owner.id===p.portalPersonId)?.name||'la fiche principale'):p.employeeCode?'Code personnel renseigné':'Code personnel à compléter'}</p><p>${p.active?'Actif':'Inactif'} · ${p.group==='regular'?'Régulier':'Temps partiel'}</p><p>Priorité : ${p.displayPriorities?.[selectedDepartment]??'—'}</p><p>Ancienneté : <strong>${e(tenure(p.seniorityDate))}</strong><br>${e(dateLabel(p.seniorityDate))}</p><p>Anniversaire : ${p.birthday?e(dateLabel(p.birthday)):'À compléter'}</p><p>${e(p.email||'Courriel à compléter')}</p><p>${e(p.departments.map(id=>meta.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · '))}</p><button data-person="${p.id}" class="button quiet">Ouvrir la fiche</button></article>`).join('')||'<p class="notice">Aucune fiche pour ce département. Ajoutez les employés progressivement; les renseignements inconnus peuvent rester vides.</p>';

@@ -127,6 +127,22 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     res.json({weekStart:start,publications:rows.filter(r=>ownsDepartment(req,Number(r.department_id))).map(r=>({departmentId:Number(r.department_id),publishedAt:r.published_at}))});
   }));
   app.get('/api/departments/meta',requireManager,endpoint(async(req,res)=>res.json({departments:(await listDepartments(pool)).filter(d=>ownsDepartment(req,d.id)),people:(await directory()).filter(p=>p.departments.some(id=>ownsDepartment(req,id))),visionConfigured:Boolean(process.env.OPENAI_API_KEY),publicPath:'/horaires-departements',account:req.manager||{kind:'admin'}})));
+  app.get('/api/departments/:id/available-people',requireManager,endpoint(async(req,res)=>{
+    const id=integer(req.params.id);assertDepartment(req,id);await department(id);
+    const departments=await listDepartments(pool);
+    res.json({people:(await directory()).filter(p=>p.active&&!p.departments.includes(id)).map(p=>({id:p.id,name:p.name,version:p.version,serviceEmployeeId:p.serviceEmployeeId,departments:p.departments.map(d=>departments.find(v=>v.id===d)?.name).filter(Boolean)}))});
+  }));
+  app.post('/api/departments/:id/people',requireManager,sameOrigin,endpoint(async(req,res)=>{
+    const id=integer(req.params.id);assertDepartment(req,id);await department(id);
+    res.json(await transaction(async client=>{
+      const person=(await directory(client)).find(p=>p.id===integer(req.body.personId));
+      if(!person?.active)fail('Employé introuvable ou inactif. Actualisez la liste.');
+      if(person.version!==req.body.version)fail('Cette fiche a changé. Actualisez la liste avant de réessayer.',409);
+      const added=await client.query('INSERT INTO schedule_store_memberships(person_id,department_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING person_id',[person.id,id]);
+      if(added.rowCount)await client.query('UPDATE schedule_store_people SET version=version+1,updated_at=clock_timestamp() WHERE id=$1',[person.id]);
+      return {personId:person.id,departmentId:id,added:Boolean(added.rowCount)};
+    }));
+  }));
   app.post('/api/departments/personal-import',requireManager,sameOrigin,endpoint(async(req,res)=>{
     if(isScoped(req))fail('Import réservé à l’administration.',403);
     const entries=req.body?.entries;if(!Array.isArray(entries)||!entries.length||entries.length>300)fail('Liste invalide.');
