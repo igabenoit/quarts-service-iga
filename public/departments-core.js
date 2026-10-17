@@ -91,7 +91,7 @@ export function automaticBreakMinutes(start,end,post){
 // Explicit overrides are retained, including an intentionally entered 60 minutes.
 export const cellBreakMinutes=c=>!c.breakOverride&&c.breakMinutes===60&&isNightShift(c.start,c.end,c.post)?automaticBreakMinutes(c.start,c.end,c.post):c.breakMinutes??0;
 export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start-cellBreakMinutes(c)):0;
-export const departmentLabel=key=>DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
+export const departmentLabel=key=>key==='service'?'Service':DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
 export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',transferLabel(c)].filter(Boolean).join(' · ');

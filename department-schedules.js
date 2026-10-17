@@ -7,6 +7,7 @@ import {installEmployeePortal,saveEmployeeCode,employeePersonIds} from './employ
 import {installStorePortal} from './store-portal.js';
 import {installFamilyPortal} from './family-portal.js';
 import {employeeAvailability} from './availability-rules.js';
+import {serviceWeekProjection,departmentPortionsForService} from './public/shared-service.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
@@ -66,7 +67,16 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   const peopleFor=async(id,client=pool,weekStart)=>(await directory(client,weekStart)).filter(p=>p.departments.includes(Number(id))).sort((a,b)=>comparePeople(a,b,id));
   const emptyDraft=people=>({manager:'',notes:'',rows:people.filter(p=>p.active).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
-  const transferWeeks=async(start,client=pool)=>(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
+  const transferWeeks=async(start,client=pool)=>{
+    const weeks=(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
+    const service=(await listDepartments(client)).find(d=>d.key==='service');
+    if(service){
+      const shifts=(await client.query('SELECT s.*,a.employee_id FROM schedule_shifts s JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.week_start=$1',[start])).rows;
+      const link=(await client.query('SELECT created_at FROM schedule_public_links WHERE week_start=$1',[start])).rows[0];
+      weeks.push(serviceWeekProjection(shifts,await directory(client,start),service.id,{published:Boolean(link),publishedAt:link?.created_at}));
+    }
+    return weeks;
+  };
   async function getWeek(id,start,client=pool){
     const members=await peopleFor(id,client,start),d=await department(id,client),weeks=await transferWeeks(start,client),row=weeks.find(w=>Number(w.department_id)===Number(id));
     const incoming=incomingFor(weeks,d.key),guestIds=new Set(incoming.map(i=>i.personId)),people=[...members];
@@ -357,6 +367,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   };
   installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek});
   const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
-  return {directory,getWeek,warningsFor,employeePortal,familyPortal};
+  const serviceRelated=async start=>departmentPortionsForService(await transferWeeks(start),await directory(pool,start));
+  return {directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
 }
 

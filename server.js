@@ -698,7 +698,7 @@ app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
       pool.query("SELECT * FROM schedule_weeks WHERE week_start=$1", [weekStart]),
       pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY area, day_index, start_minute, id", [weekStart]),
     ]);
-    response.json({ week: mapWeek(weekResult.rows[0]), shifts: shiftsResult.rows.map(mapShift) });
+    response.json({ week: mapWeek(weekResult.rows[0]), shifts: shiftsResult.rows.map(mapShift), relatedDepartments:await departmentService.serviceRelated(weekStart) });
   } catch (error) {
     console.error("GET week", error);
     response.status(500).json({ error: "Impossible de charger la semaine." });
