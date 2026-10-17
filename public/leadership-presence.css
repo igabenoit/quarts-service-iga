@@ -10,3 +10,9 @@
 @media print{body.printing-planogram{margin:0!important;padding:0!important}#planoPrintSheet>article{page:daily-sheet;width:8.5in;min-height:14in;height:14in;padding:.4in;box-sizing:border-box;box-shadow:none;margin:0;break-inside:avoid;break-after:page}#planoPrintSheet>article:last-child{break-after:auto}.presence-table tr{break-inside:avoid}.daily-controls,.daily-status{display:none!important}}
 
 .presence-department.theme-administration{background:#eee9f6;color:#665489;border-left-color:#665489}
+
+/* Separate departments without adding empty employee rows. */
+.presence-compact .presence-table .presence-department-gap td{height:12px;padding:0;border:0;background:#fff}
+.presence-compact .presence-row th,.presence-compact .presence-row td{padding-top:5px;padding-bottom:5px}
+.presence-scheduled{color:#245a9a;font-weight:700}
+.presence-page{print-color-adjust:exact;-webkit-print-color-adjust:exact}
