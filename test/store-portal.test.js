@@ -8,6 +8,7 @@ import {installManagerAccess} from '../manager-access.js';
 import * as core from '../public/departments-core.js';
 import * as weeks from '../public/portal-weeks.js';
 import {storeSelection} from '../public/store-portal-core.js';
+import {scrollToToday} from '../public/portal-current-day.js';
 
 const week='2026-10-19',cells=(values={})=>Array.from({length:7},(_,i)=>values[i]||core.blankCell());
 const shift=(extra={})=>({kind:'shift',start:420,end:960,breakMinutes:60,note:'',...extra});
@@ -66,13 +67,26 @@ test('store filters: accent-insensitive names, work department, complete persona
 });
 
 function ui(){
-  const elements=new Map(),$=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;}});return elements.get(s);};
-  const context=vm.createContext({...core,...weeks,storeSelection,e:core.escapeHTML,console,fetch:async()=>{throw Error('Unexpected fetch');},document:{querySelector:$,querySelectorAll:()=>[]}});
+  const scrolls=[],elements=new Map(),$=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;},getBoundingClientRect:()=>({height:150}),querySelector(){return this.innerHTML.includes(' is-today')?{style:{},scrollIntoView:options=>scrolls.push({selector:s,options})}:null;}});return elements.get(s);};
+  const context=vm.createContext({...core,...weeks,storeSelection,scrollToToday,e:core.escapeHTML,console,fetch:async()=>{throw Error('Unexpected fetch');},document:{querySelector:$,querySelectorAll:()=>[]}});
   const source=readFileSync(new URL('../public/store-portal.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export function startStorePortal','function startStorePortal');vm.runInContext(source,context);
   context.seed={today:'2026-10-14',departments:[{key:'pam',name:'Prêt-à-manger'}],weeks:['2026-10-12',week]};vm.runInContext("listing=seed;week='2026-10-12'",context);
-  return {$,context,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};
+  return {$,context,scrolls,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};
 }
 const response=(body,status=200)=>({ok:status<400,status,json:async()=>structuredClone(body)});
+
+test('store portal opens on today and repositions only on reopening, current-week navigation or date change',async()=>{
+  const f=ui();f.run('listing=null;week=null');f.context.seed.today='2026-10-18';
+  f.fetch(async path=>response(path==='/api/store-portal'?f.context.seed:{...data(path.split('/').at(-1)),today:f.context.seed.today}));
+  await f.run('load({reset:true})');assert.equal(f.scrolls.length,1);assert.equal(f.scrolls[0].selector,'#storeSchedule');
+  assert.match(f.$('#storeSchedule').innerHTML,/<article class="store-day is-today"><header><div><h3>Dimanche/);
+  await f.run('load()');f.run('render()');assert.equal(f.scrolls.length,1,'refresh and filters preserve reading position');
+  await f.run("chooseWeek('2026-10-19')");assert.equal(f.scrolls.length,1);
+  await f.run('load({reset:true})');assert.equal(f.scrolls.length,2);
+  await f.run("chooseWeek('2026-10-19')");await f.run("chooseWeek('2026-10-12')");assert.equal(f.scrolls.length,3);
+  f.context.seed.today='2026-10-19';await f.run('load()');assert.equal(f.scrolls.length,4);assert.match(f.$('#storeSchedule').innerHTML,/<article class="store-day is-today"><header><div><h3>Lundi/);
+  f.fetch(async()=>response({error:'Indisponible'},500));await f.run('load({reset:true})');assert.equal(f.scrolls.length,4);
+});
 test('store UI ignores late week responses and clears data on errors; admin reads never post a consultation',async()=>{
   const f=ui(),paths=[];let release;const delayed=new Promise(r=>release=r);
   f.fetch(async(path,opts)=>{paths.push({path,opts});return path.endsWith('2026-10-12')?delayed:response(data(week));});

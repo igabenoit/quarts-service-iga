@@ -5,20 +5,34 @@ import {readFileSync} from 'node:fs';
 import crypto from 'node:crypto';
 import * as core from '../public/departments-core.js';
 import * as weeks from '../public/portal-weeks.js';
+import {scrollToToday} from '../public/portal-current-day.js';
 import {departmentFixture} from './department-fixture.js';
 const response=(body,status=200)=>({ok:status<400,status,json:async()=>structuredClone(body)});
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const item=weekStart=>({departmentId:1,name:'Fruits & Légumes',weekStart});
 const published=weekStart=>({department:{key:'fruits',name:'Fruits & Légumes'},weekStart,schedule:{rows:[{name:'Camille Exemple',cells:[{kind:'shift',start:1320,end:1830,breakMinutes:30,post:'night'},...Array.from({length:6},core.blankCell)]}]}});
 function fixture(){
- const elements=new Map(),events={};
- const $=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;}});return elements.get(s);};
- const context=vm.createContext({...core,...weeks,e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
+ const elements=new Map(),events={},scrolls=[];
+ const $=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;},getBoundingClientRect:()=>({height:150}),querySelector(){return this.innerHTML.includes(' is-today')?{style:{},scrollIntoView:options=>scrolls.push({selector:s,options})}:null;}});return elements.get(s);};
+ const context=vm.createContext({...core,...weeks,scrollToToday,e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
  const source=readFileSync(new URL('../public/horaires-departements.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/\r?\nload\(\);\s*$/,'');
  vm.runInContext(source,context);
- return {$,events,context,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};
+ return {$,events,context,scrolls,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};
 }
 const listing=(today='2026-10-14')=>({today,employeeName:'Camille Exemple',schedules:[item('2026-10-12'),item('2026-10-19')],service:[]});
+
+test('personal portal opens on today, preserves manual browsing and returns to today on reopening or date change',async()=>{
+ const f=fixture();let date='2026-10-18';
+ f.fetch(async path=>response(path.endsWith('department-schedules')?listing(date):published(path.split('/').at(-1))));
+ await f.run('load()');assert.equal(f.scrolls.length,1);assert.equal(f.scrolls[0].selector,'#personalSchedule');
+ assert.match(f.$('#personalSchedule').innerHTML,/<article class="portal-day is-today"><header><h3>Dimanche/);
+ await f.run('load()');assert.equal(f.scrolls.length,1,'manual refresh does not move the reader');
+ await f.run("chooseWeek('2026-10-19')");assert.equal(f.scrolls.length,1,'future week does not jump to a day');
+ await f.run('load({reset:true})');assert.equal(f.scrolls.length,2,'reopening returns to today');
+ await f.run("chooseWeek('2026-10-19')");await f.run("chooseWeek('2026-10-12')");assert.equal(f.scrolls.length,3,'returning to current week shows today');
+ date='2026-10-19';await f.run('load()');assert.equal(f.scrolls.length,4);assert.match(f.$('#personalSchedule').innerHTML,/<article class="portal-day is-today"><header><h3>Lundi/);
+ f.fetch(async()=>{throw Error('Hors connexion');});await f.run('load({reset:true})');assert.equal(f.scrolls.length,4,'errors do not scroll to stale content');
+});
 test('current week always opens, including when only a future publication exists',async()=>{
  const f=fixture();f.fetch(async()=>response({...listing(),schedules:[item('2026-10-19')]}));await f.run('load()');
  assert.equal(f.run('week'),'2026-10-12');assert.match(f.$('#weekBanner').innerHTML,/Cette semaine/);assert.match(f.$('#personalSchedule').innerHTML,/pas encore publié/);assert.match(f.$('#personalSchedule').innerHTML,/ne signifie pas.*congé/);

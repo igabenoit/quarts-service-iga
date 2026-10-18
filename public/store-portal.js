@@ -1,6 +1,7 @@
 import {escapeHTML as e,monday,addDays,today,hoursLabel} from './departments-core.js';
 import {weekInfo,weekRange,fullDate} from './portal-weeks.js';
 import {storeSelection} from './store-portal-core.js';
+import {scrollToToday} from './portal-current-day.js';
 
 const $=s=>document.querySelector(s);
 let listing,week,data,sequence=0,loading=false,personId=null;
@@ -27,6 +28,14 @@ function navigation(){
   banner.innerHTML=`<p>VOUS CONSULTEZ · TOUT LE MAGASIN</p><h2>${info.title}</h2><strong>${info.range}</strong><p>${info.note}</p>`;
   $('#storeReturnCurrent').hidden=week===current;
 }
+function shiftHTML(c){
+  return `<div class="store-shift theme-${e(c.departmentKeys[0]||'service')}"><button class="store-person" data-store-person="${c.personId}">${e(c.personName)}</button><div class="store-post"><span class="department-tag">${e(c.department)}</span>${c.detail?`<span>${e(c.detail)}</span>`:''}</div><strong>${e(c.hours)}</strong>${c.minutes!==null?`<small>${hoursLabel(c.minutes)} h</small>`:'<small></small>'}</div>`;
+}
+function dayEntriesHTML(day,selected,unpublished){
+  if(!day.entries.length)return `<p class="no-shift">${unpublished?'Aucun horaire publié.':selected?'Aucun quart inscrit dans les horaires publiés.':'Aucun quart publié pour cette sélection.'}</p>`;
+  if(selected)return day.entries.map(shiftHTML).join('');
+  return day.groups.map(group=>`<section class="store-department theme-${e(group.departmentKeys[0]||'service')}" data-store-department="${e(group.key)}"><header><h4>${e(group.name)}</h4><span>${group.count} quart${group.count===1?'':'s'} · ${hoursLabel(group.minutes)} h</span></header>${group.entries.map(shiftHTML).join('')}</section>`).join('');
+}
 function render(){
   if(!data)return;
   const department=$('#storeDepartment').value,search=$('#storeSearch').value,result=storeSelection(data,{department,search,personId});
@@ -37,26 +46,27 @@ function render(){
   $('#storeMatches').innerHTML=!result.selected&&search.trim()?`<p>${result.matches.length} employé${result.matches.length===1?'':'s'} trouvé${result.matches.length===1?'':'s'}. Choisis un nom pour voir sa semaine complète.</p><div class="store-person-choices">${result.matches.map(p=>`<button class="quiet" data-store-person="${p.id}">${e(p.name)}</button>`).join('')}</div>`:'';
   const anyPublished=data.publications.some(p=>p.published),personalUnpublished=result.selected&&!result.selected.published;
   const notice=!anyPublished||personalUnpublished?'<div class="empty-week"><h3>Horaire pas encore publié</h3><p>Aucun horaire publié pour cette sélection. Cela ne signifie pas que les employés sont en congé.</p></div>':'';
-  $('#storeSchedule').innerHTML=notice+`<div class="store-days">${result.days.map(day=>`<article class="store-day${day.date===data.today?' is-today':''}"><header><div><h3>${day.name}</h3><span>${fullDate(day.date)}</span></div><span>${day.date===data.today?'Aujourd’hui · ':''}${day.entries.filter(c=>c.minutes!==null).length} quart(s)</span></header><div>${day.entries.map(c=>`<div class="store-shift theme-${e(c.departmentKeys[0]||'service')}"><button class="store-person" data-store-person="${c.personId}">${e(c.personName)}</button><div class="store-post"><span class="department-tag">${e(c.department)}</span>${c.detail?`<span>${e(c.detail)}</span>`:''}</div><strong>${e(c.hours)}</strong>${c.minutes!==null?`<small>${hoursLabel(c.minutes)} h</small>`:'<small></small>'}</div>`).join('')||`<p class="no-shift">${personalUnpublished||!anyPublished?'Aucun horaire publié.':result.selected?'Aucun quart inscrit dans les horaires publiés.':'Aucun quart publié pour cette sélection.'}</p>`}</div></article>`).join('')}</div>`;
+  $('#storeSchedule').innerHTML=notice+`<div class="store-days">${result.days.map(day=>`<article class="store-day${day.date===data.today?' is-today':''}"><header><div><h3>${day.name}</h3><span>${fullDate(day.date)}</span></div><span>${day.date===data.today?'Aujourd’hui · ':''}${day.entries.filter(c=>c.minutes!==null).length} quart(s)</span></header><div>${dayEntriesHTML(day,result.selected,personalUnpublished||!anyPublished)}</div></article>`).join('')}</div>`;
   document.querySelectorAll('[data-store-person]').forEach(button=>button.onclick=()=>{personId=Number(button.dataset.storePerson);render();$('#storeHeading').scrollIntoView({block:'center'});});
 }
-async function loadWeek(){
+async function loadWeek({showToday=false}={}){
   const request=++sequence,chosen=week;clear();message('Chargement de la semaine choisie…');
-  try{const result=await api('/api/store-portal/weeks/'+chosen);if(request!==sequence)return;if(result.weekStart!==chosen)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');data=result;render();message('');}
+  try{const result=await api('/api/store-portal/weeks/'+chosen);if(request!==sequence)return;if(result.weekStart!==chosen)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');data=result;render();message('');if(showToday)scrollToToday($('#storeSchedule'),$('#storeWeekBanner'));}
   catch(error){if(request===sequence)failed(error);}
 }
-async function chooseWeek(value){if(loading||!listing)return;week=value;navigation();await loadWeek();}
+async function chooseWeek(value){if(loading||!listing)return;week=value;navigation();await loadWeek({showToday:value===monday(listing.today)});}
 async function load({reset=false}={}){
   const request=++sequence;loading=true;clear();message('Actualisation du magasin…');$('#storeWeekControls').inert=true;$('#storeWeekBanner').hidden=true;
   try{
     const next=await api('/api/store-portal');if(request!==sequence)return;
+    const showToday=reset||!listing||listing.today!==next.today;
     const current=monday(next.today),allowed=[current,addDays(current,7),...next.weeks];
     if(reset||!week||!listing||monday(listing.today)!==current||!allowed.includes(week))week=current;
     listing=next;
     const chosenDepartment=$('#storeDepartment').value;
     $('#storeDepartment').innerHTML='<option value="">Tout le magasin</option>'+listing.departments.map(d=>`<option value="${e(d.key)}">${e(d.name)}</option>`).join('');
     $('#storeDepartment').value=listing.departments.some(d=>d.key===chosenDepartment)?chosenDepartment:'';
-    navigation();await loadWeek();
+    navigation();await loadWeek({showToday});
   }catch(error){if(request===sequence)failed(error);}
   finally{loading=false;$('#storeWeekControls').inert=false;}
 }
