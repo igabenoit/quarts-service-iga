@@ -1,3 +1,4 @@
+import {installSalesForecasts} from './sales-forecasts.js';
 import {installClothing} from './clothing.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {installPdfAssets} from './pdf-assets.js';
@@ -688,6 +689,8 @@ app.get("/h/:token", (request, response) => {
   response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" });
   response.redirect(302,"/horaires-departements");
 });
+
+installSalesForecasts(app,{requireManager});
 
 app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
   try {

@@ -1,5 +1,13 @@
 # Quarts Service IGA
 
+## Prévisions initiales dans les brouillons
+
+Chaque journée des brouillons Service (attribution et besoins de quarts) et des huit autres départements affiche la prévision **initiale totale du magasin**, en dollars canadiens. La correspondance se fait par date civile, du lundi au dimanche, y compris aux changements de période ou d’année. Une absence vaut « Non renseignée »; un zéro reste `0,00 $`. Les feuilles publiées et les PDF employés ne contiennent pas ces montants.
+
+La source est `https://releve-quotidien-iga.onrender.com`, via son point d’accès privé `GET /api/integrations/quarts-service/initial-sales/:weekStart`. Déployer d’abord la prise en charge de ce point d’accès dans Relevé quotidien. Dans Render, définir **la même valeur secrète aléatoire** `SCHEDULE_FORECAST_TOKEN` sur les deux services web (par exemple 32 octets générés par un gestionnaire de secrets, soit 64 caractères hexadécimaux). Ne pas réutiliser un code de connexion et ne jamais placer cette valeur dans Git, une URL ou le navigateur. Enregistrer et redéployer les deux services. La liaison n’exige aucune migration ni copie de données.
+
+Le serveur Quarts Service utilise ce secret uniquement pour lire les sept valeurs initiales. Le proxy `/api/sales-forecasts/:weekStart` reste réservé aux gestionnaires, y compris les comptes limités à un département; les sessions employé/famille n’y ont pas accès. Aucun montant révisé ou réel n’est accepté en remplacement. La liaison se désactive lorsque le secret manque; une panne n’empêche pas de travailler sur les horaires. Les montants sont chargés à l’ouverture, au changement de département/semaine et via « Actualiser les ventes », sans cache ni sauvegarde dans le brouillon.
+
 Application Web pour construire les quarts nécessaires à la caisse, à la supervision et pour les emballeurs avant l’attribution des employés.
 
 L’onglet Horaire permet d’importer une liste JSON d’employés dans la base privée, de corriger
