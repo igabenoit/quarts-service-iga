@@ -93,6 +93,7 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     // Prefix middleware authenticates before reading large request bodies. Route checks follow parsing.
     if(!req.route)return;
     const path=req.route.path;
+    if(path==='/api/sales-forecasts/:weekStart'&&req.method==='GET')return;
     if(path==='/api/departments/meta'||path==='/api/departments/people'||path==='/api/departments/people/:id')return;
     if(path.startsWith('/api/departments/')){
       let id;

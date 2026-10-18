@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import * as core from '../public/departments-core.js';
+import {createSalesForecastDisplay} from '../public/sales-forecast.js';
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 function fixture(file){
   const elements=new Map();const element=selector=>{if(!elements.has(selector)){let html='';elements.set(selector,{value:'',textContent:'',checked:false,disabled:false,hidden:false,inert:false,querySelectorAll:()=>[],querySelector:()=>element(selector+' child'),addEventListener(){},setAttribute(){},focus(){},close(){},get innerHTML(){return html;},set innerHTML(value){html=value;if(selector.endsWith('Picker'))this.value=/value="([^"]*)"/.exec(value)?.[1]||'';}});}return elements.get(selector);};
-  const context=vm.createContext({...core,e:core.escapeHTML,console,URL,URLSearchParams,setTimeout,clearTimeout,confirm:()=>true,fetch:async()=>{throw Error('unexpected fetch');},window:{addEventListener(){}},document:{body:{className:''},querySelector:element,querySelectorAll:()=>[],addEventListener(){}}});
+  const context=vm.createContext({...core,createSalesForecastDisplay:()=>createSalesForecastDisplay({root:context.document,fetchImpl:(...args)=>context.fetch(...args)}),e:core.escapeHTML,console,URL,URLSearchParams,setTimeout,clearTimeout,confirm:()=>true,fetch:async()=>{throw Error('unexpected fetch');},window:{addEventListener(){}},document:{body:{className:''},querySelector:element,querySelectorAll:()=>[],addEventListener(){}}});
   let source=readFileSync(new URL('../public/'+file,import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
   source=source.replace(/^try\{await loadMeta\(\);await loadWeek\(\);[\s\S]*$/m,'').replace(/load\(\)\.catch\(err=>status\(err.message\)\);\s*$/,'');
   vm.runInContext(source,context);

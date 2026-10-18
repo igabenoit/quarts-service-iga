@@ -12,12 +12,13 @@ test('password hashes are salted and reject incorrect or oversized credentials',
 test('individual accounts: administration, department boundaries, revocation and stale updates',async()=>{
   const f=await departmentFixture(),app=express();app.use(express.json());
   // Test-only sessions replace signature verification, which remains in server.js.
-  const readSession=req=>{try{return JSON.parse(req.headers['x-test-session']||'null');}catch{return null;}};
+  const readSession=req=>{try{const session=JSON.parse(req.headers['x-test-session']||'null');return session?.role==='manager'||session?.accountId?session:null;}catch{return null;}};
   const origin=(req,res,next)=>req.headers.origin&&req.headers.origin!=='https://same.example'?res.status(403).json({error:'origin'}):next();
   const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true,credentialSecret:'test-only-secret-for-recoverable-passwords'});
   const guard=async(req,res,next)=>{try{await access.authorize(req);next();}catch(e){res.status(e.status||500).json({error:e.message});}};
   for(const [key,handlers] of f.routes){const space=key.indexOf(' '),method=key.slice(0,space),path=key.slice(space+1);if(path.startsWith('/api/departments')||path.startsWith('/api/leave/'))app[method](path,guard,handlers.at(-1));}
-  for(const path of ['/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool'])app.get(path,guard,(_q,res)=>res.json({ok:true}));
+  for(const path of ['/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool','/api/sales-forecasts/:weekStart'])app.get(path,guard,(_q,res)=>res.json({ok:true}));
+  app.post('/api/sales-forecasts/:weekStart',guard,(_q,res)=>res.json({ok:true}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base='http://127.0.0.1:'+server.address().port;
   const admin={role:'manager'},call=async(path,{session=admin,method='GET',body,origin}={})=>{const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(session?{'x-test-session':JSON.stringify(session)}:{}),...(origin?{origin}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json(),cookie:r.headers.get('set-cookie')};};
   try{
@@ -39,6 +40,10 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/manager-accounts',{method:'POST',body})).status,409);
     const login=await call('/api/manager-login',{method:'POST',session:null,body:{login:'GERANT.TEST',password:body.password}});assert.equal(login.status,200);assert.match(login.cookie,/HttpOnly; SameSite=Strict/);assert.match(login.cookie,/Secure/);
     const session=JSON.parse(decodeURIComponent(login.cookie.split(';')[0].split('=').slice(1).join('=')));
+    assert.equal((await call('/api/sales-forecasts/2026-10-19',{session:null})).status,401);
+    assert.equal((await call('/api/sales-forecasts/2026-10-19',{session:{role:'employee'}})).status,401);
+    assert.equal((await call('/api/sales-forecasts/2026-10-19',{session})).status,200);
+    assert.equal((await call('/api/sales-forecasts/2026-10-19',{session,method:'POST'})).status,403);
     assert.equal((await call(reveal,{method:'POST'})).body.password,body.password,'successful legacy login enables recovery');
     assert.equal((await call(reveal,{method:'POST',session})).status,403);
     assert.equal((await call('/api/manager-accounts',{session})).status,403);

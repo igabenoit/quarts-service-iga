@@ -1,0 +1,11 @@
+.sales-forecast{display:flex;flex-direction:column;justify-content:center;gap:4px;min-height:64px;padding:9px 5px;margin:0 0 9px;background:#e3f4ee;border:1px solid #a4d7c6;border-top:3px solid #237658;border-radius:7px;color:#174f3c;line-height:1.25;text-align:center;font-variant-numeric:tabular-nums}
+.sales-forecast small{display:block;font-size:.67rem;font-weight:600;color:#32614f}
+.sales-forecast strong{display:block;font-size:.94rem;font-weight:800;color:#174f3c;overflow-wrap:anywhere}
+.sales-forecast.is-pending strong{font-size:.74rem;font-weight:600}
+.sales-forecast-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin:12px 0;color:#4b6259;font-size:.8rem}
+.sales-forecast-toolbar a{color:#23674f}
+.sales-forecast-toolbar button{padding:6px 10px;font-size:.75rem}
+.editor-table thead th:has(.sales-forecast){padding:5px 4px 10px;vertical-align:top}
+.day-column>.sales-forecast{margin:6px}
+.schedule-day>.sales-forecast{margin-top:0}
+@media print{.sales-forecast,.sales-forecast-toolbar{display:none!important}}
