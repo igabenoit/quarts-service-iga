@@ -1,5 +1,6 @@
 import {escapeHTML as e,addDays,monday,today,hoursLabel} from './departments-core.js';
 import {availableWeeks,selectedWeek,weekInfo,weekRange,fullDate,personalDays} from './portal-weeks.js';
+import {scrollToToday} from './portal-current-day.js';
 const $=s=>document.querySelector(s);
 let listing=null,week=null,listSequence=0,scheduleSequence=0,loading=false;
 const status=text=>$('#status').textContent=text;
@@ -37,14 +38,15 @@ async function load({reset=false}={}){
   $('#personalSchedule').innerHTML='';$('#weekControls').inert=true;$('#weekBanner').hidden=true;status('Actualisation des horaires…');
   try{
     const next=await api('/api/leave/department-schedules');if(sequence!==listSequence)return;
-    next.today=next.today||today();week=selectedWeek(week,next,listing?.today,reset);listing=next;
+    next.today=next.today||today();const showToday=reset||!listing||listing.today!==next.today;
+    week=selectedWeek(week,next,listing?.today,reset);listing=next;
     $('#accessForm').hidden=true;$('#staffContent').hidden=false;$('#weekBanner').hidden=false;
-    renderNavigation();await loadSchedule();
+    renderNavigation();await loadSchedule({showToday});
   }catch(error){if(sequence===listSequence)failed(error);}
   finally{if(sequence===listSequence){loading=false;$('#weekControls').inert=false;}}
 }
-async function chooseWeek(value){if(loading||!listing)return;week=value;renderNavigation();await loadSchedule();}
-async function loadSchedule(){
+async function chooseWeek(value){if(loading||!listing)return;week=value;renderNavigation();await loadSchedule({showToday:value===monday(listing.today)});}
+async function loadSchedule({showToday=false}={}){
   const sequence=++scheduleSequence,chosen=week;
   $('#personalSchedule').innerHTML='';status('Chargement de la semaine choisie…');
   const sources=[...listing.schedules.filter(s=>s.weekStart===chosen).map(s=>({kind:'department',path:`/api/leave/department-schedules/${s.departmentId}/${chosen}`})),...listing.service.filter(s=>s.weekStart===chosen).map(s=>({kind:'service',path:'/api/public-schedules/'+encodeURIComponent(s.path.split('/').pop())}))];
@@ -55,6 +57,7 @@ async function loadSchedule(){
     const days=personalDays(chosen,results),total=days.flatMap(d=>d.entries).reduce((n,c)=>n+(c.minutes||0),0);
     $('#personalSchedule').innerHTML=`<p class="week-total"><strong>${hoursLabel(total)} h planifiées</strong> · Pauses déduites · Horaires publiés seulement</p><div class="personal-days">${days.map(day=>`<article class="portal-day${day.date===listing.today?' is-today':''}"><header><h3>${day.name}</h3><span>${fullDate(day.date)}</span>${day.date===listing.today?'<b class="today-tag">Aujourd’hui</b>':''}</header><div>${day.entries.map(c=>`<div class="portal-shift"><span class="department-tag">${e(c.department)}</span><strong>${e(c.hours)}</strong>${c.detail?`<span>${e(c.detail)}</span>`:''}${c.minutes!==null?`<small>${hoursLabel(c.minutes)} h</small>`:''}</div>`).join('')||'<p class="no-shift">Aucun quart inscrit dans les horaires publiés.</p>'}${day.birthday?'<p class="birthday-greeting">Bonne fête !</p>':''}</div></article>`).join('')}</div><p class="muted">+1 indique une fin le lendemain. Le quart figure au jour de son début.</p><p class="muted">Actualisé à ${new Date().toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})}. En cas de question, communique avec ton gérant.</p>`;
     status('');
+    if(showToday)scrollToToday($('#personalSchedule'),$('#weekBanner'));
     for(const r of results.filter(r=>r.kind==='service'))fetch(r.path+'/views',{method:'POST'}).catch(()=>{});
   }catch(error){if(sequence===scheduleSequence)failed(error);}
 }
