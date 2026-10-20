@@ -1,3 +1,4 @@
+import {createPushControls} from './service-chat-push.js';
 const $=s=>document.querySelector(s);
 const mode=new URLSearchParams(location.search).get('mode')==='manager'?'manager':'employee';
 let user=null,busy=false,sending=false,first=null,last=null,pending=null,epoch=0;
@@ -9,8 +10,10 @@ async function api(path,options={}){
   return data;
 }
 const json=body=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const pushControls=createPushControls({api});
 const atBottom=()=>box.scrollHeight-box.scrollTop-box.clientHeight<70;
 function clearChat(){
+  pushControls.reset();
   epoch++;user=null;seen.clear();first=last=null;pending=null;
   box.replaceChildren();$('#pins').replaceChildren();$('#body').value='';$('#photo').value='';
   $('#chat').hidden=true;$('#pinned').hidden=true;$('#older').hidden=true;$('#newMessages').hidden=true;
@@ -69,6 +72,7 @@ async function refresh(initial=false){
     if(generation!==epoch)return;
     if(user&&user.key!==meta.user.key){clearChat();location.reload();return;}
     user=meta.user;$('#identity').textContent=user.name+(user.manager?' · Gestionnaire':'');$('#login').hidden=true;$('#chat').hidden=false;
+    pushControls.refresh();
     const bottom=initial||atBottom();
     let more=true,received=0;
     while(more){

@@ -28,7 +28,7 @@ export function chatPayload(input={}){
   return {body,photo,requestId};
 }
 
-export async function installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin}){
+export async function installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,pushFactory}){
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_messages(
     id BIGSERIAL PRIMARY KEY,author_key TEXT NOT NULL,author_name TEXT NOT NULL,
     request_id UUID NOT NULL,body TEXT NOT NULL CHECK(length(body)<=4000),photo TEXT,
@@ -37,6 +37,7 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     CREATE INDEX IF NOT EXISTS schedule_service_messages_author ON schedule_service_messages(author_key,created_at);
     CREATE TABLE IF NOT EXISTS schedule_service_reads(
     reader_key TEXT PRIMARY KEY,last_id BIGINT NOT NULL DEFAULT 0);`);
+  const push=pushFactory?await pushFactory(pool):null;
   async function identity(req){
     const employee=req.query.mode==='manager'?null:await employeePortal.identity(req);
     if(employee){
@@ -64,6 +65,7 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
   const endpoint=fn=>async(req,res)=>{
     try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'Impossible de charger ou enregistrer la discussion. Réessaie.'});}
   };
+  push?.installRoutes(app,{auth,sameOrigin});
   app.get('/api/service-chat',auth,endpoint(async(req,res)=>{
     const unread=(await pool.query(`SELECT count(*)::int AS count FROM schedule_service_messages
       WHERE id>COALESCE((SELECT last_id FROM schedule_service_reads WHERE reader_key=$1),0) AND author_key<>$1`,[req.chatUser.key])).rows[0].count;
@@ -104,7 +106,8 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
       if(recent>=20)fail('Trop de messages. Attends une minute avant de réessayer.',429);
       const row=(await client.query(`INSERT INTO schedule_service_messages(author_key,author_name,request_id,body,photo)
         VALUES($1,$2,$3,$4,$5) RETURNING ${fields}`,[req.chatUser.key,req.chatUser.name,payload.requestId,payload.body,payload.photo])).rows[0];
-      await client.query('COMMIT');res.status(201).json(row);
+      if(push)await push.enqueue(client,row);
+      await client.query('COMMIT');res.status(201).json(row);push?.kick();
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }));
   app.post('/api/service-chat/read',auth,sameOrigin,endpoint(async(req,res)=>{
@@ -128,4 +131,6 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }));
   app.use('/api/service-chat',(error,_req,res,_next)=>res.status(error.type==='entity.too.large'?413:400).json({error:'Le message ou la photo est trop volumineux ou invalide.'}));
+  push?.kick();
+  return push;
 }

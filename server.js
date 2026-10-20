@@ -1,5 +1,6 @@
 import {installSalesForecasts} from './sales-forecasts.js';
 import {installServiceChat} from './service-chat.js';
+import {createServiceChatPush} from './service-chat-push.js';
 import {installClothing} from './clothing.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {installPdfAssets} from './pdf-assets.js';
@@ -157,6 +158,12 @@ app.set("trust proxy", 1);
 app.use('/api/departments/photos',requireManager,sameOrigin,express.json({limit:'12mb'}));
 app.use('/api/departments/document-mail',requireManager,sameOrigin,express.json({limit:'13mb'}));
 app.use(express.json({ limit: "250kb" }));
+let chatPush=null;
+app.use(['/api/logout','/api/employee-portal/logout'],sameOrigin,async(req,res,next)=>{
+  if(req.method!=='POST')return next();
+  try{await chatPush?.logout(req,res);next();}
+  catch{res.status(503).json({error:'Impossible de désactiver les notifications de cet appareil. Réessaie avant de te déconnecter.'});}
+});
 app.use((_request, response, next) => {
   response.set({
     "X-Content-Type-Options": "nosniff",
@@ -573,7 +580,8 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
-await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin});
+chatPush=await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,
+  pushFactory:pool=>createServiceChatPush(pool,{secret:sessionSecret})});
 await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 await installUndo(app,pool,{requireManager,sameOrigin});
