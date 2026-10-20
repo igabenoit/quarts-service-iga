@@ -103,6 +103,19 @@ test('push subscription, durable queue, revocation, retries and private payloads
     await f.pool.query('UPDATE schedule_employees SET departed_at=clock_timestamp() WHERE id=$1',[identities[2].employee]);
     assert.equal(await push.credential(identities[2].key),null);
     await call('/logout',2,{method:'POST'});assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM schedule_service_push_subscriptions')).rows[0].n,0);
+    // A guest outside Service receives alerts only while their explicit grant is active.
+    await f.pool.query('UPDATE schedule_store_people SET service_employee_id=NULL WHERE id=$1',[identities[2].person]);
+    assert.equal(await push.credential(identities[2].key),null);
+    await f.pool.query("INSERT INTO schedule_service_chat_guests VALUES($1,clock_timestamp()+interval '7 days')",[identities[2].person]);
+    assert.ok(await push.credential(identities[2].key));
+    assert.equal((await call('/api/service-chat/push',2,{method:'POST',body:one})).status,200);
+    sent.length=0;
+    await call('/api/service-chat/messages',0,{method:'POST',body:{body:'Guest delivery',requestId:crypto.randomUUID()}});
+    await push.drain();assert.equal(sent.length,1);
+    await call('/api/service-chat/messages',0,{method:'POST',body:{body:'Expired guest',requestId:crypto.randomUUID()}});
+    await f.pool.query("UPDATE schedule_service_chat_guests SET expires_at=clock_timestamp()-interval '1 second'");
+    await push.drain();assert.equal(sent.length,1);assert.equal(await jobs(),0);
+    assert.equal(await push.credential(identities[2].key),null);
   }finally{push?.stop();if(server)await new Promise(resolve=>server.close(resolve));await f.db.close();}
 });
 

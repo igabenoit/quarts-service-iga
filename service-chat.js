@@ -1,4 +1,5 @@
 import express from 'express';
+import {ensureChatGuests,isChatGuest} from './service-chat-guests.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const id=value=>{
@@ -29,6 +30,7 @@ export function chatPayload(input={}){
 }
 
 export async function installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,pushFactory}){
+  await ensureChatGuests(pool);
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_messages(
     id BIGSERIAL PRIMARY KEY,author_key TEXT NOT NULL,author_name TEXT NOT NULL,
     request_id UUID NOT NULL,body TEXT NOT NULL CHECK(length(body)<=4000),photo TEXT,
@@ -49,7 +51,7 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
             SELECT 1 FROM schedule_store_memberships m JOIN schedule_leave_departments d ON d.id=m.department_id
             WHERE m.person_id=p.id AND d.code='service' AND d.active=TRUE))) LIMIT 1`,
       [employee.portalPersonIds||[employee.id]])).rows.length;
-      if(!member)fail('La discussion est réservée à l’équipe du Service.',403);
+      if(!member&&!await isChatGuest(pool,employee.id))fail('La discussion est réservée à l’équipe du Service.',403);
       return {key:`employee:${employee.id}`,name:employee.name,manager:false};
     }
     const manager=await managerAccess.identity(req);
@@ -65,6 +67,38 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
   const endpoint=fn=>async(req,res)=>{
     try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'Impossible de charger ou enregistrer la discussion. Réessaie.'});}
   };
+  const admin=async(req,res,next)=>{
+    res.set('Cache-Control','no-store');
+    try{
+      const manager=await managerAccess.identity(req);
+      if(!manager)fail('Connexion administrateur requise.',401);
+      if(manager.kind!=='admin')fail('Accès réservé à l’administration.',403);
+      next();
+    }catch(error){res.status(error.status||500).json({error:error.status?error.message:'Accès indisponible.'});}
+  };
+  app.get('/api/service-chat/guests',admin,endpoint(async(_req,res)=>{
+    const people=(await pool.query(`SELECT p.id::text,p.name,g.expires_at AS "expiresAt"
+      FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
+      LEFT JOIN schedule_service_chat_guests g ON g.person_id=p.id
+      WHERE p.employee_code IS NOT NULL AND
+      ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
+      ORDER BY p.name,p.id`)).rows;
+    res.json({people});
+  }));
+  app.put('/api/service-chat/guests/:id',admin,sameOrigin,endpoint(async(req,res)=>{
+    const personId=id(req.params.id);
+    if(typeof req.body?.enabled!=='boolean')fail('Choisis si cet accès est autorisé.');
+    if(req.body.enabled){
+      const result=await pool.query(`INSERT INTO schedule_service_chat_guests(person_id,expires_at)
+        SELECT p.id,clock_timestamp()+interval '7 days' FROM schedule_store_people p
+        LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
+        WHERE p.id=$1 AND p.employee_code IS NOT NULL AND
+        ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
+        ON CONFLICT(person_id) DO UPDATE SET expires_at=excluded.expires_at RETURNING person_id`,[personId]);
+      if(!result.rows.length)fail('Fiche active avec code personnel introuvable.',404);
+    }else await pool.query('DELETE FROM schedule_service_chat_guests WHERE person_id=$1',[personId]);
+    res.json({ok:true});
+  }));
   push?.installRoutes(app,{auth,sameOrigin});
   app.get('/api/service-chat',auth,endpoint(async(req,res)=>{
     const unread=(await pool.query(`SELECT count(*)::int AS count FROM schedule_service_messages
