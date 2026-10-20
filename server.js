@@ -1,4 +1,5 @@
 import {installSalesForecasts} from './sales-forecasts.js';
+import {installServiceChat} from './service-chat.js';
 import {installClothing} from './clothing.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {installPdfAssets} from './pdf-assets.js';
@@ -572,6 +573,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
+await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin});
 await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
 await installUndo(app,pool,{requireManager,sameOrigin});
