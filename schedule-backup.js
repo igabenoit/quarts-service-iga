@@ -4,7 +4,7 @@ import {profileAt,historyOf} from './availability-rules.js';
 
 // The caller holds the scheduling advisory lock, inside the mutation transaction.
 export async function readSchedule(client, weekStart) {
-  const shifts=(await client.query(`SELECT id, area, role, day_index, start_minute, end_minute, break_minutes
+  const shifts=(await client.query(`SELECT id, area, role, day_index, start_minute, end_minute, break_minutes, absence
     FROM schedule_shifts WHERE week_start=$1 ORDER BY id`,[weekStart])).rows;
   const assignments=(await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a
     JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 ORDER BY a.shift_id`,[weekStart])).rows;
@@ -48,7 +48,7 @@ export function restorationPreview(backup,current,{weekStart,employees,leaves,ti
     if(historyOf(employee).length&&!profileAt(employee,addDays(weekStart,s.day_index)).availability[s.day_index]?.some(([a,b])=>a<=s.start_minute&&b>=s.end_minute))
       issues.push(`${employee.name} n’est plus disponible pour ce quart le ${addDays(weekStart,s.day_index)}. Révisez cette disponibilité avant de restaurer son affectation.`);
     const periods=leaves.filter(r=>String(r.employee_id)===String(a.employee_id)).flatMap(r=>r.periods);
-    if(conflictsWithLeave({weekStart,dayIndex:s.day_index,startMinute:s.start_minute,endMinute:s.end_minute},periods)
+    if(conflictsWithLeave({weekStart,dayIndex:s.day_index,startMinute:s.start_minute,endMinute:s.end_minute,absence:s.absence},periods)
       ||timeOff.some(r=>String(r.employee_id)===String(a.employee_id)&&r.day_index===s.day_index))
       issues.push(`${employee.name} a un congé le ${addDays(weekStart,s.day_index)}. Révisez ce congé avant de restaurer son affectation.`);
   }

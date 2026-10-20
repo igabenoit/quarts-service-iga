@@ -1,3 +1,4 @@
+import {workingIntervals} from './public/shift-absence.js';
 import {addDays,weekOf,localDate,earliestLeaveDate,deadlineForDate,isBeforeDeadline} from './public/leave-calendar.js';
 export {addDays,weekOf,localDate,earliestLeaveDate} from './public/leave-calendar.js';
 export const LATE_MESSAGE = 'Votre demande est hors délai. Elle devait être reçue avant 9 h le jeudi précédant la semaine du congé. Veuillez vous adresser à votre gérante.';
@@ -51,7 +52,7 @@ export function uncoveredLeavePeriods(periods, approved) {
 export function conflictsWithLeave(shift, periods = []) {
   if (!shift.weekStart) return false;
   const date = addDays(shift.weekStart, shift.dayIndex);
-  return periods.some(p=>p.date===date && p.startMinute<shift.endMinute && p.endMinute>shift.startMinute);
+  return periods.some(p=>p.date===date && workingIntervals(shift.startMinute,shift.endMinute,shift.absence).some(([a,b])=>p.startMinute<b&&p.endMinute>a));
 }
 export function leaveStatistics(rows) {
   const counts = {total:rows.length,pending:0,conditional:0,approved:0,refused:0,cancelled:0,late:0,fullDays:0,partialHours:0};

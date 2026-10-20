@@ -164,3 +164,5 @@
 #permanentAvailabilityWarnings:empty{display:none}#permanentAvailabilityWarnings:not(:empty){padding:16px;margin:16px 0;background:#fff0d5;border:1px solid #d2a854;border-radius:10px}#permanentAvailabilityWarnings li{margin:6px 0}#employeeAvailabilityStatus{font-size:.9rem;line-height:1.5;color:#5b655e}
 
 .plano-role{display:block;font-size:.8em;font-weight:400}
+
+.absence-fields{grid-column:1/-1;border:1px solid #b7cbc3;border-radius:10px;padding:12px}.absence-fields label{display:block;margin:8px 0}.shift-absence{display:block;font-weight:600;color:#784317;white-space:normal}

@@ -1,3 +1,4 @@
+import {normalizeAbsence,absenceDeduction,absenceLabel} from './shift-absence.js';
 export const PRINT_ROW_CAPACITY=14;
 export const DAY_NAMES=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 export const DEPARTMENT_STYLES=[
@@ -90,11 +91,11 @@ export function automaticBreakMinutes(start,end,post){
 // Nights saved with the former automatic hour now use the corrected half-hour.
 // Explicit overrides are retained, including an intentionally entered 60 minutes.
 export const cellBreakMinutes=c=>!c.breakOverride&&c.breakMinutes===60&&isNightShift(c.start,c.end,c.post)?automaticBreakMinutes(c.start,c.end,c.post):c.breakMinutes??0;
-export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start-cellBreakMinutes(c)):0;
+export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start-cellBreakMinutes(c)-absenceDeduction(c.absence,cellBreakMinutes(c))):0;
 export const departmentLabel=key=>key==='service'?'Service':DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
-export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',transferLabel(c)].filter(Boolean).join(' · ');
+export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
 export const shiftAssignment=(c,key)=>c.buffetAllocation?[c.buffetAllocation.pam&&`PAM${c.buffetAllocation.charcuterie?' '+hoursLabel(c.buffetAllocation.pam)+' h':''}`,c.buffetAllocation.charcuterie&&`Charcuterie${c.buffetAllocation.pam?' '+hoursLabel(c.buffetAllocation.charcuterie)+' h':''}`].filter(Boolean).join(' / ')+' · Buffet':[c.workDepartment==='pam'||!c.workDepartment&&key==='pam'?'PAM':departmentLabel(c.workDepartment||key),c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
@@ -110,10 +111,12 @@ export function normalizeCell(value){
     const end=Number.isInteger(c.end)&&c.end>=0&&c.end<c.start?c.end+1440:c.end;
     if(!Number.isInteger(c.start)||!Number.isInteger(end)||c.start<0||c.start>=1440||end<=c.start||end-c.start>1440||!Number.isInteger(c.breakMinutes??0)||(c.breakMinutes??0)<0||(c.breakMinutes??0)>=end-c.start)throw Error('Vérifiez le début, la fin et la pause du quart.');
     if(c.paidMinutesOverride!==undefined&&(!Number.isInteger(c.paidMinutesOverride)||c.paidMinutesOverride<0||c.paidMinutesOverride>1440))throw Error('Les heures payées doivent être comprises entre 0 et 24 h, à la minute près.');
+    const absence=normalizeAbsence(c.absence,c.start,end,cellBreakMinutes({...c,end}));
+    if(absence&&c.paidMinutesOverride!==undefined)throw Error('Retirez les heures payées convenues pour calculer automatiquement cette absence.');
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post)&&!Object.hasOwn(BAKERY_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,start:c.start,end,...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    return {kind,start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};
@@ -190,7 +193,7 @@ export function sheetHTML({department,weekStart,people,draft,blank=false,related
       return [...(isTimedCell(c)?[{...c,printDepartment:c.workDepartment||department.key}]:extra.length?[]:[c]),...extra].sort((a,b)=>(a.start??0)-(b.start??0));
     });
     const longPost=row.shared&&row.printDays.some(day=>day.some(c=>isTimedCell(c)&&shiftAssignment(c,c.printDepartment||department.key).length>20));
-    row.printUnits=Math.max(longPost?2:1,...row.printDays.map(day=>day.length));
+    row.printUnits=Math.max(longPost?2:1,...row.printDays.map(day=>day.reduce((n,c)=>n+(c.absence?3:1),0)));
     row.allMinutes=row.printDays.flat().reduce((n,c)=>n+cellMinutes(c),0);
   }
   const printDay=(r,c,d)=>{

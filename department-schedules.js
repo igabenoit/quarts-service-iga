@@ -1,3 +1,4 @@
+import {workingIntervals} from './public/shift-absence.js';
 import {installDepartmentHoursSummary} from './department-hours-summary.js';
 import {prepareSharedDraft} from './public/department-buffet.js';
 import {installDepartmentMail} from './department-mail.js';
@@ -114,7 +115,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
         const c=row.cells[day];if(!isTimedCell(c))continue;
         const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
         for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)&&[current.department.key,c.workDepartment,c.sourceDepartment].includes(l.key)))for(const period of leave.effective_periods||leave.periods){
-          if(overlaps(start,end,minute(period.date,period.startMinute),minute(period.date,period.endMinute)))warnings.push(p.name+' : congé approuvé à vérifier le '+period.date+'.');
+          if(workingIntervals(c.start,c.end,c.absence).some(([a,b])=>overlaps(minute(date,a),minute(date,b),minute(period.date,period.startMinute),minute(period.date,period.endMinute))))warnings.push(p.name+' : congé approuvé à vérifier le '+period.date+'.');
         }
         if(p.serviceEmployeeId&&assignments.some(a=>Number(a.employee_id)===p.serviceEmployeeId&&overlaps(start,end,minute(a.week_start,a.day_index*1440+a.start_minute),minute(a.week_start,a.day_index*1440+a.end_minute))))warnings.push(p.name+' : chevauchement avec un quart du Service, le '+date+'.');
       }

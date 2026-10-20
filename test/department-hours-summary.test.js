@@ -8,6 +8,7 @@ test('productive hours exclude kitchen and Service includes a separate orders su
 const db=new PGlite();try{const pool={async query(sql,args){const r=args?await db.query(sql,args):(await db.exec(sql)).at(-1)||{rows:[]};return {...r,rowCount:r.affectedRows??r.rows.length};}};
 await pool.query('CREATE TABLE schedule_leave_departments(id BIGINT PRIMARY KEY); INSERT INTO schedule_leave_departments VALUES(1),(2),(3); CREATE TABLE schedule_shifts(week_start DATE,role TEXT,start_minute INTEGER,end_minute INTEGER);');
 await pool.query("INSERT INTO schedule_shifts VALUES('2026-10-19','cashier',480,1020),('2026-10-19','supervisor',480,960),('2026-10-19','packer',480,720),('2026-10-19','manager',480,1020),('2026-10-19','orders',480,960),('2026-10-19','support',480,1020)");
+await pool.query('ALTER TABLE schedule_shifts ADD COLUMN absence JSONB');
 const people=[{id:1,name:'Sylvain Malo'}];const data={department:{id:2,key:'viande',name:'Viande'},weekStart:'2026-10-19',revision:4,people,draft:{rows:[{personId:1,cells:[{kind:'shift',start:480,end:900,breakMinutes:0,paidMinutesOverride:480},...Array.from({length:6},blankCell)]}]}};
 const routes=new Map(),app={};for(const method of ['get','put'])app[method]=(path,...handlers)=>routes.set(method,handlers.at(-1));
 const deps={1:{id:1,key:'service',name:'Service'},2:data.department,3:{id:3,key:'administration',name:'Administration'}};

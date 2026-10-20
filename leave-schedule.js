@@ -5,7 +5,7 @@ import {conflictsWithLeave} from './leave-rules.js';
 export async function releaseLeaveConflicts(client, {weekStart=null, requestId=null}={}) {
   if (!weekStart && !requestId) throw new Error('Une semaine ou une demande est requise.');
   const candidates=(await client.query(`SELECT s.id, s.week_start, s.day_index,
-    s.start_minute, s.end_minute, a.employee_id, r.id AS request_id, COALESCE(r.effective_periods, r.periods) AS periods
+    s.start_minute, s.end_minute, s.absence, a.employee_id, r.id AS request_id, COALESCE(r.effective_periods, r.periods) AS periods
     FROM schedule_assignments a
     JOIN schedule_shifts s ON s.id=a.shift_id
     JOIN schedule_leave_requests r ON r.employee_id=a.employee_id
@@ -17,7 +17,7 @@ export async function releaseLeaveConflicts(client, {weekStart=null, requestId=n
   const conflicts=new Map();
   for (const row of candidates) {
     const shift={weekStart:typeof row.week_start==='string'?row.week_start.slice(0,10):row.week_start.toISOString().slice(0,10),
-      dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute)};
+      absence:row.absence,dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute)};
     if(conflictsWithLeave(shift,row.periods)) conflicts.set(String(row.id),{...shift,
       shiftId:Number(row.id),employeeId:Number(row.employee_id),requestId:Number(row.request_id)});
   }
