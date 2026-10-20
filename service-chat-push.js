@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import webpush from 'web-push';
+import {ensureChatGuests} from './service-chat-guests.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -34,6 +35,7 @@ const validDevice=value=>typeof value==='string'&&/^[0-9a-f-]{36}$/.test(value);
 
 export async function createServiceChatPush(pool,{secret,send=webpush.sendNotification.bind(webpush),subject='https://quarts-service-iga.onrender.com',startWorker=true}={}){
   if(!secret)throw Error('SESSION_SECRET requis pour les notifications.');
+  await ensureChatGuests(pool);
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_push_config(
     id INTEGER PRIMARY KEY CHECK(id=1),public_key TEXT NOT NULL,private_key_encrypted TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS schedule_service_push_subscriptions(
@@ -68,11 +70,12 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
       LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
       WHERE p.id=$1 AND p.employee_code IS NOT NULL AND
       ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
-      AND EXISTS(SELECT 1 FROM schedule_store_people m LEFT JOIN schedule_employees se ON se.id=m.service_employee_id
+      AND (EXISTS(SELECT 1 FROM schedule_service_chat_guests g WHERE g.person_id=p.id AND g.expires_at>clock_timestamp())
+      OR EXISTS(SELECT 1 FROM schedule_store_people m LEFT JOIN schedule_employees se ON se.id=m.service_employee_id
         WHERE (m.id=p.id OR (m.portal_person_id=p.id AND m.active AND m.service_employee_id IS NULL AND m.employee_code IS NULL))
         AND ((se.active AND se.departed_at IS NULL) OR (m.service_employee_id IS NULL AND m.active AND EXISTS(
           SELECT 1 FROM schedule_store_memberships sm JOIN schedule_leave_departments d ON d.id=sm.department_id
-          WHERE sm.person_id=m.id AND d.code='service' AND d.active))))`,[id])).rows[0];
+          WHERE sm.person_id=m.id AND d.code='service' AND d.active)))))`,[id])).rows[0];
     return row?fingerprint(owner+':'+row.employee_code):null;
   }
   function cookie(res,id,maxAge=31536000){

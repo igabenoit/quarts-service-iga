@@ -35,3 +35,6 @@ Références : [Web Push sur iOS/iPadOS](https://webkit.org/blog/13878/web-push-
 Aucun courriel automatique, message privé, groupe d’un autre département, modification ou suppression de message n’est ajouté.
 
 Les photos augmentent la taille de la base; prévoir le suivi du stockage et une politique de conservation avant un usage prolongé. Les messages et photos restent privés à la discussion mais sont visibles par tous les membres du Service et ses gestionnaires.
+
+## Accès de test hors Service
+Depuis Gestion des accès, l’administrateur peut sélectionner une fiche active avec code personnel et autoriser la discussion pour sept jours. La personne utilise son code habituel sur /discussion. Cet accès inclut l’historique, les photos et les notifications, sans droits de gestion ni changement de département. Le retrait ou l’expiration bloque les requêtes suivantes et les notifications en attente. L’activation doit être faite par l’administrateur sur la fiche voulue; aucun nom n’est autorisé automatiquement par le code.
