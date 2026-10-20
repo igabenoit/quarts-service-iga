@@ -12,9 +12,9 @@
   const employeeRow = ({ shift, employee }) => {
     const minutes = shift.endMinute - shift.startMinute;
     const pauses = minutes >= 360 ? 2 : minutes >= 180 ? 1 : 0;
-    const meal = minutes >= 480;
+    const meal = minutes >= 480 && !shift.absence?.includesMeal;
     const rowClass = employee ? (["manager","supervisor"].includes(employee.role) || ["manager","supervisor"].includes(shift.role) ? ' class="plano-supervisor"' : "") : ' class="plano-unfilled"';
-    return `<tr${rowClass}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name)+(employee.role==='manager'?'<small class="plano-role">Gérante</small>':'') : "&nbsp;"}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
+    return `<tr${rowClass}><th scope="row" class="plano-name">${employee ? escapeHtml(employee.name)+(employee.role==='manager'?'<small class="plano-role">Gérante</small>':'') : "&nbsp;"}${shift.absence?`<small>Absence à ses frais ${timeText(shift.absence.start)}–${timeText(shift.absence.end)}${shift.absence.includesMeal?" (repas compris)":""}</small>`:""}</th><td class="plano-time">${timeText(shift.startMinute)}</td><td class="plano-time">${timeText(shift.endMinute)}</td>${slot(pauses >= 1)}${slot(meal)}${slot(pauses >= 2)}</tr>`;
   };
 
   window.createPlanogramPages = ({ weekStart, shifts, assignments, employees }) => {

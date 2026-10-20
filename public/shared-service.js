@@ -7,7 +7,7 @@ export function serviceWeekProjection(shifts,people,departmentId,{published=fals
   for(const s of shifts){
     const person=people.find(p=>p.serviceEmployeeId===Number(s.employee_id));if(!person)continue;
     const cells=Array.from({length:7},blankCell),start=Number(s.start_minute),end=Number(s.end_minute);
-    cells[Number(s.day_index)]={kind:'shift',start,end,breakMinutes:serviceShiftTiming(start,end).breakMinutes,paidMinutesOverride:serviceShiftTiming(start,end).paidMinutes,note:''};
+    cells[Number(s.day_index)]={kind:'shift',start,end,breakMinutes:serviceShiftTiming(start,end).breakMinutes,...(s.absence?{absence:s.absence}:{paidMinutesOverride:serviceShiftTiming(start,end).paidMinutes}),note:''};
     rows.push({personId:person.id,cells});
   }
   return {key:'service',department_id:departmentId,draft:{rows},published:published?{rows}:null,published_at:publishedAt};

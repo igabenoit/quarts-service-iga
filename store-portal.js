@@ -33,14 +33,14 @@ export function storePeople(weekStart,people,departments,results){
 
 export function installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek}){
   async function serviceResult(start){
-    const records=(await pool.query(`SELECT e.id,e.name,e.role,s.day_index,s.start_minute,s.end_minute,s.role AS shift_role
+    const records=(await pool.query(`SELECT e.id,e.name,e.role,s.day_index,s.start_minute,s.end_minute,s.absence,s.role AS shift_role
       FROM schedule_employees e LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN (SELECT id FROM schedule_shifts WHERE week_start=$1)
       LEFT JOIN schedule_shifts s ON s.id=a.shift_id WHERE e.active=TRUE AND e.departed_at IS NULL ORDER BY e.name,s.day_index,s.start_minute`,[start])).rows;
     const employees=new Map();
     for(const row of records){
       const id=Number(row.id);
       if(!employees.has(id))employees.set(id,{id,name:row.name,role:row.role,shifts:[]});
-      if(row.day_index!==null)employees.get(id).shifts.push({dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute)),role:row.shift_role});
+      if(row.day_index!==null)employees.get(id).shifts.push({dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),role:row.shift_role});
     }
     return {kind:'service',data:{weekStart:start,employees:[...employees.values()]}};
   }

@@ -61,6 +61,7 @@ function openCell(personId,day){
   $('#cellTitle').textContent=`${person.name} · ${DAY_NAMES[day]}`;$('#cellAvailability').textContent='Disponibilité : '+(availabilityCode(person.availability[day])||'Non renseignée');
   $('#cellOriginal').hidden=cell.kind!=='review';$('#cellOriginal').textContent='Lecture à vérifier sur la photo : '+cell.note;
   $('#cellKind').value=['blank','review','training','buffet','kitchen'].includes(cell.kind)?'shift':cell.kind;$('#cellTraining').checked=cell.kind==='training';$('#cellWorkDepartment').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<option value="${e(d.key)}">${e(d.name)}${d.id===selectedDepartment?' (cet horaire)':''}</option>`).join('');$('#cellWorkDepartment').value=cell.workDepartment||current.department.key;updatePosts(assignmentPost(cell)||(['buffet','kitchen'].includes(cell.kind)?cell.kind:''));$('#cellStart').value=cell.start===null?'':quickTimeLabel(cell.start);$('#cellEnd').value=cell.end===null?'':quickTimeLabel(cell.end);
+  $('#cellAbsenceStart').value=cell.absence?timeLabel(cell.absence.start%1440):'';$('#cellAbsenceEnd').value=cell.absence?timeLabel(cell.absence.end%1440):'';$('#cellAbsenceMeal').value=cell.absence?.includesMeal?'included':'extra';
   $('#cellPaidHours').value=isTimedCell(cell)&&cell.paidMinutesOverride!==undefined?cell.paidMinutesOverride/60:'';
   $('#cellBreak').value=!isTimedCell(cell)||!cell.breakOverride&&cellBreakMinutes(cell)===automaticBreakMinutes(cell.start,cell.end,cell.post)?'':cellBreakMinutes(cell);$('#cellNote').value=cell.kind==='review'||isTimedCell(cell)?'':cell.note;$('#cellError').textContent='';updateCellKind();$('#cellDialog').showModal();if($('#cellKind').value==='shift'){$('#cellStart').focus();$('#cellStart').select();}
 }
@@ -74,9 +75,15 @@ let transferSource;
 function openTransfer(item,day){transferSource=item;$('#transferDescription').textContent=departmentLabel(item.sourceDepartment)+' · '+DAY_NAMES[item.day]+'. Le quart reçu se modifie dans cet horaire d’origine. Ses heures sont comptées uniquement en '+current.department.name+'.';$('#transferDialog').showModal();}
 $('#openTransferSource').onclick=async()=>{if(!mayLeave())return;$('#transferDialog').close();copiedShift=null;try{await loadWeek({departmentId:transferSource.sourceDepartmentId});}catch(err){message(err.message);}};
 $('#cellForm').onsubmit=event=>{event.preventDefault();try{saveCellForm();}catch(err){$('#cellError').textContent=err.message;}};
+function readCellAbsence(times){
+  const a=$('#cellAbsenceStart').value,b=$('#cellAbsenceEnd').value;if(!a&&!b)return null;
+  if(!a||!b)throw Error('Indiquez le début et la fin de l’absence.');
+  const minute=v=>{const [h,m]=v.split(':').map(Number);const n=h*60+m;return n<times.start&&times.end>1440?n+1440:n;};
+  return {start:minute(a),end:minute(b),includesMeal:$('#cellAbsenceMeal').value==='included'};
+}
 function cellFromForm(){
   const kind=$('#cellKind').value==='shift'?($('#cellTraining').checked?'training':Object.hasOwn(KITCHEN_POSTS,$('#cellPost').value)?'kitchen':['buffet','kitchen'].includes($('#cellPost').value)?$('#cellPost').value:'shift'):$('#cellKind').value,times=isTimedCell({kind})?parseShiftTimes($('#cellStart').value,$('#cellEnd').value):{};
-  return validateAssignment(normalizeCell({kind,...times,...($('#cellPaidHours').value!==''?{paidMinutesOverride:Number($('#cellPaidHours').value)*60}:{}),breakMinutes:$('#cellBreak').value===''?automaticBreakMinutes(times.start,times.end,$('#cellPost').value):Number($('#cellBreak').value),breakOverride:$('#cellBreak').value!=='',note:$('#cellNote').value,post:['buffet','kitchen'].includes($('#cellPost').value)?'':$('#cellPost').value,workDepartment:$('#cellWorkDepartment').value!==current.department.key?$('#cellWorkDepartment').value:''}),current.department.key);
+  return validateAssignment(normalizeCell({kind,...times,absence:isTimedCell({kind})?readCellAbsence(times):null,...($('#cellPaidHours').value!==''?{paidMinutesOverride:Number($('#cellPaidHours').value)*60}:{}),breakMinutes:$('#cellBreak').value===''?automaticBreakMinutes(times.start,times.end,$('#cellPost').value):Number($('#cellBreak').value),breakOverride:$('#cellBreak').value!=='',note:$('#cellNote').value,post:['buffet','kitchen'].includes($('#cellPost').value)?'':$('#cellPost').value,workDepartment:$('#cellWorkDepartment').value!==current.department.key?$('#cellWorkDepartment').value:''}),current.department.key);
 }
 function previewShift(){
   const el=$('#resolvedShift');el.textContent='';el.dataset.invalid='false';
@@ -84,7 +91,7 @@ function previewShift(){
   try{const c=cellFromForm();el.textContent=`Quart compris : ${timeLabel(c.start)} → ${timeLabel(c.end)} · ${hoursLabel(cellMinutes(c))} h ${c.kind==='training'?'de formation':c.kind==='buffet'?'au Buffet':c.kind==='kitchen'?'en Cuisine':'régulières'}${c.workDepartment?' · comptées en '+departmentLabel(c.workDepartment):['training','buffet','kitchen'].includes(c.kind)?' · exclues du total régulier':''}`;}
   catch(err){el.textContent=err.message;el.dataset.invalid='true';}
 }
-for(const id of ['cellStart','cellEnd','cellBreak','cellPaidHours','cellTraining'])$('#'+id).addEventListener('input',previewShift);
+for(const id of ['cellStart','cellEnd','cellBreak','cellPaidHours','cellTraining','cellAbsenceStart','cellAbsenceEnd','cellAbsenceMeal'])$('#'+id).addEventListener('input',previewShift);
 $('#cellEnd').addEventListener('blur',()=>{try{const t=parseShiftTimes($('#cellStart').value,$('#cellEnd').value);$('#cellStart').value=quickTimeLabel(t.start);$('#cellEnd').value=quickTimeLabel(t.end);}catch{}previewShift();});
 function saveCellForm(){
   const c=cellFromForm();current.draft.rows.find(r=>r.personId===editingCell.personId).cells[editingCell.day]=c;

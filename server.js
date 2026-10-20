@@ -153,6 +153,7 @@ await pool.query(`
   );
 `);
 
+await pool.query('ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS absence JSONB');
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use('/api/departments/photos',requireManager,sameOrigin,express.json({limit:'12mb'}));
@@ -241,13 +242,13 @@ function normalizeShift(body) {
   if (!["cashier", "supervisor", "support", "packer", "orders", "manager"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
-  const {breakMinutes} = serviceShiftTiming(startMinute,endMinute);
+  const {breakMinutes,absence} = serviceShiftTiming(startMinute,endMinute,body.absence);
   return {
     role,
     area: role === "packer" ? "packer" : "front",
     startMinute,
     endMinute,
-    breakMinutes,
+    breakMinutes, absence:absence||null,
     sourceDepartment: String(body.sourceDepartment || "").trim().slice(0, 80),
     notes: String(body.notes || "").trim().slice(0, 300),
   };
@@ -267,7 +268,7 @@ function mapShift(row) {
   return {
     id: Number(row.id), weekStart: isoDate(row.week_start), area: row.area, role: row.role,
     dayIndex: Number(row.day_index), startMinute: Number(row.start_minute), endMinute: Number(row.end_minute),
-    ...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute)),
+    ...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),
     sourceDepartment: row.source_department, notes: row.notes,
   };
 }
@@ -657,7 +658,7 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
     if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
     const weekStart = isoDate(link.rows[0].week_start);
-    const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.role AS shift_role
+    const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.absence,s.break_minutes,s.role AS shift_role
       FROM schedule_employees e
       LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN
         (SELECT id FROM schedule_shifts WHERE week_start=$1)
@@ -668,7 +669,7 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
     for (const row of result.rows) {
       const id = Number(row.id);
       if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):'',shifts:[] });
-      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute)),role:row.shift_role });
+      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),role:row.shift_role });
     }
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
@@ -752,7 +753,7 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
     await ensureWeek(weekStart, client);
     const created = [];
     for (const dayIndex of days) {
-      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes]);
+      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence]);
       created.push(mapShift(result.rows[0]));
     }
     await client.query("COMMIT");
@@ -779,7 +780,7 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
       const periods=(await approvedLeave(client,weekStart)).filter(r=>String(r.employee_id)===String(existing.employee_id)).flatMap(r=>r.periods);
       if(conflictsWithLeave({...shift,weekStart,dayIndex},periods))throw new Error("Ce changement chevauche un congé approuvé. Réattribuez le quart d’abord.");
     }
-    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id]);
+    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, shift.absence]);
     if (!result.rowCount) throw new Error("Quart introuvable.");
     await client.query("COMMIT");
     response.json({ shift: mapShift(result.rows[0]) });

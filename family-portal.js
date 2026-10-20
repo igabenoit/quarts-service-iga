@@ -64,11 +64,11 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
     const all=await directory(pool,start),group=await members(family,all),published=await readPublishedWeek(start,all),service=[];
     const serviceIds=group.people.map(p=>p.serviceEmployeeId).filter(Boolean);
     if(serviceIds.length&&(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[start])).rows.length){
-      const records=(await pool.query(`SELECT e.id,s.day_index,s.start_minute,s.end_minute,s.role
+      const records=(await pool.query(`SELECT e.id,s.day_index,s.start_minute,s.end_minute,s.absence,s.role
         FROM schedule_employees e LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN(SELECT id FROM schedule_shifts WHERE week_start=$1)
         LEFT JOIN schedule_shifts s ON s.id=a.shift_id WHERE e.id=ANY($2::bigint[]) AND e.active AND e.departed_at IS NULL
         ORDER BY e.id,s.day_index,s.start_minute`,[start,serviceIds])).rows;
-      for(const id of serviceIds)service.push({id,shifts:records.filter(r=>Number(r.id)===id&&r.day_index!==null).map(r=>({dayIndex:Number(r.day_index),startMinute:Number(r.start_minute),endMinute:Number(r.end_minute),role:r.role,...serviceShiftTiming(Number(r.start_minute),Number(r.end_minute))}))});
+      for(const id of serviceIds)service.push({id,shifts:records.filter(r=>Number(r.id)===id&&r.day_index!==null).map(r=>({dayIndex:Number(r.day_index),startMinute:Number(r.start_minute),endMinute:Number(r.end_minute),role:r.role,...serviceShiftTiming(Number(r.start_minute),Number(r.end_minute),r.absence)}))});
     }
     const people=group.roots.map(person=>{
       const records=group.people.filter(p=>owner(p)===person.id),ids=new Set(records.map(p=>p.id)),results=[];
