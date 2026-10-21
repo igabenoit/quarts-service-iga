@@ -1,3 +1,4 @@
+import {errorCode,installHealth,logEvent,requestDiagnostics,startupPhase} from './runtime-diagnostics.js';
 import {installSalesForecasts} from './sales-forecasts.js';
 import {installServiceChat} from './service-chat.js';
 import {createServiceChatPush} from './service-chat-push.js';
@@ -27,15 +28,19 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const production = process.env.NODE_ENV === "production";
 
+startupPhase('configuration');
 for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
-  if (!process.env[key]) throw new Error(`Variable requise absente: ${key}`);
+  if (!process.env[key]) throw Object.assign(new Error(`Variable requise absente: ${key}`),{code:'MISSING_'+key});
 }
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: production ? { rejectUnauthorized: false } : false,
   max: 5,
+  connectionTimeoutMillis: 3000,
 });
+pool.on('error',error=>logEvent('database_pool_error',{code:errorCode(error)},'error'));
+startupPhase('schema_core');
 const attempts = new Map();
 const scheduleAccessAttempts = new Map();
 const sessionSecret = process.env.SESSION_SECRET;
@@ -157,6 +162,8 @@ await pool.query(`
 
 await pool.query('ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS absence JSONB');
 app.disable("x-powered-by");
+startupPhase('http_setup');
+app.use(requestDiagnostics);
 app.set("trust proxy", 1);
 app.use('/api/departments/photos',requireManager,sameOrigin,express.json({limit:'12mb'}));
 app.use('/api/departments/document-mail',requireManager,sameOrigin,express.json({limit:'13mb'}));
@@ -221,6 +228,7 @@ async function requireManager(request, response, next) {
   try { await managerAccess.authorize(request); next(); }
   catch(error) { response.status(error.status||500).json({error:error.status?error.message:'Impossible de vérifier l’accès.'}); }
 }
+startupPhase('schema_manager_access');
 const managerAccess=await installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production});
 function sameOrigin(request, response, next) {
   const origin = request.get("origin");
@@ -590,17 +598,23 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
   } finally { client.release(); }
 });
 
+startupPhase('schema_leave');
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
+startupPhase('schema_chat_push');
 chatPush=await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,
   pushFactory:pool=>createServiceChatPush(pool,{secret:sessionSecret})});
+startupPhase('schema_clothing');
 await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
+startupPhase('schema_backups');
 await installScheduleBackup(app,pool,{requireManager,sameOrigin});
+startupPhase('schema_undo');
 await installUndo(app,pool,{requireManager,sameOrigin});
 app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}));
 
-app.get("/health", (_request, response) => response.json({ ok: true }));
+installHealth(app,pool);
 app.post("/api/login", sameOrigin, (request, response) => {
   const ip = request.ip || "unknown";
   const now = Date.now();
@@ -726,7 +740,7 @@ app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
     ]);
     response.json({ week: mapWeek(weekResult.rows[0]), shifts: shiftsResult.rows.map(mapShift), relatedDepartments:await departmentService.serviceRelated(weekStart) });
   } catch (error) {
-    console.error("GET week", error);
+    logEvent('week_read_failed',{code:errorCode(error)},'error');
     response.status(500).json({ error: "Impossible de charger la semaine." });
   }
 });
@@ -845,4 +859,17 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
 installPdfAssets(app);
 app.use(express.static("public", { extensions: ["html"] }));
 app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
-app.listen(port, () => console.log(`Quarts Service IGA sur le port ${port}`));
+app.use((error,_req,res,_next)=>{
+  logEvent('http_unhandled_error',{code:errorCode(error)},'error');
+  if(!res.headersSent)res.status(error.status>=400&&error.status<500?error.status:500).json({error:'Service temporairement indisponible. Réessayez.'});
+});
+startupPhase('listen');
+const server=app.listen(port,()=>startupPhase('ready'));
+const shutdown=()=>{
+  startupPhase('shutdown');
+  chatPush?.stop();
+  server.close(async()=>{await pool.end();process.exit(0);});
+  setTimeout(()=>process.exit(1),25000).unref();
+};
+process.once('SIGTERM',shutdown);
+process.once('SIGINT',shutdown);

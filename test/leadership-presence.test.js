@@ -33,7 +33,7 @@ test('seven daily pages distinguish off, missing, blank and overnight carry-over
   const previous=structuredClone(employee);previous.days[6].entries=[{start:1320,end:1830,minutes:480,department:'Fruits & Légumes',departmentKeys:['fruits']}];
   const data=presenceWeek(week,roster,{employees:[employee],publications:[{key:'fruits',name:'Fruits & Légumes',published:true},{key:'boulangerie',name:'Boulangerie',published:false}]},{employees:[previous]});
   assert.equal(data.days[0].people[0].shifts.length,2);assert.equal(data.days[1].people[0].shifts[0].end,390);assert.equal(data.days[3].people[0].status,'Congé');assert.equal(data.days[2].people[0].status,'Aucun quart indiqué');assert.match(data.days[0].people[1].status,/non publié/);
-  const pages=presencePages(data);assert.equal(pages.length,7);assert.match(pages[0],/Émile &lt;test&gt;/);assert.match(pages[0],/Depuis la veille/);assert.match(pages[0],/06:30 \+1/);assert.ok(pages.every(p=>p.includes('presence-box')||p.includes('Aucun quart indiqué')||p.includes('Congé')));
+  const pages=presencePages(data);assert.equal(pages.length,7);assert.match(pages[0],/Émile &lt;test&gt;/);assert.match(pages[0],/Depuis la veille/);assert.match(pages[0],/06:30 \+1/);assert.ok(pages.every(p=>p.includes('presence-box')||p.includes('Aucun responsable prévu en magasin pour cette journée.')));
   const p=Array.from({length:7},(_,i)=>`P${i}`),r=p.map((_,i)=>`R${i}`);assert.equal(dailyPacket(p,r),'P0R0P1R1P2R2P3R3P4R4P5R5P6R6');assert.equal(dailyPacket(p,r,{mode:'presence',day:'2'}),'R2');assert.equal(dailyPacket(p,r,{mode:'planogram',day:'all'}),p.join(''));
 });
 test('attendance API protects all-store data, returns only leaders and published departments, and leaves consultations intact',async()=>{

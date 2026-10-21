@@ -10,7 +10,7 @@ Les messages sont rendus comme du texte. Les écritures utilisent la protection 
 
 ## Déploiement et validation
 
-Les tables de discussion et de notifications sont créées automatiquement au démarrage, sans modifier les horaires. La dépendance `web-push` est verrouillée dans `package-lock.json`. Aucune nouvelle variable Render n’est nécessaire : une paire VAPID est générée une fois et conservée en base; la clé privée est chiffrée par AES-GCM avec une clé dérivée de `SESSION_SECRET`. Conserver cette variable stable; sa rotation nécessite de rechiffrer la clé VAPID avant le redémarrage. La fusion dans la branche suivie déclenche le déploiement Render configuré sur commit.
+Les tables de discussion et de notifications sont créées automatiquement au démarrage, sans modifier les horaires. La dépendance `web-push` est verrouillée dans `package-lock.json`. Aucune nouvelle variable Render n’est nécessaire : une paire VAPID est générée une fois par origine Render et conservée en base; la clé privée est chiffrée par AES-GCM avec une clé dérivée de `SESSION_SECRET`. Conserver cette variable stable; sa rotation nécessite de rechiffrer la clé VAPID avant le redémarrage. La fusion dans la branche suivie déclenche le déploiement Render configuré sur commit.
 
 Exécuter `npm ci`, `npm run check` et `npm test`. Les tests de discussion utilisent PostgreSQL embarqué et des sessions employé réelles avec des données fictives; aucun message réel ni courriel n’est envoyé.
 
@@ -38,3 +38,5 @@ Les photos augmentent la taille de la base; prévoir le suivi du stockage et une
 
 ## Accès de test hors Service
 Depuis Gestion des accès, l’administrateur peut sélectionner une fiche active avec code personnel et autoriser la discussion pour sept jours. La personne utilise son code habituel sur /discussion. Cet accès inclut l’historique, les photos et les notifications, sans droits de gestion ni changement de département. Le retrait ou l’expiration bloque les requêtes suivantes et les notifications en attente. L’activation doit être faite par l’administrateur sur la fiche voulue; aucun nom n’est autorisé automatiquement par le code.
+
+Les clés, abonnements et files sont isolés par origine. Le domaine principal conserve ses tables et clés historiques. Voir [le guide de fiabilité Render](render-reliability.md) pour la migration, le diagnostic et le retour arrière.

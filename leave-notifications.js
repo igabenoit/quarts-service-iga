@@ -1,3 +1,4 @@
+import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 // Department recipients and copies are kept in the private database. Tests never use department recipients.
 export async function installNotifications(app,pool,{requireManager,sameOrigin}) {
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_mail_settings (
@@ -22,7 +23,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
     if(copy!==undefined&&(typeof copy!=='string'||copy.length>254||(copy.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(copy.trim()))))return res.status(400).json({error:'Adresse de copie invalide.'});
     await pool.query('UPDATE schedule_leave_mail_settings SET test_recipient=$1,copy_recipient=COALESCE($2,copy_recipient) WHERE id=1',[email,copy===undefined?null:copy.trim()]);
     res.json({ok:true,configured:configured()});
-    run().catch(()=>{});
+    run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
   });
   async function queue(client,id) {
     await client.query(`INSERT INTO schedule_leave_mail (request_id) VALUES ($1) ON CONFLICT DO NOTHING`,[id]);
@@ -56,13 +57,13 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
         if(!claimed)continue;
         try {
           const result=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`quarts-leave-${job.is_test?'test':'real'}-${job.request_id}`},body:JSON.stringify(claimed.payload)});
-          const data=await result.json();
+          const data=await result.json();mailResult('leave_manager',job.request_id,result,data);
           if(!result.ok||!data.id)throw new Error(`Resend HTTP ${result.status}. Vérifiez la clé et l’expéditeur dans Render/Resend.`);
           await pool.query(`UPDATE schedule_leave_mail SET status='sent',provider_id=$2,error='' WHERE request_id=$1`,[job.request_id,data.id]);
-        }catch(error){await pool.query(`UPDATE schedule_leave_mail SET status='error',error=$2 WHERE request_id=$1`,[job.request_id,error.name==='TimeoutError'?'Délai de réponse Resend dépassé. Nouvelle tentative prévue.':error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);}
+        }catch(error){logEvent('mail_attempt_failed',{component:'leave_manager',jobId:String(job.request_id),code:errorCode(error)},'error');await pool.query(`UPDATE schedule_leave_mail SET status='error',error=$2 WHERE request_id=$1`,[job.request_id,error.name==='TimeoutError'?'Délai de réponse Resend dépassé. Nouvelle tentative prévue.':error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);}
       }
     }finally{running=false;}
   }
-  const timer=setInterval(()=>run().catch(()=>{}),60000);timer.unref();run().catch(()=>{});
+  const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
   return {queue,run};
 }

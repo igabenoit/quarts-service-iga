@@ -1,3 +1,4 @@
+import {startupPhase} from '../runtime-diagnostics.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -20,7 +21,7 @@ test('manager defaults persist through manual assignment, generation, copying an
   try{
     await installScheduleBackup(f.app,f.pool,f.options);
     const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-    const context=vm.createContext({app:f.app,pool:f.pool,...f.options,serviceShiftTiming,employeeAvailability,availabilityRevision,
+    const context=vm.createContext({startupPhase,app:f.app,pool:f.pool,...f.options,serviceShiftTiming,employeeAvailability,availabilityRevision,
       approvedLeave,conflictsWithLeave,assignmentConflict,generateAssignments,beginUndo,applyServiceRoleDefault,copyServiceShifts,
       backupBeforeRegeneration,finishRegenerationBackup,shiftWithApprovedLeave,saveShiftLeave});
     for(const [start,end] of [
