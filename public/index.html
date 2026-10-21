@@ -33,13 +33,14 @@
         <button id="prevWeek" class="square" aria-label="Semaine précédente">‹</button>
         <div><span>Semaine du</span><strong id="weekLabel"></strong></div>
         <button id="nextWeek" class="square" aria-label="Semaine suivante">›</button>
+        <button id="refreshServiceWeek" class="secondary">Actualiser</button>
         <input id="weekPicker" type="date" aria-label="Choisir la semaine">
         <button id="copyPrevious" class="secondary">Copier la semaine précédente</button>
         <span id="saveStatus" class="save-status">Tout est enregistré</span>
       </section>
 
       <section class="card share-card">
-        <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Publication dans le portail employés</h2><p>Publie la semaine choisie quand elle est prête. Le lien et le QR restent toujours les mêmes; chaque employé utilise son code personnel. Les changements de quarts sont visibles à l’actualisation.</p></div>
+        <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Publication dans le portail employés</h2><p>Publie la semaine choisie quand elle est prête. Le lien et le QR restent toujours les mêmes; chaque employé utilise son code personnel. Les modifications restent privées jusqu’à ce que tu publies de nouveau la semaine.</p></div>
         <div class="share-actions"><button id="createShareLink" type="button">Publier cette semaine</button><button id="copyShareLink" type="button" class="secondary">Copier le lien permanent</button><button id="revokeShareLink" type="button" class="danger" hidden>Retirer cette semaine du portail</button></div>
         <output id="shareLinkDisplay" aria-live="polite"></output>
         <div class="view-dashboard"><div class="view-dashboard-header"><div><h3>Consultation des horaires</h3><p>Consultations avec le code personnel de l’employé. Cela ne garantit pas qu’il a mémorisé tous ses quarts.</p></div><button id="refreshScheduleViews" type="button" class="secondary">Actualiser le suivi</button></div><div id="scheduleViews" aria-live="polite">Chargement…</div></div>

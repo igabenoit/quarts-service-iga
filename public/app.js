@@ -10,7 +10,7 @@ const employeeRoles=["manager","supervisor","cashier","packer","orders"];
 function canWorkRole(employee,role){return employee.role==='manager'&&role==='supervisor'||(employee.roles||[employee.role]).includes(role);}
 function compareDisplayOrder(a,b){return Number(b.role==='manager')-Number(a.role==='manager')||(a.displayRank??9999)-(b.displayRank??9999)||(a.seniority||'9999').localeCompare(b.seniority||'9999')||a.id-b.id;}
 const scheduleGroups=[{title:"Gérante et superviseurs",roles:["manager","supervisor"]},{title:"Caissières",roles:["cashier","support"]},{title:"Emballeurs",roles:["packer"]},{title:"Commandes téléphoniques",roles:["orders"]}];
-const state={weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],approvedLeaves:[],dayExceptions:[],saving:null,sharePath:null};
+const state={weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],approvedLeaves:[],dayExceptions:[],saving:null,sharePath:null,revision:null};
 const $=selector=>document.querySelector(selector);
 const fmtDate=new Intl.DateTimeFormat("fr-CA",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
 
@@ -28,9 +28,26 @@ function durationText(value){const h=value/60;return `${h.toLocaleString("fr-CA"
 function seniorityText(value){if(!value||value==="9999-12-31")return "À préciser";const [year,month,day]=value.slice(0,10).split("-");return `${day}/${month}/${year}`;}
 function formatWeek(start){return `${fmtDate.format(new Date(`${start}T12:00:00Z`))} au ${fmtDate.format(new Date(`${addDays(start,6)}T12:00:00Z`))}`;}
 function escapeHtml(value){return String(value??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");}
-async function api(url,options={}){const response=await undoControl.request(url,{...options,headers:{"Content-Type":"application/json",...(options.undoGroup?{"X-Undo-Group":options.undoGroup}:{}),...(options.headers||{})}});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||"Une erreur est survenue.");return body;}
+let serviceDirty=false,savePromise=null,serviceLocks=0,weekLoadSequence=0;
+async function withServiceLock(action){
+  serviceLocks++;$('#appView').inert=true;
+  try{return await action();}finally{serviceLocks--;$('#appView').inert=serviceLocks>0;}
+}
+function protectAction(action,{flush=true}={}){return async function(event){
+  event?.preventDefault?.();if(serviceLocks)return;
+  return withServiceLock(async()=>{try{if(flush&&serviceDirty)await saveWeek();return await action.call(this,event);}catch(error){showError(error);}});
+};}
+async function api(url,options={}){
+  const write=options.method&&options.method!=='GET'&&/^\/api\/(weeks\/|shifts\/|employees(?:\/|$))/.test(url),week=state.weekStart;
+  if(write&&!state.revision)throw Error('Actualisez la semaine avant de modifier la feuille.');
+  const response=await undoControl.request(url,{...options,headers:{'Content-Type':'application/json',...(options.undoGroup?{'X-Undo-Group':options.undoGroup}:{}),...(write?{'X-Service-Week':week,'X-Service-Revision':state.revision}:{}),...(options.headers||{})}});
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok){if(write&&response.status===409)state.revision=null;throw Error(body.error||'Une erreur est survenue.');}
+  if(write&&state.weekStart===week&&response.headers.get('X-Service-Revision'))state.revision=response.headers.get('X-Service-Revision');
+  return body;
+}
 function toast(text){const node=$("#toast");node.textContent=text;node.classList.add("show");setTimeout(()=>node.classList.remove("show"),2200);}
-function showError(error){console.error(error);toast(error.message||"Une erreur est survenue.");}
+function showError(error){console.error(error);$("#saveStatus").textContent="Échec : "+(error.message||"Une erreur est survenue.");toast(error.message||"Une erreur est survenue.");}
 
 function renderDayChoices(selected=[0]){$("#dayChoices").innerHTML=shortDays.map((day,index)=>`<label class="day-choice"><input type="checkbox" value="${index}" ${selected.includes(index)?"checked":""}><span>${day}</span></label>`).join("");}
 function totals(area){return state.shifts.filter(s=>s.area===area).reduce((sum,s)=>sum+s.paidMinutes,0);}
@@ -91,10 +108,25 @@ function servicePrintHTML(data){
 function renderPrint(){$('#printSheet').innerHTML=servicePrintHTML(state);}
 
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
-async function loadWeek(start){document.querySelectorAll("#planoBtn,#presenceBtn").forEach(b=>b.disabled=true);$("#assignmentMessage").hidden=true;$("#assignmentMessage").textContent="";state.weekStart=mondayOf(new Date(`${start}T12:00:00Z`));state.employees=(await api(`/api/employees?weekStart=${state.weekStart}`)).employees;renderEmployees();state.approvedLeaves=(await api(`/api/leave/week/${state.weekStart}`)).leaves;$("#saveStatus").textContent="Chargement…";const data=await api(`/api/weeks/${state.weekStart}`);state.week=data.week;state.shifts=data.shifts;state.relatedDepartments=data.relatedDepartments||[];state.assignments=(await api(`/api/weeks/${state.weekStart}/assignments`)).assignments;state.timeOff=(await api(`/api/weeks/${state.weekStart}/time-off`)).timeOff;state.dayExceptions=(await api(`/api/weeks/${state.weekStart}/day-exceptions`)).employeeIds;state.sharePath=(await api(`/api/weeks/${state.weekStart}/share-link`)).path;renderShareLink();loadScheduleViews().catch(showError);resetForm();resetEmployeeForm();render();void salesForecasts.load(state.weekStart);$("#saveStatus").textContent="Tout est enregistré";undoControl.refresh();document.querySelectorAll("#planoBtn,#presenceBtn").forEach(b=>b.disabled=false);}
+async function loadWeek(start){
+  if(serviceDirty)await saveWeek();
+  const turn=++weekLoadSequence,next=mondayOf(new Date(`${start}T12:00:00Z`));
+  return withServiceLock(async()=>{
+    $('#saveStatus').textContent='Chargement…';
+    try{
+      const data=await api(`/api/weeks/${next}`);if(turn!==weekLoadSequence)return;
+      if(data.week.weekStart!==next||!data.revision)throw Error('La réponse ne correspond pas à la semaine demandée. Actualisez.');
+      Object.assign(state,{weekStart:next,week:data.week,shifts:data.shifts,employees:data.employees,assignments:data.assignments,timeOff:data.timeOff,dayExceptions:data.dayExceptions,approvedLeaves:data.approvedLeaves,relatedDepartments:data.relatedDepartments||[],sharePath:data.sharePath,revision:data.revision});
+      $('#assignmentMessage').hidden=true;$('#assignmentMessage').textContent='';
+      renderEmployees();renderShareLink();resetForm();resetEmployeeForm();render();
+      loadScheduleViews().catch(showError);void salesForecasts.load(next);
+      $('#saveStatus').textContent='Tout est enregistré';void undoControl.refresh();
+    }catch(error){if(turn===weekLoadSequence){state.revision=null;$('#weekPicker').value=state.weekStart||'';showError(error);}throw error;}
+  });
+}
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
-function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=active;$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=(active?'Semaine publiée : ':'Semaine non publiée : ')+formatWeek(state.weekStart)+' · Portail permanent : '+location.origin+'/horaires-departements';}
+function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=false;$("#createShareLink").textContent=active?'Publier les modifications':'Publier cette semaine';$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=(active?'Une version de cette semaine est publiée. Les modifications restent privées jusqu’à une nouvelle publication. ':'Semaine non publiée. ')+formatWeek(state.weekStart)+' · Portail permanent : '+location.origin+'/horaires-departements';}
 
 function windowText(windows){return (windows||[]).map(([a,b])=>`${String(Math.floor(a/60)).padStart(2,"0")}:${String(a%60).padStart(2,"0")}-${String(Math.floor(b/60)).padStart(2,"0")}:${String(b%60).padStart(2,"0")}`).join(", ");}
 function parseWindow(value){if(!value.trim())return [];return value.split(",").map(part=>{const match=part.trim().match(/^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$/);if(!match)throw new Error("Utilise le format 08:00-17:00.");const a=Number(match[1])*60+Number(match[2]),b=Number(match[3])*60+Number(match[4]);if(a>=b||b>1440)throw new Error("Plage de disponibilité invalide.");return [a,b];});}
@@ -152,7 +184,7 @@ function renderSchedule(){
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
   $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day">${salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}</h4>${state.employees.filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
   $("#employeeTotals").innerHTML="<h3>Heures par employé</h3>"+scheduleGroups.map(group=>`<div class="total-group"><strong>${group.title}</strong>${state.employees.filter(e=>group.roles.includes(e.role)&&state.assignments.some(a=>a.employeeId===e.id)).map(e=>{const paid=state.assignments.filter(a=>a.employeeId===e.id).reduce((sum,a)=>sum+(state.shifts.find(s=>s.id===a.shiftId)?.paidMinutes||0),0);return `<span>${escapeHtml(e.name)} : ${durationText(paid)} / ${durationText(e.targetMinutes)} souhaitées</span>`;}).join("")||"<span>Aucun quart attribué</span>"}</div>`).join("");
-  document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=async()=>{
+  document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=protectAction(async()=>{
     const message=$("#assignmentMessage");message.hidden=true;message.textContent="";
     const employee=state.employees.find(e=>e.id===Number(select.value));
     const shift=state.shifts.find(s=>s.id===Number(select.dataset.shift));
@@ -166,11 +198,25 @@ function renderSchedule(){
       message.textContent=`${context?context+" : ":""}${error.message||"Une erreur est survenue."}`;
       message.hidden=false;renderSchedule();message.scrollIntoView({behavior:"smooth",block:"center"});
     }
-  });
+  }));
   document.querySelectorAll(".edit-unfilled-shift").forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));
 }
-async function saveWeek(){clearTimeout(state.saving);state.saving=null;$("#saveStatus").textContent="Enregistrement…";const result=await api(`/api/weeks/${state.weekStart}`,{method:"PUT",body:JSON.stringify({cashierBudgetMinutes:Math.round(Number($("#frontBudget").value||0)*60),packerBudgetMinutes:Math.round(Number($("#packerBudget").value||0)*60),notes:$("#weekNotes").value})});state.week=result.week;renderSummary();renderPrint();$("#saveStatus").textContent="Tout est enregistré";}
-function queueSave(){clearTimeout(state.saving);state.saving=setTimeout(()=>saveWeek().catch(showError),600);}
+async function saveWeek(){
+  if(savePromise)return savePromise;
+  clearTimeout(state.saving);state.saving=null;if(!serviceDirty)return;
+  const week=state.weekStart,body={cashierBudgetMinutes:Math.round(Number($('#frontBudget').value||0)*60),packerBudgetMinutes:Math.round(Number($('#packerBudget').value||0)*60),notes:$('#weekNotes').value};
+  savePromise=withServiceLock(async()=>{
+    $('#saveStatus').textContent='Enregistrement…';
+    try{
+      const result=await api(`/api/weeks/${week}`,{method:'PUT',body:JSON.stringify(body)});
+      serviceDirty=false;if(state.weekStart===week){state.week=result.week;renderSummary();renderPrint();$('#saveStatus').textContent='Tout est enregistré';}
+    }catch(error){showError(error);throw error;}
+  });
+  try{return await savePromise;}finally{savePromise=null;}
+}
+function queueSave(){serviceDirty=true;$('#saveStatus').textContent='Modifications à enregistrer…';clearTimeout(state.saving);state.saving=setTimeout(()=>saveWeek().catch(showError),600);}
+window.addEventListener('beforeunload',event=>{if(serviceDirty||savePromise){event.preventDefault();event.returnValue='';}});
+
 function readServiceAbsence(){const a=$('#shiftAbsenceStart').value,b=$('#shiftAbsenceEnd').value;if(!a&&!b)return null;if(!a||!b)throw Error('Indiquez le début et la fin de l’absence.');return {start:minutes(a),end:minutes(b),includesMeal:$('#shiftAbsenceMeal').value==='included'};}
 function refreshServiceBreaks(){
   try{
@@ -260,12 +306,8 @@ $("#applyApprovedLeaves").onclick=async()=>{
   try{
     const result=await api(`/api/leave/week/${week}/apply`,{method:"POST"});
     if(state.weekStart===week){
-      const leaves=(await api(`/api/leave/week/${week}`)).leaves;
-      const assignments=await api(`/api/weeks/${week}/assignments`);
-      const shifts=(await api(`/api/weeks/${week}`)).shifts;
-      if(state.weekStart===week){state.approvedLeaves=leaves;state.assignments=assignments.assignments;state.shifts=shifts;render();
-        $("#leaveApplyStatus").textContent=`Congés appliqués : ${result.adjustedShifts||0} quart(s) ajusté(s) avec absence partielle; ${result.releasedShifts} quart(s) remis à couvrir.`;
-      }
+      await loadWeek(week);
+      $('#leaveApplyStatus').textContent=`Congés appliqués : ${result.adjustedShifts||0} quart(s) ajusté(s) avec absence partielle; ${result.releasedShifts} quart(s) remis à couvrir.`;
     }
   }catch(error){$("#leaveApplyStatus").textContent=error.message;showError(error);}
   finally{button.disabled=false;}
@@ -281,10 +323,20 @@ $("#regenerateSchedule").onclick=async()=>{
 };
 const salesForecasts=createSalesForecastDisplay();
 const undoControl=window.createUndoControl({
-  beforeUndo:async()=>{if(!state.saving)return false;await saveWeek();return true;},
+  beforeUndo:async()=>{if(!serviceDirty)return false;await saveWeek();return true;},
   onUndo:async action=>{clearTimeout(state.saving);state.saving=null;await loadEmployees();await loadWeek(action.week_start?String(action.week_start).slice(0,10):state.weekStart);toast('Dernière action annulée');}
 });
-api("/api/session").then(async session=>{if(session.role==="manager"){if(session.user?.kind==="account"&&!session.user.serviceAccess){location.replace("/departements");return;}$("#loginView").hidden=true;$("#appView").hidden=false;await loadEmployees();await loadWeek(upcomingWeekStart());}}).catch(()=>{});
+api("/api/session").then(async session=>{if(session.role==="manager"){if(session.user?.kind==="account"&&!session.user.serviceAccess){location.replace("/departements");return;}$("#loginView").hidden=true;$("#appView").hidden=false;await loadWeek(upcomingWeekStart());}}).catch(error=>{$("#loginError").textContent=error.message;showError(error);});
 
 
 $("#employeeMinor").onchange=event=>{if(event.target.checked&&Number($("#employeeTarget").value)>17)$("#employeeTarget").value="17";};
+
+$('#refreshServiceWeek').onclick=protectAction(async()=>{
+  if(serviceDirty&&!confirm('Abandonner les modifications non enregistrées et recharger cette semaine ?'))return;
+  serviceDirty=false;clearTimeout(state.saving);state.saving=null;await loadWeek(state.weekStart||upcomingWeekStart());
+},{flush:false});
+for(const id of ['prevWeek','nextWeek','copyPrevious','createShareLink','revokeShareLink','deleteShift','departEmployee','generateSchedule','regenerateSchedule','applyApprovedLeaves','logoutBtn','undoLastAction']){
+  const node=$('#'+id),action=node.onclick;if(action)node.onclick=protectAction(action);
+}
+for(const id of ['shiftForm','employeeForm']){const node=$('#'+id),action=node.onsubmit;node.onsubmit=protectAction(action);}
+for(const id of ['weekPicker','employeeImport']){const node=$('#'+id),action=node.onchange;node.onchange=protectAction(action);}

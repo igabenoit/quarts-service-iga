@@ -13,7 +13,7 @@ class TestPool extends EventEmitter{
     return {query:async(sql,args)=>{
       if(typeof sql==='object'){args=sql.values;sql=sql.text;}
       const result=args?await this.db.query(sql,args):(await this.db.exec(sql)).at(-1)||{rows:[]};
-      return {...result,rowCount:result.affectedRows??result.rows.length};
+      return {...result,rowCount:result.rows.length||result.affectedRows||0};
     },release(){if(!released){released=true;unlock();}}};
   }
   async query(sql,args){const client=await this.connect();try{return await client.query(sql,args);}finally{client.release();}}

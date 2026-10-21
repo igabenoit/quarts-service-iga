@@ -1,3 +1,4 @@
+import {publishServiceWeek} from '../service-publication.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {departmentFixture} from './department-fixture.js';
@@ -72,6 +73,7 @@ test('family Service hours preserve paid meal rules and exclude unpublished sche
     const a=await account(f,[child.id]),cookie=await login(f,a.code),request={headers:{cookie},params:{week:start}};
     assert.equal((await call(f,'get','/api/family-portal/weeks/:week',request)).body.people[0].published,false);
     await f.pool.query("INSERT INTO schedule_public_links(week_start,token,access_code_hash) VALUES($1,$2,'unused')",[start,'t'.repeat(43)]);
+    await publishServiceWeek(f.pool,start);
     const result=await call(f,'get','/api/family-portal/weeks/:week',request);assert.equal(result.code,200,JSON.stringify(result.body));const p=result.body.people[0];assert.equal(p.days[0].entries.length,1);assert.equal(p.days[0].entries[0].minutes,450);assert.match(p.days[0].entries[0].hours,/08:00/);assert.ok(!JSON.stringify(result.body).includes('Private coworker'));
     assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM schedule_schedule_views')).rows[0].n,0);
     const sameAccount=await call(f,'put','/api/family-accounts/:id',{manager:admin,params:{id:a.id},body:{name:'Parent test',personIds:[],active:true,version:1}});assert.equal(sameAccount.code,400);assert.ok(await f.service.familyPortal.identity({headers:{cookie}}));

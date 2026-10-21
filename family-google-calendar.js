@@ -122,9 +122,11 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
     await locked(req.family.id,async client=>client.query("UPDATE schedule_family_google SET enabled=FALSE,token='' WHERE access_id=$1",[req.family.id]));res.json({ok:true});
   }));
   let running=false;
-  async function run(){if(running||!configured)return;running=true;try{const rows=(await pool.query('SELECT g.access_id FROM schedule_family_google g JOIN schedule_family_access a ON a.id=g.access_id WHERE g.enabled AND a.active')).rows;for(const row of rows)try{await sync(Number(row.access_id));}catch{ /* Visible status is stored per family; tokens never enter logs. */ }}finally{running=false;}}
-  const timer=startTimer?setInterval(()=>void run().catch(()=>{}),120000):null;timer?.unref();
-  if(startTimer)void run().catch(()=>{});
+  async function run(){if(running||!configured)return;running=true;try{const rows=(await pool.query('SELECT g.access_id FROM schedule_family_google g JOIN schedule_family_access a ON a.id=g.access_id WHERE g.enabled AND a.active')).rows;for(const row of rows)try{await sync(Number(row.access_id));}catch(error){logEvent('calendar_sync_failed',{component:'family_google',jobId:String(row.access_id),code:errorCode(error)},'error');}}finally{running=false;}}
+  const workerError=error=>logEvent('calendar_worker_failed',{component:'family_google',code:errorCode(error)},'error');
+  const timer=startTimer?setInterval(()=>void run().catch(workerError),120000):null;timer?.unref();
+  if(startTimer)void run().catch(workerError);
   return {sync,run,stop:()=>clearInterval(timer)};
 }
 
+import {logEvent,errorCode} from './runtime-diagnostics.js';

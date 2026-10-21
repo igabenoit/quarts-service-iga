@@ -1,5 +1,19 @@
 # Quarts Service IGA
 
+## Fiabilité du Service : brouillons, publication et concurrence
+
+Le bouton « Publier cette semaine » enregistre une copie publique distincte du brouillon. Après une modification, utiliser « Publier les modifications » pour la rendre visible aux employés, aux familles et à la vue magasin. Le lien permanent et les codes personnels ne changent pas. Retirer la publication masque immédiatement la copie publique.
+
+Au premier démarrage de cette version, les semaines déjà partagées sont copiées une seule fois dans `schedule_service_publications`. Aucun horaire ni compte n’est supprimé. Les redémarrages suivants ne remplacent pas ces copies par les brouillons. Cette migration conserve l’état déjà visible au moment de son exécution; elle ne peut pas retrouver une ancienne version publiée qui n’avait jamais été conservée.
+
+Les écritures du Service exigent la révision et la semaine affichées (`X-Service-Revision`, `X-Service-Week`). Une révision périmée est refusée avec HTTP 409, avant toute modification. Le navigateur propose « Actualiser » et demande confirmation avant d’abandonner une saisie non enregistrée. Les notes et budgets sont enregistrés avant la navigation vers une autre semaine. Les onglets ouverts avant le déploiement doivent être actualisés.
+
+La modification d’un quart attribué vérifie aussi le poste, les disponibilités, les congés et les limites hebdomadaires appliqués lors de l’attribution. Aucun élargissement des permissions des gérants n’est nécessaire.
+
+Validation : `npm run check` puis `npm test`. Les tests HTTP de `test/platform-publication.test.js` démarrent le serveur complet avec une base PGlite persistante isolée et de vraies sessions signées. Ils ne disposent d’aucun identifiant de fournisseur externe. Le test de migration vérifie la conservation des publications historiques, l’absence de renseignements privés et l’idempotence au redémarrage.
+
+Retour arrière : redéployer le commit antérieur `7f5bda21845d063eedd125edb90380daac303606`, sans supprimer la nouvelle table et sans changer les secrets. Cette version antérieure reprend son ancien comportement de publication Service en direct; limiter alors les modifications jusqu’au rétablissement du correctif. Après rétablissement, republier explicitement les semaines modifiées pendant le retour arrière. Un retour arrière du code ne restaure pas les données ni les actions effectuées entre-temps.
+
 ## Prévisions initiales dans les brouillons
 
 Chaque journée des brouillons Service (attribution et besoins de quarts) et des huit autres départements affiche la prévision **initiale totale du magasin**, en dollars canadiens. La correspondance se fait par date civile, du lundi au dimanche, y compris aux changements de période ou d’année. Une absence vaut « Non renseignée »; un zéro reste `0,00 $`. Les feuilles publiées et les PDF employés ne contiennent pas ces montants.

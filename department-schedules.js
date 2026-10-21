@@ -9,6 +9,7 @@ import {installStorePortal} from './store-portal.js';
 import {installFamilyPortal} from './family-portal.js';
 import {employeeAvailability} from './availability-rules.js';
 import {serviceWeekProjection,departmentPortionsForService} from './public/shared-service.js';
+import {installServicePublications,readServicePublication} from './service-publication.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
@@ -35,6 +36,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS schedule_department_photo_week ON schedule_department_photos(department_id,week_start);`);
+  await installServicePublications(pool);
   const employeePortal=await installEmployeePortal(app,pool,{sameOrigin,requireManager});
   const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
   for(const style of DEPARTMENT_STYLES){
@@ -73,8 +75,10 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const service=(await listDepartments(client)).find(d=>d.key==='service');
     if(service){
       const shifts=(await client.query('SELECT s.*,a.employee_id FROM schedule_shifts s JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.week_start=$1',[start])).rows;
-      const link=(await client.query('SELECT created_at FROM schedule_public_links WHERE week_start=$1',[start])).rows[0];
-      weeks.push(serviceWeekProjection(shifts,await directory(client,start),service.id,{published:Boolean(link),publishedAt:link?.created_at}));
+      const publication=await readServicePublication(client,start),people=await directory(client,start);
+      const projection=serviceWeekProjection(shifts,people,service.id);
+      if(publication){projection.published=serviceWeekProjection(publication.snapshot.shifts,people,service.id).draft;projection.published_at=publication.published_at;}
+      weeks.push(projection);
     }
     return weeks;
   };
@@ -384,7 +388,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   };
   installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek});
   const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
-  const serviceRelated=async start=>departmentPortionsForService(await transferWeeks(start),await directory(pool,start));
+  const serviceRelated=async(start,client=pool)=>departmentPortionsForService(await transferWeeks(start,client),await directory(client,start));
   return {directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
 }
 

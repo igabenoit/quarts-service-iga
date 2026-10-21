@@ -1,3 +1,4 @@
+import {publishServiceWeek,publishedServiceResult} from '../service-publication.js';
 import {serviceShiftTiming} from '../public/service-rules.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,8 +62,9 @@ test('Service returns only the authenticated employee and ignores a forged viewi
     const employees=(await f.pool.query("INSERT INTO schedule_employees(name,area,role) VALUES('First test','front','cashier'),('Second test','front','cashier') RETURNING id")).rows;
     const shifts=(await f.pool.query("INSERT INTO schedule_shifts(week_start,area,role,day_index,start_minute,end_minute,break_minutes) VALUES('2026-10-12','front','cashier',0,480,900,30),('2026-10-12','front','cashier',1,480,1020,30) RETURNING id")).rows;
     for(const shift of shifts)await f.pool.query('INSERT INTO schedule_assignments(shift_id,employee_id) VALUES($1,$2)',[shift.id,employees[0].id]);
+    await publishServiceWeek(f.pool,'2026-10-12');
     const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-    const handler=prefix=>{const start=source.indexOf('async (request, response) => {',source.indexOf(prefix)),end=source.indexOf('\n});',start);return new Function('pool','serviceShiftTiming','isoDate','return ('+source.slice(start,end)+'\n});')(f.pool,serviceShiftTiming,v=>typeof v==='string'?v.slice(0,10):v.toISOString().slice(0,10));};
+    const handler=prefix=>{const start=source.indexOf('async (request, response) => {',source.indexOf(prefix)),end=source.indexOf('\n});',start);return new Function('publishedServiceResult','pool','serviceShiftTiming','isoDate','return ('+source.slice(start,end)+'\n});')(publishedServiceResult,f.pool,serviceShiftTiming,v=>typeof v==='string'?v.slice(0,10):v.toISOString().slice(0,10));};
     const reply=()=>({code:200,status(n){this.code=n;return this;},set(){return this;},json(body){this.body=body;return this;}});
     const req={params:{token},body:{employeeId:Number(employees[1].id)},employee:{service_employee_id:employees[0].id,birthday:'2000-10-14'}};
     let res=reply();await handler('app.get("/api/public-schedules/:token",')(req,res);assert.equal(res.code,200,JSON.stringify(res.body));assert.equal(res.body.employees.length,1);assert.equal(res.body.employees[0].id,Number(employees[0].id));assert.ok(!JSON.stringify(res.body).includes('2000'));

@@ -2,6 +2,7 @@ import {isDate,monday,today,addDays} from './public/departments-core.js';
 import {leadershipRoster,presenceWeek} from './public/leadership-presence-core.js';
 import {personalDays} from './public/portal-weeks.js';
 import {serviceShiftTiming} from './public/service-rules.js';
+import {publishedServiceResult} from './service-publication.js';
 
 const iso=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 const identity=person=>Number(person.portalPersonId||person.id);
@@ -87,7 +88,7 @@ export function installStorePortal(app,pool,{requireManager,directory,listDepart
     const servicePublished=(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[start])).rows.length>0;
     publications.push({key:'service',name:'Service',published:servicePublished});
     if(servicePublished){
-      results.push(await serviceResult(start));
+      const publishedService=await publishedServiceResult(pool,start);if(publishedService)results.push(publishedService);
     }
     res.json({today:today(),weekStart:start,publications,employees:storePeople(start,people,departments,results)});
   }));

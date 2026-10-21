@@ -1,3 +1,4 @@
+import {commitServiceTransaction} from '../service-concurrency.js';
 import {startupPhase} from '../runtime-diagnostics.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -128,7 +129,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       }
       return {rows:[]};
     }};
-    const context=vm.createContext({startupPhase,app:{post(_path,...handlers){handler=handlers.at(-1);}},pool:{connect:async()=>client},requireManager(){},sameOrigin(){},validDate:()=>true,
+    const context=vm.createContext({commitServiceTransaction,startupPhase,app:{post(_path,...handlers){handler=handlers.at(-1);}},pool:{connect:async()=>client},requireManager(){},sameOrigin(){},validDate:()=>true,
       mapShift:r=>({...r,id:Number(r.id)}),mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,applyServiceRoleDefault,shiftWithApprovedLeave,saveShiftLeave,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
     vm.runInContext(route,context);
     const res={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};

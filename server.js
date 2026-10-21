@@ -6,6 +6,8 @@ import {installClothing} from './clothing.js';
 import {shiftWithApprovedLeave,storedShiftAbsence,editedShiftLeave} from './public/approved-shift-leave.js';
 import {saveShiftLeave} from './approved-shift-leave.js';
 import {serviceShiftTiming} from './public/service-rules.js';
+import {publishServiceWeek,publishedServiceResult} from './service-publication.js';
+import {serviceRevision,assertServiceRevision,commitServiceTransaction} from './service-concurrency.js';
 import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
@@ -235,7 +237,7 @@ function sameOrigin(request, response, next) {
   if (origin && new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Requête refusée." });
   next();
 }
-function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")); }
+function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value; }
 function isoDate(value) { return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10); }
 function addDays(value, days) {
   const date = new Date(`${value}T12:00:00Z`);
@@ -375,11 +377,11 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
       ) UPDATE schedule_employees e SET display_rank=ranked.position, assignment_rank=ranked.position
         FROM ranked WHERE e.id=ranked.id`, [role]);
     }
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.status(201).json({ count: normalized.length });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
-    response.status(400).json({ error: error.message || "Import impossible." });
+    response.status(error.status||400).json({ error: error.message || "Import impossible." });
   } finally { client.release(); }
 });
 app.post("/api/employees", requireManager, sameOrigin, async (request, response) => {
@@ -397,11 +399,11 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count));
     await saveServicePersonal(client,id,request.body);
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.status(201).json({ employee: mapEmployee(saved.rows[0]) });
   } catch (error) {
     await client.query("ROLLBACK").catch(()=>{});
-    response.status(400).json({ error: error.message });
+    response.status(error.status||400).json({ error: error.message });
   } finally { client.release(); }
 });
 app.put("/api/employees/:id", requireManager, sameOrigin, async (request, response) => {
@@ -432,11 +434,11 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment));
     await saveServicePersonal(client,id,request.body);
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ employee: mapEmployee(saved.rows[0]) });
   } catch (error) {
     await client.query("ROLLBACK").catch(()=>{});
-    response.status(400).json({ error: error.message });
+    response.status(error.status||400).json({ error: error.message });
   } finally { client.release(); }
 });
 app.post('/api/employees/:id/departure',requireManager,sameOrigin,async(request,response)=>{
@@ -444,8 +446,8 @@ app.post('/api/employees/:id/departure',requireManager,sameOrigin,async(request,
   try{
     await client.query('BEGIN');
     const employee=await recordDeparture(client,Number(request.params.id),request);
-    await client.query('COMMIT');response.json({employee:mapEmployee(employee)});
-  }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(400).json({error:error.message});}
+    await commitServiceTransaction(client,request);response.json({employee:mapEmployee(employee)});
+  }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(error.status||400).json({error:error.message});}
   finally{client.release();}
 });
 app.get("/api/weeks/:weekStart/assignments", requireManager, async (request, response) => {
@@ -481,9 +483,9 @@ app.put("/api/weeks/:weekStart/employees/:id/day-exception", requireManager, sam
     if (request.body.allowed) await client.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id)
       VALUES ($1,$2) ON CONFLICT DO NOTHING`, [weekStart,employeeId]);
     else await client.query("DELETE FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
-    await client.query('COMMIT');
+    await commitServiceTransaction(client,request);
     response.json({ allowed: request.body.allowed });
-  } catch (error) {await client.query('ROLLBACK').catch(()=>{}); response.status(400).json({ error: error.message }); }
+  } catch (error) {await client.query('ROLLBACK').catch(()=>{}); response.status(error.status||400).json({ error: error.message }); }
   finally{client.release();}
 });
 app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrigin, async (request, response) => {
@@ -507,11 +509,11 @@ app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrig
     if (days.length) await client.query(`DELETE FROM schedule_assignments a USING schedule_shifts s
       WHERE a.shift_id=s.id AND a.employee_id=$1 AND s.week_start=$2 AND s.day_index=ANY($3::int[])`,
       [employeeId,weekStart,days]);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ days });
   } catch (error) {
     await client.query("ROLLBACK").catch(()=>{});
-    response.status(400).json({ error:error.message });
+    response.status(error.status||400).json({ error:error.message });
   } finally { client.release(); }
 });
 app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request, response) => {
@@ -527,7 +529,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       await client.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
       const before=mapShift(shiftResult.rows[0]);
       const shift=await saveShiftLeave(client,before,shiftWithApprovedLeave(before));
-      await client.query("COMMIT");
+      await commitServiceTransaction(client,request);
       return response.json({ ok:true,shift });
     }
     const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
@@ -550,9 +552,9 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
     await saveShiftLeave(client,before,s);
     const savedShift=await applyServiceRoleDefault(client,s,e);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ ok:true,shift:savedShift });
-  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(400).json({ error:error.message }); } finally { client.release(); }
+  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(error.status||400).json({ error:error.message }); } finally { client.release(); }
 });
 app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (request, response) => {
   const client = await pool.connect();
@@ -590,11 +592,11 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
       await applyServiceRoleDefault(client,shifts.find(s=>s.id===a.shiftId),employees.find(e=>e.id===a.employeeId));
     }
     if(backupId)await finishRegenerationBackup(client,backupId,request.params.weekStart);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ ...result, preserved:current.length });
   } catch (error) {
     await client.query("ROLLBACK").catch(()=>{});
-    response.status(400).json({ error:error.message || "Génération impossible." });
+    response.status(error.status||400).json({ error:error.message || "Génération impossible." });
   } finally { client.release(); }
 });
 
@@ -646,21 +648,29 @@ app.get("/api/weeks/:weekStart/share-link", requireManager, async (request, resp
   } catch { response.status(500).json({ error: "Impossible de charger le lien." }); }
 });
 app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
-    await ensureWeek(request.params.weekStart);
+    await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    await assertServiceRevision(client,request.params.weekStart,request);
+    await ensureWeek(request.params.weekStart,client);
     const token = crypto.randomBytes(32).toString("base64url");
-    const result = await pool.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
+    const result = await client.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
       ON CONFLICT (week_start) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'']);
+    await publishServiceWeek(client,request.params.weekStart);
+    await commitServiceTransaction(client,request);
     response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}` });
-  } catch { response.status(500).json({ error: "Impossible de créer le lien." }); }
+  } catch(error) { await client.query('ROLLBACK').catch(()=>{});response.status(error.status||500).json({ error: error.status?error.message:"Impossible de publier cette semaine. Réessayez." }); }finally{client.release();}
 });
 app.delete("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
+  const client=await pool.connect();
   try {
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
-    await pool.query("DELETE FROM schedule_public_links WHERE week_start=$1", [request.params.weekStart]);
-    response.json({ ok: true });
-  } catch { response.status(500).json({ error: "Impossible de désactiver le lien." }); }
+    await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    await assertServiceRevision(client,request.params.weekStart,request);
+    await client.query('DELETE FROM schedule_public_links WHERE week_start=$1',[request.params.weekStart]);
+    await commitServiceTransaction(client,request);response.json({ok:true});
+  }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(error.status||500).json({error:error.status?error.message:'Impossible de désactiver le lien.'});}finally{client.release();}
 });
 
 app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, response) => {
@@ -684,20 +694,10 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
     if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
     const weekStart = isoDate(link.rows[0].week_start);
-    const result = await pool.query(`SELECT e.id,e.name,e.role,e.display_rank,s.day_index,s.start_minute,s.end_minute,s.absence,s.break_minutes,s.role AS shift_role
-      FROM schedule_employees e
-      LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN
-        (SELECT id FROM schedule_shifts WHERE week_start=$1)
-      LEFT JOIN schedule_shifts s ON s.id=a.shift_id
-      WHERE e.id=$2 AND e.active=TRUE AND e.departed_at IS NULL
-      ORDER BY e.role,e.display_rank,e.name,s.day_index,s.start_minute`, [weekStart,request.employee.service_employee_id]);
-    const people = new Map();
-    for (const row of result.rows) {
-      const id = Number(row.id);
-      if (!people.has(id)) people.set(id,{ id,name:row.name,role:row.role,rank:row.display_rank,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):'',shifts:[] });
-      if (row.day_index !== null) people.get(id).shifts.push({ dayIndex:Number(row.day_index),startMinute:Number(row.start_minute),endMinute:Number(row.end_minute),...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),role:row.shift_role });
-    }
-    response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees:[...people.values()] });
+    const publication=await publishedServiceResult(pool,weekStart);
+    if(!publication)return response.status(404).json({error:'Cet horaire n’est pas publié.'});
+    const employees=publication.data.employees.filter(e=>e.id===Number(request.employee.service_employee_id)).map(e=>({...e,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):''}));
+    response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
 });
 app.post("/api/public-schedules/:token/views", sameOrigin, employeePortal.requireEmployee, async (request, response) => {
@@ -730,19 +730,25 @@ app.get("/h/:token", (request, response) => {
 installSalesForecasts(app,{requireManager});
 
 app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
+  const client=await pool.connect();
   try {
-    const { weekStart } = request.params;
-    if (!validDate(weekStart)) return response.status(400).json({ error: "Date invalide." });
-    await ensureWeek(weekStart);
-    const [weekResult, shiftsResult] = await Promise.all([
-      pool.query("SELECT * FROM schedule_weeks WHERE week_start=$1", [weekStart]),
-      pool.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY area, day_index, start_minute, id", [weekStart]),
-    ]);
-    response.json({ week: mapWeek(weekResult.rows[0]), shifts: shiftsResult.rows.map(mapShift), relatedDepartments:await departmentService.serviceRelated(weekStart) });
-  } catch (error) {
-    logEvent('week_read_failed',{code:errorCode(error)},'error');
-    response.status(500).json({ error: "Impossible de charger la semaine." });
-  }
+    const {weekStart}=request.params;
+    if(!validDate(weekStart)||new Date(weekStart+'T12:00:00Z').getUTCDay()!==1)return response.status(400).json({error:'Choisissez une semaine commençant un lundi valide.'});
+    await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    await ensureWeek(weekStart,client);
+    const week=(await client.query('SELECT * FROM schedule_weeks WHERE week_start=$1',[weekStart])).rows[0];
+    const shifts=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY area,day_index,start_minute,id',[weekStart])).rows.map(mapShift);
+    const employees=(await client.query('SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id ORDER BY e.role,e.display_rank,e.seniority,e.name')).rows.map(row=>mapEmployee(row,weekStart));
+    const assignments=(await client.query('SELECT a.shift_id,a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1',[weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
+    const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1',[weekStart])).rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)}));
+    const dayExceptions=(await client.query('SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1',[weekStart])).rows.map(r=>Number(r.employee_id));
+    const approvedLeaves=await approvedLeave(client,weekStart),relatedDepartments=await departmentService.serviceRelated(weekStart,client);
+    const link=(await client.query('SELECT token FROM schedule_public_links WHERE week_start=$1',[weekStart])).rows[0];
+    const revision=await serviceRevision(client,weekStart);
+    await client.query('COMMIT');
+    response.set({'Cache-Control':'no-store','X-Service-Revision':revision}).json({week:mapWeek(week),shifts,employees,assignments,timeOff,dayExceptions,approvedLeaves,relatedDepartments,sharePath:link?'/h/'+link.token:null,revision});
+  }catch(error){await client.query('ROLLBACK').catch(()=>{});logEvent('week_read_failed',{code:errorCode(error)},'error');response.status(500).json({error:'Impossible de charger la semaine. Réessayez.'});}
+  finally{client.release();}
 });
 
 app.put("/api/weeks/:weekStart", requireManager, sameOrigin, async (request, response) => {
@@ -757,11 +763,11 @@ app.put("/api/weeks/:weekStart", requireManager, sameOrigin, async (request, res
     await beginUndo(client,'Modifier les budgets ou notes',weekStart,request);
     await ensureWeek(weekStart,client);
     const result = await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart]);
-    await client.query('COMMIT');
+    await commitServiceTransaction(client,request);
     response.json({ week: mapWeek(result.rows[0]) });
   } catch (error) {
     await client.query('ROLLBACK').catch(()=>{});
-    response.status(400).json({ error: error.message || "Paramètres invalides." });
+    response.status(error.status||400).json({ error: error.message || "Paramètres invalides." });
   }finally{client.release();}
 });
 
@@ -782,11 +788,11 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
       const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence]);
       created.push(mapShift(result.rows[0]));
     }
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.status(201).json({ shifts: created });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
-    response.status(400).json({ error: error.message || "Quart invalide." });
+    response.status(error.status||400).json({ error: error.message || "Quart invalide." });
   } finally { client.release(); }
 });
 
@@ -806,12 +812,20 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
       const periods=(await approvedLeave(client,weekStart)).filter(r=>String(r.employee_id)===String(existing.employee_id)).flatMap(r=>r.periods);
       shift=shiftWithApprovedLeave(editedShiftLeave({...shift,weekStart,dayIndex},existing),periods,existing.employee_id);
       if(conflictsWithLeave(shift,periods))throw new Error("Ce changement chevauche un congé approuvé. Réattribuez le quart d’abord.");
+      const employeeId=Number(existing.employee_id),employee=mapEmployee((await client.query('SELECT * FROM schedule_employees WHERE id=$1',[employeeId])).rows[0],weekStart);
+      employee.leavePeriods=periods;
+      employee.allowSixOrSevenDays=!!(await client.query('SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2',[weekStart,employeeId])).rowCount;
+      if((await client.query('SELECT 1 FROM schedule_time_off WHERE week_start=$1 AND employee_id=$2 AND day_index=$3',[weekStart,employeeId,dayIndex])).rowCount)throw Error('Congé demandé pour cette journée. Réattribuez le quart d’abord.');
+      const all=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1',[weekStart])).rows.map(mapShift);
+      const assigned=(await client.query('SELECT a.shift_id,a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 AND a.shift_id<>$2',[weekStart,id])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
+      const conflict=assignmentConflict(employee,{...shift,...serviceShiftTiming(shift.startMinute,shift.endMinute,shift.absence),id,dayIndex},all,assigned);
+      if(conflict)throw Error(conflict+' Réattribuez le quart d’abord.');
     }
     const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, storedShiftAbsence(shift)]);
     if (!result.rowCount) throw new Error("Quart introuvable.");
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ shift: mapShift(result.rows[0]) });
-  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(400).json({ error: error.message || "Quart invalide." }); } finally {client.release();}
+  } catch (error) { await client.query("ROLLBACK").catch(()=>{}); response.status(error.status||400).json({ error: error.message || "Quart invalide." }); } finally {client.release();}
 });
 
 app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, response) => {
@@ -824,7 +838,7 @@ app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, respon
     const previous=(await client.query("SELECT week_start FROM schedule_shifts WHERE id=$1",[id])).rows[0];
     await beginUndo(client,"Supprimer un quart",previous?isoDate(previous.week_start):null,request);
     await client.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
-    await client.query('COMMIT');
+    await commitServiceTransaction(client,request);
     response.json({ ok: true });
   } catch {await client.query('ROLLBACK').catch(()=>{});response.status(500).json({error:'Suppression impossible.'});}
   finally {client.release();}
@@ -848,11 +862,11 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
     if (previousCount.rows[0].count === 0) throw new Error("La semaine précédente ne contient aucun quart.");
     await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes='', updated_at=NOW() WHERE week_start=$3`, [previousWeek.rows[0].cashier_budget_minutes, previousWeek.rows[0].packer_budget_minutes, weekStart]);
     await copyServiceShifts(client,weekStart,previous);
-    await client.query("COMMIT");
+    await commitServiceTransaction(client,request);
     response.json({ copiedFrom: previous });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
-    response.status(400).json({ error: error.message || "Copie impossible." });
+    response.status(error.status||400).json({ error: error.message || "Copie impossible." });
   } finally { client.release(); }
 });
 

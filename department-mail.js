@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {mailResult,logEvent,errorCode} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {isDate,monday} from './public/departments-core.js';
 const labels={draft:'Ébauche',blank:'Gabarit vierge',filled:'Horaire rempli'};
@@ -47,9 +48,10 @@ export async function installDepartmentMail(app,pool,{requireManager,sameOrigin,
       attachments:[{filename:`${b.kind}-${d.schedule_key}-${b.weekStart}.pdf`,content:b.pdf}]};
     try{
       const response=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(20000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`department-document-${b.requestId}`},body:JSON.stringify(payload)});
-      const result=await response.json();if(!response.ok||!result.id)throw Error('provider');
+      const result=await response.json();mailResult('department_document',b.requestId,response,result);if(!response.ok||!result.id)throw Error('provider');
       await pool.query("UPDATE schedule_department_document_mail SET status='sent',provider_id=$2 WHERE id=$1",[b.requestId,result.id]);res.json({ok:true,status:'sent'});
-    }catch{
+    }catch(error){
+      logEvent('mail_attempt_failed',{component:'department_document',jobId:String(b.requestId),code:errorCode(error)},'error');
       await pool.query("UPDATE schedule_department_document_mail SET status='error' WHERE id=$1",[b.requestId]);fail('L’envoi n’est pas confirmé. Réessayez ici avec la même pièce jointe; les doublons sont protégés. Vérifiez aussi la configuration courriel si le problème persiste.',502);
     }
   }));
