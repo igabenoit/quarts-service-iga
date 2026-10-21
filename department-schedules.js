@@ -267,7 +267,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(draft.rows.some(r=>r.cells.some(c=>c.kind==='review')))fail('Corrigez toutes les cases à vérifier avant de publier.');
     if(req.body.verified!==true)fail('Confirmez la vérification des noms, dates, heures et pauses.');
     const warnings=await warningsFor({...current,draft},client);if(warnings.length&&req.body.warningsReviewed!==true)fail('Vérifiez les disponibilités et les avertissements avant de publier.');
-    return saveWeek(client,current,draft,'publish',publicSnapshot(draft,current.people,current.department.id));
+    return saveWeek(client,current,draft,'publish',publicSnapshot(draft,current.people,current.department.id,current.department.key));
   }))));
   app.post('/api/departments/:id/weeks/:week/unpublish',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);return saveWeek(client,current,current.draft,'unpublish',null);}))));
   app.get('/api/departments/:id/weeks/:week/history',requireManager,endpoint(async(req,res)=>res.json({history:(await pool.query('SELECT id,revision,action,created_at FROM schedule_department_history WHERE department_id=$1 AND week_start=$2 ORDER BY id DESC LIMIT 30',[integer(req.params.id),week(req.params.week)])).rows})));
