@@ -94,6 +94,8 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     if(!req.route)return;
     const path=req.route.path;
     if(path==='/api/sales-forecasts/:weekStart'&&req.method==='GET')return;
+    // The collection filters publications to the account's departments.
+    if(path==='/api/departments/publication-status'&&req.method==='GET')return;
     if(path==='/api/departments/meta'||path==='/api/departments/people'||path==='/api/departments/people/:id')return;
     if(path.startsWith('/api/departments/')){
       let id;
