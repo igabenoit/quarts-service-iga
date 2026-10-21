@@ -103,5 +103,29 @@ test('PostgreSQL : accord conditionnel, migration, validation finale, refus et r
       assert.equal((await decide(4,{status:'approved',version:2,conditionsConfirmed:true})).code,200);assert.deepEqual(await assignments(),before);
       await add(5);assert.equal((await decide(5,{status:'approved',version:1,employeeId:2})).code,200);assert.equal((await request(5)).status,'approved');
     });
+    await t.test('dates corrigées : validation atomique, historique, horaire, courriel et annulation',async()=>{
+      await add(20,'conditional');
+      const periods=[{startDate:'2030-10-19',endDate:'2030-10-19',allDay:true}];
+      const body={status:'approved',version:1,employeeId:1,conditionsConfirmed:true,periods};
+      const before=await request(20),assigned=await assignments();
+      for(const invalid of [[],[{...periods[0],startDate:'2030-02-30'}],[periods[0],periods[0]],[{...periods[0],allDay:false,startTime:'13:00',endTime:'12:00'}]]){
+        assert.equal((await decide(20,{...body,periods:invalid})).code,400);
+        assert.deepEqual(await request(20),before);
+      }
+      assert.equal((await decide(20,{...body,version:0})).code,409);
+      const result=await decide(20,body);assert.equal(result.code,200,JSON.stringify(result.body));
+      assert.equal(result.body.releasedShifts,1);
+      assert.deepEqual(await assignments(),assigned.filter(a=>a.shift_id!==3));
+      const corrected=await request(20);assert.equal(corrected.periods[0].date,'2030-10-19');assert.deepEqual(corrected.effective_periods,corrected.periods);
+      const dates=(await pool.query('SELECT first_date::text,last_date::text FROM schedule_leave_requests WHERE id=20')).rows[0];assert.deepEqual(dates,{first_date:'2030-10-19',last_date:'2030-10-19'});
+      const history=(await pool.query('SELECT note FROM schedule_leave_events WHERE request_id=20')).rows;
+      assert.ok(history.some(e=>e.note.includes('Avant : 2030-10-18')&&e.note.includes('Après : 2030-10-19')));
+      await run();assert.match(sends.at(-1).text,/19 octobre 2030/);assert.doesNotMatch(sends.at(-1).text,/18 octobre 2030/);
+      await undo();assert.deepEqual((await request(20)).periods,before.periods);assert.deepEqual(await assignments(),assigned);
+      const version=(await request(20)).version;
+      assert.equal((await decide(20,{status:'conditional',version,note:conditions,periods:[{...periods[0],allDay:false,startTime:'12:30',endTime:'13:30'}]})).code,200);
+      assert.deepEqual(await assignments(),assigned);
+      assert.deepEqual((await notices(20)).at(-1).snapshot.periods,[{date:'2030-10-19',allDay:false,startMinute:750,endMinute:810}]);
+    });
   }finally{if(oldKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=oldKey;await db.close();}
 });
