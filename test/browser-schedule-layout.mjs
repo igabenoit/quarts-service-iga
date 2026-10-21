@@ -15,8 +15,10 @@ const context=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenc
 vm.runInContext(source.slice(0,source.indexOf('function render(){')),context);
 context.data={weekStart:'2026-10-19',employees:Array.from({length:30},(_,i)=>({id:i+1,name:`Employé Service ${i+1} avec un nom composé très long`,role:'cashier',active:true,displayRank:i+1,seniority:'2020-01-01',availability:{0:[[480,600],[660,720],[780,900],[960,1020]]}})),shifts:Array.from({length:30},(_,i)=>({id:i+1,role:'cashier',dayIndex:0,startMinute:480,endMinute:1020,breakMinutes:60,absence:{start:750,end:810,includesMeal:false}})),assignments:Array.from({length:30},(_,i)=>({shiftId:i+1,employeeId:i+1})),approvedLeaves:[],timeOff:[]};
 const serviceHTML=vm.runInContext('servicePrintHTML(data)',context);
+const serviceBlankHTML=vm.runInContext('servicePrintHTML(data,{blank:true})',context);
 const app=express();installPdfAssets(app);app.use(express.static('public'));
 app.get('/service-fixture',(_q,res)=>res.send(serviceHTML));
+app.get('/service-blank-fixture',(_q,res)=>res.send(serviceBlankHTML));
 app.get('/layout-test',(_q,res)=>res.send('<link rel="stylesheet" href="/departments.css"><link rel="stylesheet" href="/service-print.css"><link rel="stylesheet" href="/department-control.css"><div id="fixture"></div>'));
 const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
 const browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
@@ -79,6 +81,14 @@ try{
   for(const p of preparedService.pages)for(const n of p.querySelectorAll('.sheet-work,.sheet-person-label,.sheet-day-detail span'))if(n.scrollHeight>n.clientHeight+2||n.scrollWidth>n.clientWidth+2)throw Error('Service clip '+n.outerHTML);
   results.push({department:'service',pages:preparedService.pages.length});
   window.serviceSample=preparedService.pages.map(p=>p.outerHTML).join('');preparedService.cleanup();
+  fixture.innerHTML=await (await fetch('/service-blank-fixture')).text();
+  await Promise.all([...fixture.querySelectorAll('img')].map(i=>i.decode()));
+  const blankService=prepareSchedulePages([...fixture.querySelectorAll('article')]);verify(blankService);
+  const blankNames=blankService.pages.flatMap(p=>[...p.querySelectorAll('[data-person]')].map(n=>n.dataset.person));
+  if(blankNames.length!==30||new Set(blankNames).size!==30)throw Error('Blank Service names lost');
+  if(blankService.pages.some(p=>[...p.querySelectorAll('.sheet-work')].some(n=>n.textContent.trim())))throw Error('Blank Service contains shifts');
+  window.serviceBlankSample=blankService.pages.map(p=>p.outerHTML).join('');
+  results.push({department:'service',blank:true,pages:blankService.pages.length});blankService.cleanup();
   const report=controlReport({department:DEPARTMENT_STYLES[0],weekStart:'2026-10-19',people,draft});
   fixture.innerHTML=controlPages([report]);
   const control=prepareSchedulePages([...fixture.querySelectorAll('article')]);
@@ -98,6 +108,8 @@ try{
  await page.locator('#fixture article').first().screenshot({path:'tmp/pdf-layout/epicerie.png'});
  await page.evaluate(()=>document.querySelector('#fixture').innerHTML=window.serviceSample);
  await page.locator('#fixture article').nth(1).screenshot({path:'tmp/pdf-layout/service.png'});
+ await page.evaluate(()=>document.querySelector('#fixture').innerHTML=window.serviceBlankSample);
+ await page.locator('#fixture article').nth(1).screenshot({path:'tmp/pdf-layout/service-blank.png'});
  assert.deepEqual(errors,[]);console.log(JSON.stringify(result));
 }finally{await browser.close();server.close();}
 
