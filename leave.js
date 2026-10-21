@@ -156,6 +156,18 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       if(row.version!==b.version){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande a changé. Actualisez le suivi.'});}
       if(!((['pending','conditional'].includes(row.status)&&['approved','refused','cancelled','conditional'].includes(b.status))||(row.status==='late'&&['approved','refused','conditional'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
       if(row.status==='conditional'&&b.status==='approved'&&b.conditionsConfirmed!==true){await client.query('ROLLBACK');return res.status(400).json({error:'Confirmez que les conditions sont remplies ou levées avant de confirmer le congé.'});}
+      if(b.periods!==undefined){
+        if(!['approved','conditional'].includes(b.status)){await client.query('ROLLBACK');return res.status(400).json({error:'Modifiez les dates lors de l’approbation ou de l’accord sous conditions.'});}
+        let periods;
+        try{periods=normalizeLeave({email:row.email,reason:row.reason,periods:b.periods},new Date()).periods;}
+        catch(error){await client.query('ROLLBACK');return res.status(400).json({error:error.message});}
+        if(JSON.stringify(periods)!==JSON.stringify(row.periods)){
+          const describe=items=>items.map(p=>`${p.date} — ${p.allDay?'journée complète':`${String(Math.floor(p.startMinute/60)).padStart(2,'0')}:${String(p.startMinute%60).padStart(2,'0')} à ${String(Math.floor(p.endMinute/60)).padStart(2,'0')}:${String(p.endMinute%60).padStart(2,'0')}`}`).join('; ');
+          await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,row.status,`Périodes modifiées par la gestion. Avant : ${describe(row.periods)}. Après : ${describe(periods)}.`]);
+          row.periods=periods;row.first_date=periods[0].date;row.last_date=periods.at(-1).date;
+          await client.query('UPDATE schedule_leave_requests SET periods=$1::jsonb,first_date=$2,last_date=$3,effective_periods=NULL WHERE id=$4',[JSON.stringify(periods),row.first_date,row.last_date,row.id]);
+        }
+      }
       if(b.status==='approved'&&!row.is_test){
         const dept=(await client.query('SELECT code FROM schedule_leave_departments WHERE id=$1',[row.department_id])).rows[0];
         if(!row.employee_id&&dept?.code==='service'){
