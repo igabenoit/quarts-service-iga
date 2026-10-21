@@ -23,7 +23,7 @@ export function createPushControls({api}){
       const subscription=await registration.pushManager.getSubscription();
       const enabled=settings.enabled&&Notification.permission==='granted'&&!!subscription;
       display(enabled);
-      say(enabled?'Notifications activées sur cet appareil, même lorsque le site est fermé.':Notification.permission==='denied'?'Les notifications sont bloquées. Autorise-les dans les réglages du navigateur ou du téléphone, puis recharge cette page.':'Active les notifications sur cet appareil pour recevoir les nouveaux messages.');
+      say(enabled?'Notifications activées sur cet appareil, même lorsque le site est fermé.':Notification.permission==='denied'?'Les notifications sont bloquées. Autorise-les dans les réglages du navigateur ou du téléphone, puis recharge cette page.':'Active les notifications sur cet appareil pour recevoir les messages, les nouveaux horaires et les modifications publiées du Service.');
       initialized=true;
     }catch(error){say(error.message||'Impossible de préparer les notifications. Réessaie.');}
     finally{locked(false);}

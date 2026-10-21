@@ -10,8 +10,11 @@ export async function serviceSnapshot(client,week){
 }
 export async function publishServiceWeek(client,week){
   const snapshot=await serviceSnapshot(client,week);
+  const previous=(await client.query('SELECT snapshot=$2::jsonb AS unchanged FROM schedule_service_publications WHERE week_start=$1',[week,JSON.stringify(snapshot)])).rows[0];
+  if(previous?.unchanged)return null;
   await client.query(`INSERT INTO schedule_service_publications(week_start,snapshot) VALUES($1,$2)
     ON CONFLICT(week_start) DO UPDATE SET snapshot=EXCLUDED.snapshot,published_at=clock_timestamp()`,[week,JSON.stringify(snapshot)]);
+  return previous?'updated':'published';
 }
 export async function installServicePublications(pool){
   const client=await pool.connect();
