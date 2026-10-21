@@ -1,5 +1,6 @@
 import {errorCode,logEvent} from './runtime-diagnostics.js';
 import crypto from 'node:crypto';
+import {createSchedulePush} from './service-schedule-push.js';
 import webpush from 'web-push';
 import {ensureChatGuests} from './service-chat-guests.js';
 
@@ -80,7 +81,7 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
   }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
   const vapidDetails={subject,publicKey:config.public_key,privateKey:decryptPushKey(config.private_key_encrypted,secret)};
   const fingerprint=value=>crypto.createHmac('sha256',secret).update('service-push-credential:'+value).digest('hex');
-  async function credential(owner){
+  async function credential(owner,{includeGuests=true}={}){
     if(owner==='admin')return fingerprint('admin:'+process.env.MANAGER_CODE);
     const [kind,id]=owner.split(':');if(!/^\d+$/.test(id||''))return null;
     if(kind==='manager'){
@@ -93,12 +94,12 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
       LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
       WHERE p.id=$1 AND p.employee_code IS NOT NULL AND
       ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
-      AND (EXISTS(SELECT 1 FROM schedule_service_chat_guests g WHERE g.person_id=p.id AND g.expires_at>clock_timestamp())
+      AND (($2::boolean AND EXISTS(SELECT 1 FROM schedule_service_chat_guests g WHERE g.person_id=p.id AND g.expires_at>clock_timestamp()))
       OR EXISTS(SELECT 1 FROM schedule_store_people m LEFT JOIN schedule_employees se ON se.id=m.service_employee_id
         WHERE (m.id=p.id OR (m.portal_person_id=p.id AND m.active AND m.service_employee_id IS NULL AND m.employee_code IS NULL))
         AND ((se.active AND se.departed_at IS NULL) OR (m.service_employee_id IS NULL AND m.active AND EXISTS(
           SELECT 1 FROM schedule_store_memberships sm JOIN schedule_leave_departments d ON d.id=sm.department_id
-          WHERE sm.person_id=m.id AND d.code='service' AND d.active)))))`,[id])).rows[0];
+          WHERE sm.person_id=m.id AND d.code='service' AND d.active)))))`,[id,includeGuests])).rows[0];
     return row?fingerprint(owner+':'+row.employee_code):null;
   }
   function cookie(res,id,maxAge=31536000){
@@ -125,10 +126,12 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     tag:test?'service-chat-test':'service-chat-'+messageId,
     url:owner.startsWith('employee:')?'/discussion':'/discussion?mode=manager'
   });
+  const schedulePush=await createSchedulePush(pool,{tables,pushTables,credential,send,vapidDetails});
   let running=false,stopped=false;
   async function drain(){
     if(running||stopped)return;running=true;
     try{
+      await schedulePush.drain();
       await pool.query(`DELETE FROM ${tables.jobs} WHERE created_at<clock_timestamp()-interval '24 hours' OR attempts>=8`);
       // Short leased batches prevent two instances from normally sending the same job.
       for(let batch=0;batch<10;batch++){
@@ -203,5 +206,5 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     }));
   }
   const timer=startWorker?setInterval(kick,30000):null;timer?.unref();
-  return {enqueue,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
+  return {enqueue,enqueueSchedule:schedulePush.enqueue,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
 }

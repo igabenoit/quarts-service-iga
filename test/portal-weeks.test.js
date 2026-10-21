@@ -13,10 +13,10 @@ const response=(body,status=200)=>({ok:status<400,status,json:async()=>structure
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const item=weekStart=>({departmentId:1,name:'Fruits & Légumes',weekStart});
 const published=weekStart=>({department:{key:'fruits',name:'Fruits & Légumes'},weekStart,schedule:{rows:[{name:'Camille Exemple',cells:[{kind:'shift',start:1320,end:1830,breakMinutes:30,post:'night'},...Array.from({length:6},core.blankCell)]}]}});
-function fixture(){
+function fixture(search=''){
  const elements=new Map(),events={},scrolls=[];
  const $=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;},getBoundingClientRect:()=>({height:150}),querySelector(){return this.innerHTML.includes(' is-today')?{style:{},scrollIntoView:options=>scrolls.push({selector:s,options})}:null;}});return elements.get(s);};
- const context=vm.createContext({...core,...weeks,scrollToToday,e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
+ const context=vm.createContext({...core,...weeks,scrollToToday,URLSearchParams,location:{search},e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
  const source=readFileSync(new URL('../public/horaires-departements.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/\r?\nload\(\);\s*$/,'');
  vm.runInContext(source,context);
  return {$,events,context,scrolls,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};
@@ -74,9 +74,19 @@ test('Service publication needs no shared code and keeps existing links and cred
  const f=await departmentFixture();try{
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8'),start=source.indexOf('async (request, response) => {',source.indexOf('app.put("/api/weeks/:weekStart/share-link"')),end=source.indexOf('\n});',start);
   const ensureWeek=week=>f.pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1) ON CONFLICT DO NOTHING',[week]);
-  const handler=new Function('assertServiceRevision','commitServiceTransaction','publishServiceWeek','pool','crypto','validDate','ensureWeek','return ('+source.slice(start,end)+'\n});')(assertServiceRevision,commitServiceTransaction,publishServiceWeek,f.pool,crypto,core.isDate,ensureWeek);
+  const alerts=[],chatPush={enqueueSchedule:async(_client,week,kind)=>alerts.push({week,kind}),kick(){}};
+  const handler=new Function('chatPush','assertServiceRevision','commitServiceTransaction','publishServiceWeek','pool','crypto','validDate','ensureWeek','return ('+source.slice(start,end)+'\n});')(chatPush,assertServiceRevision,commitServiceTransaction,publishServiceWeek,f.pool,crypto,core.isDate,ensureWeek);
   const reply=()=>({code:200,status(n){this.code=n;return this;},set(){return this;},json(body){this.body=body;return this;}});
   let res=reply();await handler({params:{weekStart:'2026-10-12'},body:{}},res);assert.equal(res.code,200);const path=res.body.path;
   await f.pool.query("UPDATE schedule_public_links SET access_code_hash='previous-hash'");res=reply();await handler({params:{weekStart:'2026-10-12'},body:{}},res);assert.equal(res.body.path,path);assert.equal((await f.pool.query('SELECT access_code_hash FROM schedule_public_links')).rows[0].access_code_hash,'previous-hash');
+  assert.deepEqual(alerts,[{week:'2026-10-12',kind:'published'}]);assert.equal(res.body.notification,null);
  }finally{await f.db.close();}
+});
+
+test('notification opens its published week once; unknown weeks and reopening use the current week',async()=>{
+ for(const search of ['?week=2026-10-19','?week=2030-01-07','?week=invalid']){
+  const f=fixture(search);f.fetch(async path=>response(path.endsWith('department-schedules')?listing():published(path.split('/').at(-1))));
+  await f.run('load()');assert.equal(f.run('week'),search==='?week=2026-10-19'?'2026-10-19':'2026-10-12');
+  await f.run('load({reset:true})');assert.equal(f.run('week'),'2026-10-12');
+ }
 });

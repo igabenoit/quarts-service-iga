@@ -657,9 +657,11 @@ app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (r
     const token = crypto.randomBytes(32).toString("base64url");
     const result = await client.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
       ON CONFLICT (week_start) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'']);
-    await publishServiceWeek(client,request.params.weekStart);
+    const notification=await publishServiceWeek(client,request.params.weekStart);
+    if(notification)await chatPush.enqueueSchedule(client,request.params.weekStart,notification);
     await commitServiceTransaction(client,request);
-    response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}` });
+    chatPush.kick();
+    response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}`,notification });
   } catch(error) { await client.query('ROLLBACK').catch(()=>{});response.status(error.status||500).json({ error: error.status?error.message:"Impossible de publier cette semaine. Réessayez." }); }finally{client.release();}
 });
 app.delete("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (request, response) => {
