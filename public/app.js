@@ -235,9 +235,11 @@ $("#prevWeek").onclick=()=>loadWeek(addDays(state.weekStart,-7)).catch(showError
 $("#copyPrevious").onclick=async()=>{if(!confirm("Copier tous les quarts et budgets de la semaine précédente?"))return;try{await api(`/api/weeks/${state.weekStart}/copy-previous`,{method:"POST"});await loadWeek(state.weekStart);toast("Semaine précédente copiée");}catch(error){showError(error);}};
 async function loadPushStatus(){
  const week=state.weekStart;
+ $('#schedulePushRecipients').innerHTML='';
  try{const info=await api(`/api/weeks/${week}/notifications`);if(week!==state.weekStart)return;
  $('#schedulePushStatus').textContent=`Téléphones activés : ${info.employees} pour les employés du Service et ${info.managers} pour les gestionnaires. ${info.pending} avis en attente. `+(info.employees?'La réception sur le téléphone reste à vérifier.':'Aucun téléphone employé activé : ouvrir la discussion, activer les notifications et utiliser Tester.')+(info.inactive?` ${info.inactive} abonnement(s) non admissible(s) : accès invité, changé ou inactif.`:'');
- }catch(error){if(week===state.weekStart)$('#schedulePushStatus').textContent=error.message;}
+ $('#schedulePushRecipients').innerHTML=(info.recipients||[]).length?'<h3>Notifications activées pour</h3><ul>'+info.recipients.map(person=>`<li><strong>${escapeHtml(person.name)}</strong> — ${person.kind==='employee'?'Employé du Service':'Gestionnaire'} · ${Number(person.devices)} téléphone(s)</li>`).join('')+'</ul>':'';
+ }catch(error){if(week===state.weekStart){$('#schedulePushStatus').textContent=error.message;$('#schedulePushRecipients').innerHTML='';}}
 }
 $('#refreshPushStatus').onclick=()=>loadPushStatus();
 $('#resendScheduleNotice').onclick=async()=>{

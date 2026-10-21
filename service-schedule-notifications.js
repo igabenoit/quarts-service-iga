@@ -10,7 +10,7 @@ export async function installScheduleNotifications(app,pool,{requireManager,same
     try{
       if(!valid(req.params.weekStart))return res.status(400).json({error:'Semaine invalide.'});
       const published=await publication(pool,req.params.weekStart);
-      res.set('Cache-Control','no-store').json({...await push.scheduleInventory(req.params.weekStart),published:!!published});
+      res.set('Cache-Control','no-store').json({...await push.scheduleInventory(req.params.weekStart,{includeRecipients:true}),published:!!published});
     }catch{res.status(503).json({error:'Suivi des notifications temporairement indisponible.'});}
   });
   app.post('/api/weeks/:weekStart/notifications',requireManager,sameOrigin,async(req,res)=>{

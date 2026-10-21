@@ -45,7 +45,26 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     const pass=(_q,_s,next)=>next();
     await installScheduleNotifications(f.app,f.pool,{requireManager:pass,sameOrigin:pass,push:workers[0]});
     const inventory=await f.call('get','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
-    assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:1,pending:0,published:true});
+    assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:1,pending:0,recipients:[{name:'Employé fictif',kind:'employee',devices:1},{name:'Accès gestionnaire partagé',kind:'manager',devices:1}],published:true});
+    // Same employee on two devices is one person; manager names are separate.
+    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB)');
+    const service=(await f.pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0].id;
+    await f.pool.query("INSERT INTO schedule_manager_accounts VALUES(7,'Gestionnaire exemple',1,TRUE,$1)",[JSON.stringify([Number(service)])]);
+    const extraIds=[];
+    for(const owner of ['employee:'+person.id,'manager:7']){
+      const id=crypto.randomUUID();extraIds.push(id);
+      await f.pool.query(`INSERT INTO ${pushTables(scopes[0]).subscriptions}(id,owner_key,credential_hash,endpoint_hash,subscription) VALUES($1,$2,$3,$4,$5)`,[id,owner,await workers[0].credential(owner),id,JSON.stringify({endpoint:'https://fcm.googleapis.com/'+id})]);
+    }
+    const named=await workers[0].scheduleInventory(week,{includeRecipients:true});
+    assert.equal(named.employees,2);assert.equal(named.managers,2);
+    assert.deepEqual(named.recipients,[{name:'Employé fictif',kind:'employee',devices:2},{name:'Accès gestionnaire partagé',kind:'manager',devices:1},{name:'Gestionnaire exemple',kind:'manager',devices:1}]);
+    assert.doesNotMatch(JSON.stringify(named),/123456|credential|endpoint|Invité fictif/);
+    await f.pool.query('UPDATE schedule_employees SET active=FALSE WHERE id=$1',[employee.id]);
+    assert.ok(!(await workers[0].scheduleInventory(week,{includeRecipients:true})).recipients.some(p=>p.kind==='employee'));
+    await f.pool.query('UPDATE schedule_employees SET active=TRUE WHERE id=$1',[employee.id]);
+    await f.pool.query('UPDATE schedule_manager_accounts SET version=2 WHERE id=7');
+    assert.ok(!(await workers[0].scheduleInventory(week,{includeRecipients:true})).recipients.some(p=>p.name==='Gestionnaire exemple'));
+    for(const id of extraIds)await f.pool.query(`DELETE FROM ${pushTables(scopes[0]).subscriptions} WHERE id=$1`,[id]);
     // Avoid background work in this fixture; explicit drains below verify publication withdrawal.
     const oldKick=workers[0].kick;workers[0].kick=()=>{};
     const before=(await f.pool.query('SELECT snapshot,published_at FROM schedule_service_publications WHERE week_start=$1',[week])).rows[0];
@@ -69,4 +88,24 @@ test('phone displays the right schedule notice and opens only its published week
     handlers.notificationclick({notification:{data:shown.at(-1).data,close(){}},waitUntil:p=>done=p});await done;
     assert.equal(opened.at(-1),'https://quarts-service-iga.onrender.com/horaires-departements?week=2026-10-26');
   }
+});
+
+test('phone recipient list escapes names and clears stale names on failed refresh or week change',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+  const elements=new Map(),$=selector=>{if(!elements.has(selector))elements.set(selector,{innerHTML:'',textContent:''});return elements.get(selector);};
+  const state={weekStart:'2026-10-26'};
+  const info={employees:2,managers:0,pending:0,inactive:0,recipients:[{name:'<img src=x onerror=alert(1)>',kind:'employee',devices:2}]};
+  const context=vm.createContext({$,state,api:async()=>info});
+  vm.runInContext(source.slice(source.indexOf('function escapeHtml('),source.indexOf('\n',source.indexOf('function escapeHtml(')))+'\n'+source.slice(source.indexOf('async function loadPushStatus(){'),source.indexOf("$('#refreshPushStatus').onclick")),context);
+  await vm.runInContext('loadPushStatus()',context);
+  assert.match($('#schedulePushRecipients').innerHTML,/&lt;img/);
+  assert.doesNotMatch($('#schedulePushRecipients').innerHTML,/<img/);
+  assert.match($('#schedulePushRecipients').innerHTML,/2 téléphone/);
+  context.api=async()=>{throw Error('Hors connexion');};
+  await vm.runInContext('loadPushStatus()',context);
+  assert.equal($('#schedulePushRecipients').innerHTML,'');
+  assert.equal($('#schedulePushStatus').textContent,'Hors connexion');
+  let resolve;context.api=()=>new Promise(r=>resolve=r);
+  const pending=vm.runInContext('loadPushStatus()',context);state.weekStart='2026-11-02';resolve(info);await pending;
+  assert.equal($('#schedulePushRecipients').innerHTML,'');
 });

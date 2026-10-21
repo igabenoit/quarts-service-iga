@@ -26,16 +26,30 @@ export async function createSchedulePush(pool,{tables,pushTables,credential,send
     }
     return queued;
   }
-  async function inventory(week){
+  async function inventory(week,{includeRecipients=false}={}){
     const subs=(await pool.query(`SELECT owner_key,credential_hash FROM ${tables.subscriptions}`)).rows;
     let employees=0,managers=0,inactive=0;
+    const recipients=new Map();
     for(const sub of subs){
       const current=await credential(sub.owner_key,{includeGuests:false});
       if(!current||current!==sub.credential_hash){inactive++;continue;}
-      if(sub.owner_key.startsWith('employee:'))employees++;else managers++;
+      const employee=sub.owner_key.startsWith('employee:');
+      if(employee)employees++;else managers++;
+      if(includeRecipients){
+        if(!recipients.has(sub.owner_key)){
+          let name='Accès gestionnaire partagé';
+          if(sub.owner_key!=='admin'){
+            const id=sub.owner_key.split(':')[1];
+            const table=employee?'schedule_store_people':'schedule_manager_accounts';
+            name=(await pool.query(`SELECT name FROM ${table} WHERE id=$1`,[id])).rows[0]?.name||(employee?'Employé':'Gestionnaire');
+          }
+          recipients.set(sub.owner_key,{name,kind:employee?'employee':'manager',devices:0});
+        }
+        recipients.get(sub.owner_key).devices++;
+      }
     }
     const pending=week?Number((await pool.query('SELECT count(*) AS n FROM schedule_service_schedule_push_jobs WHERE origin=$1 AND week_start=$2',[tables.scope,week])).rows[0].n):0;
-    return {employees,managers,inactive,pending};
+    return {employees,managers,inactive,pending,...(includeRecipients?{recipients:[...recipients.values()].sort((a,b)=>a.kind.localeCompare(b.kind)||a.name.localeCompare(b.name,'fr'))}:{})};
   }
   async function drain(){
     await pool.query(`DELETE FROM schedule_service_schedule_push_jobs WHERE origin=$1 AND (created_at<clock_timestamp()-interval '24 hours' OR attempts>=8)`,[tables.scope]);
