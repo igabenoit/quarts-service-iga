@@ -63,7 +63,7 @@ function servicePrintHTML(data){
   const shortTime=n=>`${Math.floor(n/60)}${n%60?'h'+String(n%60).padStart(2,'0'):''}`;
   const paid=s=>s.external?s.paidMinutes:serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes;
   const assigned=new Map(data.assignments.map(a=>[a.shiftId,a.employeeId]));
-  const shiftHTML=(s,role)=>`<div class="service-shift shift-theme-${e(s.external?s.department:'service')} ${s.post==='cut_fruit'?'status-cut-fruit':s.kind==='training'?'status-training':''}${role&&!s.external&&s.role!==role?' cross-role':''}">${role&&!s.external&&s.role!==role?`<small class="service-role">${e(roleNames[s.role]||s.role)}</small>`:''}${(s.sharedDay||s.external||s.role==='support')&&s.sourceDepartment?`<small class="assignment-label">${e(s.sourceDepartment)}</small>`:''}<span class="printed-shift-range"><span class="print-start">${time(s.startMinute)}</span><span>–</span><span class="print-end">${time(s.endMinute)}</span></span>${s.absence?`<small class="shift-absence">${e(absenceLabel(s.absence))}</small>`:""}</div>`;
+  const shiftHTML=(s,role,shared)=>`<div class="service-shift${shared?'':' simple-shift'} shift-theme-${e(s.external?s.department:'service')} ${s.post==='cut_fruit'?'status-cut-fruit':s.kind==='training'?'status-training':''}${role&&!s.external&&s.role!==role?' cross-role':''}">${role&&!s.external&&s.role!==role?`<small class="service-role">${e(roleNames[s.role]||s.role)}</small>`:''}${(s.sharedDay||s.external||s.role==='support')&&s.sourceDepartment?`<small class="assignment-label">${e(s.sourceDepartment)}</small>`:''}<span class="printed-shift-range"><span class="print-start">${time(s.startMinute)}</span><span>–</span><span class="print-end">${time(s.endMinute)}</span></span>${s.absence?`<small class="shift-absence">${e(absenceLabel(s.absence))}</small>`:""}</div>`;
   const availability=(person,day)=>{const windows=person.availability?.[day]||[];return !windows.length?'0':windows.some(([a,b])=>a===0&&b===1440)?'J':windows.map(([a,b])=>shortTime(a)+'–'+shortTime(b)).join(' / ');};
   const approved=(id,day)=>data.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(data.weekStart,day));
   const cell=(person,jobs,day,pending=false)=>{
@@ -73,7 +73,7 @@ function servicePrintHTML(data){
     const birthday=!pending&&person.birthday&&person.birthday.slice(5)===addDays(data.weekStart,day).slice(5);
     const labels=periods.map(p=>`<strong class="print-leave">CONGÉ APPROUVÉ${p.allDay?'':`<br>${time(p.startMinute)}–${time(p.endMinute)}`}</strong>`).join('')+(manual?'<strong class="print-leave">CONGÉ DEMANDÉ</strong>':'');
     const unavailable=!pending&&!person.availability?.[day]?.length&&!shifts.length&&!labels;
-    const content=(birthday?'<small class="birthday-greeting">Bonne fête !</small>':'')+labels+(external.length?'<small class="printed-day-total">Quart complet · '+hours(shifts.reduce((n,s)=>n+paid(s),0))+' h</small>':'')+shifts.map(s=>shiftHTML(s,person.role)).join('')+(unavailable?'<small class="service-unavailable">Indisponible</small>':'');
+    const content=(birthday?'<small class="birthday-greeting">Bonne fête !</small>':'')+labels+(external.length?'<small class="printed-day-total">Quart complet · '+hours(shifts.reduce((n,s)=>n+paid(s),0))+' h</small>':'')+shifts.map(s=>shiftHTML(s,person.role,shifts.length>1)).join('')+(unavailable?'<small class="service-unavailable">Indisponible</small>':'');
     const workHeight=shifts.reduce((n,s)=>n+21+(s.absence?28:0)+(person.role&&s.role!==person.role?Math.ceil((roleNames[s.role]||s.role).length/10)*6:0)+(s.sourceDepartment?Math.ceil(s.sourceDepartment.length/10)*7:0),0)+periods.reduce((n,p)=>n+(p.allDay?16:25),0)+(manual?16:0)+(birthday?9:0);
     return {content,unavailable,hours:shifts.length?(external.length?hours(own.reduce((n,s)=>n+paid(s),0))+' Serv. / '+hours(shifts.reduce((n,s)=>n+paid(s),0))+' total':hours(shifts.reduce((n,s)=>n+paid(s),0))):'',availability:pending?'':availability(person,day),height:workHeight+13};
   };
@@ -252,13 +252,11 @@ function showServicePreview(){
 async function checkedServiceSheets(){
   await document.fonts.ready;const sheets=[...document.querySelectorAll('#previewPages .service-sheet')];
   await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
-  const {sheetOverflowMessage}=await import('./department-pdf.js');
-  for(const sheet of sheets){const error=sheetOverflowMessage(sheet);if(error)throw Error(error);}
   return sheets;
 }
 async function printService(){
   document.body.classList.remove('printing-planogram');showServicePreview();
-  try{await checkedServiceSheets();$('#printPreview').close();window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
+  try{const {prepareSchedulePages}=await import('./schedule-layout.js');const prepared=prepareSchedulePages(await checkedServiceSheets());try{$('#printSheet').innerHTML=prepared.pages.map(page=>page.outerHTML).join('');}finally{prepared.cleanup();}$('#printPreview').close();window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
 }
 $('#printBtn').onclick=printService;
 $('#previewBtn').onclick=showServicePreview;
@@ -273,7 +271,7 @@ $('#previewPdf').onclick=async()=>{
     const blob=await schedulePagesPDF(sheets,{previewSelector:'#previewPages .service-sheet'});
     if(servicePdfUrl)URL.revokeObjectURL(servicePdfUrl);servicePdfUrl=URL.createObjectURL(blob);
     $('#servicePdfDownload').href=servicePdfUrl;$('#servicePdfDownload').download='Horaire-Service-'+weekStart+'.pdf';$('#servicePdfOpen').href=servicePdfUrl;
-    $('#servicePdfResult').hidden=false;$('#servicePdfStatus').textContent='PDF prêt : '+sheets.length+' feuilles légales, sans adresse Web ni date d’impression.';
+    $('#servicePdfResult').hidden=false;$('#servicePdfStatus').textContent='PDF prêt : '+blob.pageCount+' feuilles légales, sans adresse Web ni date d’impression.';
   }catch(error){$('#servicePdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}finally{servicePdfBusy=false;buttons.forEach(button=>button.disabled=false);}
 };
 const presenceButton=document.createElement('button');presenceButton.id='presenceBtn';presenceButton.className='secondary';presenceButton.textContent='Présences gérants et assistants';$('#planoBtn').after(presenceButton);

@@ -2,7 +2,7 @@ import {createSalesForecastDisplay} from './sales-forecast.js';
 const salesForecasts=createSalesForecastDisplay();
 import {prepareSharedDraft} from './department-buffet.js';
 import {summaryPage,summaryCSV,parseSummaryHours,summaryDelta,productiveMinutes,serviceSummaryDetail,summaryMetrics} from './department-summary.js';
-import {schedulePagesPDF,schedulePDF,sheetOverflowMessage} from './department-pdf.js';
+import {schedulePagesPDF,schedulePDF} from './department-pdf.js';
 import {isBirthday,scheduleGroup,comparePeople,orderDraft,DAY_NAMES,DEPARTMENT_STYLES,escapeHTML as e,nameKey,monday,today,dateLabel,addDays,timeLabel,hoursLabel,tenure,blankCell,normalizeCell,parseShiftTimes,automaticBreakMinutes,cellBreakMinutes,quickTimeLabel,totalMinutes,trainingMinutes,buffetMinutes,kitchenMinutes,PAM_POSTS,KITCHEN_POSTS,BAKERY_POSTS,COMMON_POSTS,assignmentPost,grandMinutes,mergeIncoming,validateAssignment,cellDetail,shiftAssignment,departmentLabel,isTimedCell,cellMinutes,cellLabel,cellTone,sheetHTML,availabilityCode,parseAvailability,normalizeAvailability,PRINT_ROW_CAPACITY} from './departments-core.js';
 const $=s=>document.querySelector(s);let analyzingPhotoId=null;let meta,current,selectedDepartment,dirty=false,editingCell,editingPerson,activePhoto,view='schedule',loadSequence=0,viewsSequence=0,copiedShift=null,lastPaste=null,weekCopySource=null,weekCopyTarget=null,weekCopySequence=0,weekCopyBusy=false;
 const message=v=>$('#appMessage').textContent=v;
@@ -294,18 +294,18 @@ let generatedPdfUrl;
 $('#printKind').onchange=()=>{renderPrint();$('#pdfResult').hidden=true;};
 $('#printSheet').onclick=async()=>{
   if(weekLocks||weekLoading)return;
-  const button=$('#printSheet');button.disabled=true;$('#managerContent').inert=true;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='Préparation du PDF d’une page…';
+  const button=$('#printSheet');button.disabled=true;$('#managerContent').inert=true;$('#pdfResult').hidden=true;$('#pdfStatus').textContent='Préparation du PDF…';
   try{
     if(dirty)await saveDraft();else await loadWeek();
     renderPrint();button.disabled=true;$('#managerContent').inert=true;
-    const sheet=$('#printPreview .department-sheet'),overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);
-    $('#pdfStatus').textContent='Préparation du PDF d’une page…';
+    const sheet=$('#printPreview .department-sheet');
+    $('#pdfStatus').textContent='Préparation du PDF…';
     const blob=await schedulePDF(sheet);
     if(generatedPdfUrl)URL.revokeObjectURL(generatedPdfUrl);
     generatedPdfUrl=URL.createObjectURL(blob);
     const link=$('#downloadPdf');link.href=generatedPdfUrl;link.download=`Horaire-${current.department.key}-${current.weekStart}.pdf`;
     $('#openPdf').href=generatedPdfUrl;$('#pdfResult').hidden=false;
-    $('#pdfStatus').textContent='PDF prêt : une page légale, sans date d’impression, adresse Web ni en-têtes de fichier. Ouvrez le PDF pour l’imprimer.';
+    $('#pdfStatus').textContent=`PDF prêt : ${blob.pageCount} page(s) légale(s). Tous les employés et les textes sont conservés. Ouvrez le PDF pour l’imprimer.`;
   }catch(error){$('#pdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}
   finally{button.disabled=false;$('#managerContent').inert=false;}
 };
@@ -408,7 +408,6 @@ $('#prepareMailPdf').onclick=async()=>{
   try{
     const kind=$('#mailDocumentKind').value,note=$('#mailDocumentNote').value;
     $('#printKind').value=kind==='blank'?'blank':'filled';renderPrint();const sheet=$('#printPreview .department-sheet');
-    const overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);
     const blob=await schedulePDF(sheet,{label:mailLabels[kind]});
     const pdf=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(blob);});
     preparedMail={requestId:crypto.randomUUID(),weekStart:current.weekStart,kind,note,pdf,recipientsVersion:departmentMailSettings.version};
@@ -502,7 +501,7 @@ $('#controlPdf').onclick=async()=>{
   await withWeekLock(async()=>{
     $('#controlResults').hidden=true;$('#controlStatus').textContent='Création du sommaire PDF…';
     try{
-      await document.fonts.ready;const sheet=$('#controlPreview .control-sheet'),overflow=sheetOverflowMessage(sheet);if(overflow)throw Error(overflow);
+      await document.fonts.ready;const sheet=$('#controlPreview .control-sheet');
       const blob=await schedulePagesPDF([sheet],{previewSelector:'#controlPreview .control-sheet'});
       if(controlPdfUrl)URL.revokeObjectURL(controlPdfUrl);controlPdfUrl=URL.createObjectURL(blob);
       $('#controlOpen').href=controlPdfUrl;$('#controlDownload').href=controlPdfUrl;$('#controlDownload').download='Sommaire-heures-'+current.weekStart+'.pdf';

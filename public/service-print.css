@@ -112,3 +112,9 @@
 .service-sheet .service-shift{flex-shrink:0}
 .service-sheet .printed-shift-range{font-size:6pt;gap:.5pt}
 .service-sheet .service-shift+.service-shift{border-top:.7pt solid var(--shift-color,#738178); padding-top:3pt}
+
+/* Ordinary shifts use the original stacked hours; boxes distinguish shared portions only. */
+.service-sheet .service-shift.simple-shift{display:flex;flex-direction:column;align-items:center;border:0;border-radius:0;background:transparent;padding:0;margin:0;gap:1pt;color:inherit}
+.service-sheet .simple-shift .printed-shift-range{display:flex;flex-direction:column;gap:0;font-size:8.5pt;line-height:1.15;order:0}
+.service-sheet .simple-shift .printed-shift-range> :nth-child(2){display:none}
+.service-sheet .simple-shift .assignment-label,.service-sheet .simple-shift .service-role,.service-sheet .simple-shift .shift-absence{order:1}

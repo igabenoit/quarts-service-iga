@@ -1,3 +1,4 @@
+import {prepareSchedulePages} from './schedule-layout.js';
 // Render the existing schedule on fixed legal pages, without browser headers.
 let libraries;
 function script(src){return new Promise((resolve,reject)=>{const el=document.createElement('script');el.src=src;el.onload=resolve;el.onerror=()=>{el.remove();reject(Error('Chargement du PDF impossible. Vérifiez la connexion et réessayez.'));};document.head.append(el);});}
@@ -27,16 +28,21 @@ export async function schedulePagesPDF(sheets,{label,previewSelector='#printPrev
   if(!sheets.length)throw Error('Aucune feuille à imprimer.');
   await loadLibraries();await document.fonts.ready;
   await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
-  for(const sheet of sheets){const overflow=validateSheet(sheet);if(overflow)throw Error(overflow);}
+  const prepared=validateSheet===sheetOverflowMessage?prepareSchedulePages(sheets,{label}):null;
+  sheets=prepared?.pages||sheets;
+  try{
+  if(!prepared)for(const sheet of sheets){const overflow=validateSheet(sheet);if(overflow)throw Error(overflow);}
   const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'pt',format:'legal',compress:true});
   for(const [index,sheet] of sheets.entries()){
     const canvas=await window.html2canvas(sheet,{scale:3,backgroundColor:'#ffffff',logging:false,useCORS:false,
     width:Math.ceil(sheet.getBoundingClientRect().width),height:Math.ceil(sheet.getBoundingClientRect().height),
-    onclone(doc){const copy=doc.querySelectorAll(previewSelector)[index];if(label)copy.querySelector('.sheet-header p').textContent=label;copy.style.boxShadow='none';copy.style.margin='0';const preview=copy.parentElement;preview.style.overflow='visible';preview.style.padding='0';preview.style.background='#ffffff';}
+    onclone(doc){const copy=prepared?doc.querySelector(`[data-pdf-render-id="${sheet.dataset.pdfRenderId}"]`):doc.querySelectorAll(previewSelector)[index];if(label&&!prepared)copy.querySelector('.sheet-header p').textContent=label;copy.style.boxShadow='none';copy.style.margin='0';const preview=copy.parentElement;preview.style.overflow='visible';preview.style.padding='0';preview.style.background='#ffffff';}
   });
     if(index)pdf.addPage('legal','portrait');
     const box=pageImagePlacement(canvas.width,canvas.height);
     pdf.addImage(canvas.toDataURL('image/png'),'PNG',box.x,box.y,box.width,box.height,undefined,'FAST');
+    pdf.setFontSize(7);pdf.setTextColor(80);pdf.text(`Page ${index+1} / ${sheets.length}`,306,1000,{align:'center'});
   }
-  return pdf.output('blob');
+  const blob=pdf.output('blob');blob.pageCount=sheets.length;return blob;
+  }finally{prepared?.cleanup();}
 }
