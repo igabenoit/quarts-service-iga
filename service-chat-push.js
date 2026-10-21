@@ -206,5 +206,5 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     }));
   }
   const timer=startWorker?setInterval(kick,30000):null;timer?.unref();
-  return {enqueue,enqueueSchedule:schedulePush.enqueue,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
+  return {enqueue,enqueueSchedule:schedulePush.enqueue,scheduleInventory:schedulePush.inventory,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
 }

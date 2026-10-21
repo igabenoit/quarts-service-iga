@@ -126,7 +126,7 @@ async function loadWeek(start){
 }
 async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
-function renderShareLink(){const active=!!state.sharePath;$("#createShareLink").hidden=false;$("#createShareLink").textContent=active?'Publier les modifications':'Publier cette semaine';$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=(active?'Une version de cette semaine est publiée. Les modifications restent privées jusqu’à une nouvelle publication. ':'Semaine non publiée. ')+formatWeek(state.weekStart)+' · Portail permanent : '+location.origin+'/horaires-departements';}
+function renderShareLink(){const active=!!state.sharePath;$('#resendScheduleNotice').hidden=!active;void loadPushStatus();$("#createShareLink").hidden=false;$("#createShareLink").textContent=active?'Publier les modifications':'Publier cette semaine';$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=(active?'Une version de cette semaine est publiée. Les modifications restent privées jusqu’à une nouvelle publication. ':'Semaine non publiée. ')+formatWeek(state.weekStart)+' · Portail permanent : '+location.origin+'/horaires-departements';}
 
 function windowText(windows){return (windows||[]).map(([a,b])=>`${String(Math.floor(a/60)).padStart(2,"0")}:${String(a%60).padStart(2,"0")}-${String(Math.floor(b/60)).padStart(2,"0")}:${String(b%60).padStart(2,"0")}`).join(", ");}
 function parseWindow(value){if(!value.trim())return [];return value.split(",").map(part=>{const match=part.trim().match(/^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-4]):([0-5]\d)$/);if(!match)throw new Error("Utilise le format 08:00-17:00.");const a=Number(match[1])*60+Number(match[2]),b=Number(match[3])*60+Number(match[4]);if(a>=b||b>1440)throw new Error("Plage de disponibilité invalide.");return [a,b];});}
@@ -233,6 +233,19 @@ $("#loginForm").onsubmit=async event=>{event.preventDefault();try{await api("/ap
 $("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload();};
 $("#prevWeek").onclick=()=>loadWeek(addDays(state.weekStart,-7)).catch(showError);$("#nextWeek").onclick=()=>loadWeek(addDays(state.weekStart,7)).catch(showError);$("#weekPicker").onchange=e=>loadWeek(e.target.value).catch(showError);
 $("#copyPrevious").onclick=async()=>{if(!confirm("Copier tous les quarts et budgets de la semaine précédente?"))return;try{await api(`/api/weeks/${state.weekStart}/copy-previous`,{method:"POST"});await loadWeek(state.weekStart);toast("Semaine précédente copiée");}catch(error){showError(error);}};
+async function loadPushStatus(){
+ const week=state.weekStart;
+ try{const info=await api(`/api/weeks/${week}/notifications`);if(week!==state.weekStart)return;
+ $('#schedulePushStatus').textContent=`Téléphones activés : ${info.employees} pour les employés du Service et ${info.managers} pour les gestionnaires. ${info.pending} avis en attente. `+(info.employees?'La réception sur le téléphone reste à vérifier.':'Aucun téléphone employé activé : ouvrir la discussion, activer les notifications et utiliser Tester.')+(info.inactive?` ${info.inactive} abonnement(s) non admissible(s) : accès invité, changé ou inactif.`:'');
+ }catch(error){if(week===state.weekStart)$('#schedulePushStatus').textContent=error.message;}
+}
+$('#refreshPushStatus').onclick=()=>loadPushStatus();
+$('#resendScheduleNotice').onclick=async()=>{
+ if(!confirm('Renvoyer l’avis pour cette semaine déjà publiée aux employés du Service et aux gestionnaires dont les notifications sont activées ?'))return;
+ const button=$('#resendScheduleNotice');button.disabled=true;
+ try{const result=await api(`/api/weeks/${state.weekStart}/notifications`,{method:'POST',body:'{}'});toast(result.queued?'Avis remis en file d’envoi. Vérifie la réception sur ton téléphone.':'Aucun téléphone inscrit aux notifications.');await loadPushStatus();}
+ catch(error){showError(error);}finally{button.disabled=false;}
+};
 async function publishPortalWeek(){const result=await api(`/api/weeks/${state.weekStart}/share-link`,{method:"PUT",body:'{}'});state.sharePath=result.path;renderShareLink();toast(result.notification==='published'?"Horaire publié. Avis de nouvel horaire préparé pour les téléphones activés du Service.":result.notification==='updated'?"Modifications publiées. Avis de mise à jour préparé pour les téléphones activés du Service.":"Horaire déjà à jour. Aucune nouvelle notification.");}
 $("#createShareLink").onclick=()=>publishPortalWeek().catch(showError);
 $("#copyShareLink").onclick=async()=>{try{await navigator.clipboard.writeText(`${location.origin}/horaires-departements`);toast("Lien permanent copié");}catch(error){showError(error);}};

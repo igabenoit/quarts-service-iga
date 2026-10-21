@@ -1,3 +1,4 @@
+import {installScheduleNotifications} from './service-schedule-notifications.js';
 import {errorCode,installHealth,logEvent,requestDiagnostics,startupPhase} from './runtime-diagnostics.js';
 import {installSalesForecasts} from './sales-forecasts.js';
 import {installServiceChat} from './service-chat.js';
@@ -608,6 +609,7 @@ const employeePortal=departmentService.employeePortal;
 startupPhase('schema_chat_push');
 chatPush=await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,
   pushFactory:pool=>createServiceChatPush(pool,{secret:sessionSecret})});
+await installScheduleNotifications(app,pool,{requireManager,sameOrigin,push:chatPush});
 startupPhase('schema_clothing');
 await installClothing(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 startupPhase('schema_backups');
@@ -661,6 +663,7 @@ app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (r
     if(notification)await chatPush.enqueueSchedule(client,request.params.weekStart,notification);
     await commitServiceTransaction(client,request);
     chatPush.kick();
+    logEvent('schedule_publication_notice',{component:'service_schedule',code:notification||'UNCHANGED_NO_NOTICE'});
     response.set("Cache-Control", "no-store").json({ path: `/h/${result.rows[0].token}`,notification });
   } catch(error) { await client.query('ROLLBACK').catch(()=>{});response.status(error.status||500).json({ error: error.status?error.message:"Impossible de publier cette semaine. Réessayez." }); }finally{client.release();}
 });

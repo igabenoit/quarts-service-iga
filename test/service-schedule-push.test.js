@@ -1,3 +1,4 @@
+import {installScheduleNotifications} from '../service-schedule-notifications.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -29,20 +30,32 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     }
     const jobs=async()=>Number((await f.pool.query('SELECT count(*) AS n FROM schedule_service_schedule_push_jobs')).rows[0].n);
     const publish=async()=>{const kind=await publishServiceWeek(f.pool,week);if(kind)await workers[0].enqueueSchedule(f.pool,week,kind);return kind;};
-    await f.pool.query('BEGIN');assert.equal(await publish(),'published');assert.equal(await jobs(),4);await f.pool.query('ROLLBACK');assert.equal(await jobs(),0);
-    assert.equal(await publish(),'published');assert.equal(await publish(),null);assert.equal(await jobs(),4);
-    await workers[0].drain();assert.equal(sent.length,1,'only the active Service employee, on this origin');assert.equal(await jobs(),2);
+    await f.pool.query('BEGIN');assert.equal(await publish(),'published');assert.equal(await jobs(),6);await f.pool.query('ROLLBACK');assert.equal(await jobs(),0);
+    assert.equal(await publish(),'published');assert.equal(await publish(),null);assert.equal(await jobs(),6);
+    await workers[0].drain();assert.equal(sent.length,2,'active Service employee and administrator, on this origin');assert.equal(await jobs(),3);
     assert.equal(sent[0].payload.kind,'schedule-published');assert.equal(sent[0].payload.week,week);assert.doesNotMatch(JSON.stringify(sent),/Employé fictif|123456/);
-    await workers[1].drain();assert.equal(sent.length,2);assert.equal(await jobs(),0);
+    await workers[1].drain();assert.equal(sent.length,4);assert.equal(await jobs(),0);
     assert.ok(await workers[0].credential('employee:'+guest.id),'guest retains chat notifications');
     await f.pool.query("INSERT INTO schedule_shifts(week_start,area,role,day_index,start_minute,end_minute) VALUES($1,'front','cashier',0,480,960)",[week]);
     assert.equal(await jobs(),0,'editing a draft does not notify');assert.equal(await publish(),'updated');
-    failure=Object.assign(Error('temporary'),{statusCode:503});await workers[0].drain();assert.equal(sent.length,2);
+    failure=Object.assign(Error('temporary'),{statusCode:503});await workers[0].drain();assert.equal(sent.length,4);
     failure=null;await f.pool.query('UPDATE schedule_service_schedule_push_jobs SET due_at=clock_timestamp()');await workers[0].drain();assert.equal(sent.at(-1).payload.kind,'schedule-updated');
-    await f.pool.query('UPDATE schedule_employees SET active=FALSE WHERE id=$1',[employee.id]);await workers[1].drain();assert.equal(sent.length,3,'revoked employee receives nothing');assert.equal(await jobs(),0);
+    await f.pool.query('UPDATE schedule_employees SET active=FALSE WHERE id=$1',[employee.id]);await workers[1].drain();assert.equal(sent.length,7,'revoked employee receives nothing; administrator still receives the notice');assert.equal(await jobs(),0);
     await f.pool.query('UPDATE schedule_employees SET active=TRUE WHERE id=$1',[employee.id]);
+    const pass=(_q,_s,next)=>next();
+    await installScheduleNotifications(f.app,f.pool,{requireManager:pass,sameOrigin:pass,push:workers[0]});
+    const inventory=await f.call('get','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
+    assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:1,pending:0,published:true});
+    // Avoid background work in this fixture; explicit drains below verify publication withdrawal.
+    const oldKick=workers[0].kick;workers[0].kick=()=>{};
+    const before=(await f.pool.query('SELECT snapshot,published_at FROM schedule_service_publications WHERE week_start=$1',[week])).rows[0];
+    const resent=await f.call('post','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
+    assert.equal(resent.code,200);assert.equal(resent.body.queued,3);
+    const repeat=await f.call('post','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});assert.equal(repeat.code,429);
+    assert.deepEqual((await f.pool.query('SELECT snapshot,published_at FROM schedule_service_publications WHERE week_start=$1',[week])).rows[0],before);
+    workers[0].kick=oldKick;
     await workers[0].enqueueSchedule(f.pool,week,'updated');await f.pool.query('DELETE FROM schedule_public_links WHERE week_start=$1',[week]);
-    await workers[0].drain();await workers[1].drain();assert.equal(sent.length,3,'withdrawn publication does not notify');assert.equal(await jobs(),0);
+    await workers[0].drain();await workers[1].drain();assert.equal(sent.length,7,'withdrawn publication does not notify');assert.equal(await jobs(),0);
   }finally{workers.forEach(w=>w.stop());await f.db.close();}
 });
 
