@@ -329,3 +329,9 @@ body{background:white}
 .department-sheet .multiple-shifts .printed-shift{padding:2pt 1pt;margin:0}
 
 .absence-fields{grid-column:1/-1;border:1px solid #b7cbc3;border-radius:10px;padding:12px}.absence-fields label{display:block;margin:8px 0}.shift-absence{display:block;font-weight:600;color:#784317;white-space:normal}
+
+/* Ordinary shifts use the original stacked hours; boxes distinguish shared portions only. */
+.department-sheet .printed-shift.simple-shift{display:flex;flex-direction:column;align-items:center;border:0;border-radius:0;background:transparent;padding:0;margin:0;gap:1pt;color:inherit}
+.department-sheet .simple-shift .printed-shift-range{display:flex;flex-direction:column;gap:0;font-size:8.5pt;line-height:1.15;order:0}
+.department-sheet .simple-shift .printed-shift-range> :nth-child(2){display:none}
+.department-sheet .simple-shift .assignment-label,.department-sheet .simple-shift .service-role,.department-sheet .simple-shift .shift-absence{order:1}
