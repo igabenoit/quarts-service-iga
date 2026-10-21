@@ -16,7 +16,7 @@ test('cases horaires : heures et poste uniquement, Buffet visible et anciennes n
   const html=sheetHTML(args);
   assert.doesNotMatch(html,/contexte des quarts|Mention transversale|dans la section Cuisine/);
   for(const label of ['BBQ','Buffet','Cuisine','Cuisine Salades','Formation · Cuisine Salades'])assert.ok(html.includes(`<small class="assignment-label">${label}</small>`),label);
-  assert.match(html,/<b>16:00<\/b><b>20:00<\/b>/);
+  assert.match(html,/<b>16:00<\/b><span>–<\/span><b>20:00<\/b>/);
   assert.deepEqual([totalMinutes(row),buffetMinutes(row),kitchenMinutes(row),trainingMinutes(row),grandMinutes(row)],before);
   assert.equal(cellDetail(row.cells[3]),'Cuisine Salades');assert.equal(normalizeCell(row.cells[3]).post,'kitchen_salads');
   assert.doesNotMatch(sheetHTML({...args,blank:true}),/assignment-label/);

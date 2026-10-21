@@ -1,3 +1,4 @@
+import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 const days=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const time=n=>`${Math.floor(n/60)} h ${String(n%60).padStart(2,'0')}`;
@@ -41,14 +42,14 @@ export async function installAvailabilityMail(pool,{autoStart=true,fetchImpl=fet
         const current=(await client.query('SELECT status,version FROM schedule_availability_requests WHERE id=$1 FOR UPDATE',[r.request_id])).rows[0];
         if(r.kind==='approved'&&(current.status!=='approved'||current.version!==r.request_version)){await client.query("UPDATE schedule_availability_mail SET status='cancelled' WHERE id=$1",[job.id]);await client.query('COMMIT');continue;}
         try{
-          const response=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`quarts-availability-${r.request_id}-${r.kind}-v${r.request_version}`},body:JSON.stringify(frozen)}),data=await response.json();
+          const response=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`quarts-availability-${r.request_id}-${r.kind}-v${r.request_version}`},body:JSON.stringify(frozen)}),data=await response.json();mailResult('availability',job.id,response,data);
           if(!response.ok||!data.id)throw new Error('Resend HTTP '+response.status);
           await client.query("UPDATE schedule_availability_mail SET status='sent',provider_id=$2,error='' WHERE id=$1",[job.id,data.id]);
-        }catch(error){await client.query("UPDATE schedule_availability_mail SET status='error',error=$2 WHERE id=$1",[job.id,error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);}
+        }catch(error){logEvent('mail_attempt_failed',{component:'availability',jobId:String(job.id),code:errorCode(error)},'error');await client.query("UPDATE schedule_availability_mail SET status='error',error=$2 WHERE id=$1",[job.id,error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);}
         await client.query('COMMIT');
-      }catch{await client.query('ROLLBACK').catch(()=>{});}finally{client.release();}}
+      }catch(error){logEvent('mail_transaction_failed',{component:'availability',code:errorCode(error)},'error');await client.query('ROLLBACK').catch(()=>{});}finally{client.release();}}
     }finally{running=false;}
   }
-  if(autoStart){const timer=setInterval(()=>run().catch(()=>{}),30000);timer.unref();run().catch(()=>{});}
+  if(autoStart){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error'));}
   return {run,queue};
 }

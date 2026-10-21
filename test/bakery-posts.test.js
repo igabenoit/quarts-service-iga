@@ -15,6 +15,6 @@ test('bakery posts persist, print below shifts and count as regular hours',()=>{
   assert.equal(grandMinutes(draft.rows[0]),28*60);
   assert.deepEqual(publicSnapshot(draft,people).rows[0].cells,draft.rows[0].cells);
   const html=sheetHTML({department:{key:'boulangerie',name:'Boulangerie'},weekStart:'2026-10-19',people,draft});
-  for(const label of Object.values(BAKERY_POSTS))assert.ok(html.includes('<b>16:00</b><small class="assignment-label">'+label+'</small>'));
+  for(const label of Object.values(BAKERY_POSTS))assert.ok(html.includes('<small class="assignment-label">'+label+'</small><span class="printed-shift-range"><b>08:00</b><span>–</span><b>16:00</b></span>'));
 });
 

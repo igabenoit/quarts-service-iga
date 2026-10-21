@@ -1,3 +1,4 @@
+import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {escapeHTML as escape} from './public/departments-core.js';
 import {leaveMailFrame,leavePeriodPanel,acknowledgementText} from './leave-mail-layout.js';
@@ -91,18 +92,18 @@ export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}=
           try{
             const result=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),
               headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':`quarts-leave-approval-${row.request_id}-v${row.request_version}`},body:JSON.stringify(payload)});
-            const data=await result.json();
+            const data=await result.json();mailResult('leave_approval',job.id,result,data);
             if(!result.ok||!data.id)throw new Error(`Resend HTTP ${result.status}. Vérifiez la clé et l’expéditeur dans Render/Resend.`);
             await client.query("UPDATE schedule_leave_approval_mail SET status='sent',provider_id=$2,error='' WHERE id=$1",[job.id,data.id]);
           }catch(error){
-            await client.query("UPDATE schedule_leave_approval_mail SET status='error',error=$2 WHERE id=$1",[job.id,error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);
+            logEvent('mail_attempt_failed',{component:'leave_approval',jobId:String(job.id),code:errorCode(error)},'error');await client.query("UPDATE schedule_leave_approval_mail SET status='error',error=$2 WHERE id=$1",[job.id,error.message.startsWith('Resend HTTP')?error.message:'Envoi non confirmé. Nouvelle tentative prévue.']);
           }
           await client.query('COMMIT');
-        }catch{await client.query('ROLLBACK').catch(()=>{});}
+        }catch(error){logEvent('mail_transaction_failed',{component:'leave_approval',code:errorCode(error)},'error');await client.query('ROLLBACK').catch(()=>{});}
         finally{client.release();}
       }
     }finally{running=false;}
   }
-  if(autoStart){const timer=setInterval(()=>run().catch(()=>{}),30000);timer.unref();run().catch(()=>{});}
+  if(autoStart){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error'));}
   return {run,queue:queueApprovalMail};
 }
