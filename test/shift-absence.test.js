@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {normalizeCell,cellMinutes,cellDetail,publicSnapshot,blankCell,sheetHTML} from '../public/departments-core.js';
+import {shiftWithApprovedLeave,storedShiftAbsence,editedShiftLeave} from '../public/approved-shift-leave.js';
 import {serviceShiftTiming} from '../public/service-rules.js';
 import {personalDays} from '../public/portal-weeks.js';
 import {conflictsWithLeave} from '../leave-rules.js';
@@ -45,7 +46,7 @@ test('Service create/update handlers persist absence and mapping restores its ca
   const handlers=new Map();const app={post:(p,...h)=>handlers.set('post '+p,h.at(-1)),put:(p,...h)=>handlers.set('put '+p,h.at(-1))};
   const code=source.slice(source.indexOf('app.post("/api/weeks/:weekStart/shifts"'),source.indexOf('app.delete("/api/shifts/:id"'));
   const ensureWeek=async(start,client)=>client.query('INSERT INTO schedule_weeks(week_start) VALUES($1) ON CONFLICT DO NOTHING',[start]);
-  new Function('app','pool','requireManager','sameOrigin','validDate','normalizeShift','beginUndo','ensureWeek','mapShift','parseMinutes','approvedLeave','conflictsWithLeave','isoDate',code)(app,f.pool,()=>{},()=>{},()=>true,normalizeShift,async()=>{},ensureWeek,mapShift,(v)=>Number(v),async()=>[],conflictsWithLeave,v=>v);
+  new Function('app','pool','requireManager','sameOrigin','validDate','normalizeShift','beginUndo','ensureWeek','mapShift','parseMinutes','approvedLeave','conflictsWithLeave','isoDate','shiftWithApprovedLeave','storedShiftAbsence','editedShiftLeave',code)(app,f.pool,()=>{},()=>{},()=>true,normalizeShift,async()=>{},ensureWeek,mapShift,(v)=>Number(v),async()=>[],conflictsWithLeave,v=>v,shiftWithApprovedLeave,storedShiftAbsence,editedShiftLeave);
   const response=()=>({status(n){this.code=n;return this;},json(b){this.body=b;return this;}});
   const r=response();await handlers.get('post /api/weeks/:weekStart/shifts')({params:{weekStart:'2026-10-26'},body:{role:'cashier',startMinute:480,endMinute:1020,days:[3],absence:absence(false)}},r);
   assert.equal(r.code,201,JSON.stringify(r.body));assert.equal(r.body.shifts[0].paidMinutes,420);

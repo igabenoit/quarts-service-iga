@@ -1,3 +1,4 @@
+import {shiftWithApprovedLeave} from './approved-shift-leave.js';
 import {absenceLabel,workingIntervals} from './shift-absence.js';
 import {createSalesForecastDisplay} from './sales-forecast.js';
 import {serviceShiftTiming} from './service-rules.js';
@@ -107,14 +108,17 @@ function renderEmployees(){
 }
 async function loadEmployees(){state.employees=(await api("/api/employees"+(state.weekStart?"?weekStart="+state.weekStart:""))).employees;renderEmployees();renderSchedule();}
 function approvedForDay(id,day){return state.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(state.weekStart,day));}
+function candidateShift(employee,shift){return shiftWithApprovedLeave({...shift,weekStart:state.weekStart},approvedForDay(employee.id,shift.dayIndex),employee.id);}
 function availableForShift(employee,shift){
-  if(approvedForDay(employee.id,shift.dayIndex).some(p=>workingIntervals(shift.startMinute,shift.endMinute,shift.absence).some(([a,b])=>p.startMinute<b&&p.endMinute>a)))return false;
+  shift=candidateShift(employee,shift);
+  if(approvedForDay(employee.id,shift.dayIndex).some(p=>p.allDay||workingIntervals(shift.startMinute,shift.endMinute,shift.absence).some(([a,b])=>p.startMinute<b&&p.endMinute>a)))return false;
   if(!employee.active||!canWorkRole(employee,shift.role)||state.timeOff.some(x=>x.employeeId===employee.id&&x.dayIndex===shift.dayIndex))return false;
   return (employee.availability?.[shift.dayIndex]||[]).some(([start,end])=>start<=shift.startMinute&&end>=shift.endMinute);
 }
 function shiftAvailabilityPanel(shift){
   const people=state.employees.filter(e=>canWorkRole(e,shift.role)&&e.active).sort(compareDisplayOrder);
   const rows=people.map(e=>{
+    const candidate=candidateShift(e,shift);
     const leave=state.timeOff.some(x=>x.employeeId===e.id&&x.dayIndex===shift.dayIndex);
     const assigned=state.assignments.filter(a=>a.employeeId===e.id).map(a=>state.shifts.find(s=>s.id===a.shiftId)).filter(Boolean);
     const dayJob=assigned.find(s=>s.dayIndex===shift.dayIndex);
@@ -125,8 +129,8 @@ function shiftAvailabilityPanel(shift){
     if(dayJob)constraints.push(`Déjà assigné ${timeText(dayJob.startMinute)}–${timeText(dayJob.endMinute)}`);
     if(!state.dayExceptions.includes(e.id)&&assigned.length>=5&&!dayJob)constraints.push("5 jours atteints");
     const remaining=e.maxMinutes-assigned.reduce((sum,s)=>sum+s.paidMinutes,0);
-    if(remaining<shift.paidMinutes)constraints.push(`Maximum hebdomadaire : ${durationText(Math.max(0,remaining))} restantes`);
-    if(e.isMinor&&(assigned.reduce((sum,s)=>sum+s.paidMinutes,0)+shift.paidMinutes>1020||shift.dayIndex<5&&assigned.filter(s=>s.dayIndex<5).length>=2))constraints.push("Limite de 17 ans et moins");
+    if(remaining<candidate.paidMinutes)constraints.push(`Maximum hebdomadaire : ${durationText(Math.max(0,remaining))} restantes`);
+    if(e.isMinor&&(assigned.reduce((sum,s)=>sum+s.paidMinutes,0)+candidate.paidMinutes>1020||shift.dayIndex<5&&assigned.filter(s=>s.dayIndex<5).length>=2))constraints.push("Limite de 17 ans et moins");
     const covers=windows.some(([start,end])=>start<=shift.startMinute&&end>=shift.endMinute);
     return `<li><b>${escapeHtml(e.name)}</b><span>${leave?"Congé demandé":windows.length?escapeHtml(windowText(windows)):"Indisponible ce jour"}</span>${constraints.length?`<small>${escapeHtml(constraints.join(" · "))}</small>`:!covers&&windows.length?"<small>La plage ne couvre pas le quart actuel</small>":""}</li>`;
   }).join("");
@@ -146,7 +150,7 @@ function renderSchedule(){
   $("#permanentAvailabilityWarnings").innerHTML=availabilityConflicts.length?"<h3>Disponibilités modifiées — quarts à vérifier</h3><p>Ces affectations sont conservées. Choisissez un autre quart ou un remplaçant.</p><ul>"+availabilityConflicts.map(({employee:e,shift:s})=>`<li>${escapeHtml(e.name)} · ${shortDays[s.dayIndex]} ${timeText(s.startMinute)}–${timeText(s.endMinute)}</li>`).join("")+"</ul>":"";
   const missing=state.shifts.filter(s=>!assignedName(s.id));
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
-  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day">${salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}</h4>${state.employees.filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?"":" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
+  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day">${salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}</h4>${state.employees.filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
   $("#employeeTotals").innerHTML="<h3>Heures par employé</h3>"+scheduleGroups.map(group=>`<div class="total-group"><strong>${group.title}</strong>${state.employees.filter(e=>group.roles.includes(e.role)&&state.assignments.some(a=>a.employeeId===e.id)).map(e=>{const paid=state.assignments.filter(a=>a.employeeId===e.id).reduce((sum,a)=>sum+(state.shifts.find(s=>s.id===a.shiftId)?.paidMinutes||0),0);return `<span>${escapeHtml(e.name)} : ${durationText(paid)} / ${durationText(e.targetMinutes)} souhaitées</span>`;}).join("")||"<span>Aucun quart attribué</span>"}</div>`).join("");
   document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=async()=>{
     const message=$("#assignmentMessage");message.hidden=true;message.textContent="";
@@ -258,8 +262,9 @@ $("#applyApprovedLeaves").onclick=async()=>{
     if(state.weekStart===week){
       const leaves=(await api(`/api/leave/week/${week}`)).leaves;
       const assignments=await api(`/api/weeks/${week}/assignments`);
-      if(state.weekStart===week){state.approvedLeaves=leaves;state.assignments=assignments.assignments;render();
-        $("#leaveApplyStatus").textContent=result.releasedShifts?`${result.releasedShifts} quart(s) remis à couvrir. Choisissez leur remplaçant dans la grille. Toutes les autres affectations sont conservées.`:"Les congés approuvés sont appliqués. Aucune affectation à retirer.";
+      const shifts=(await api(`/api/weeks/${week}`)).shifts;
+      if(state.weekStart===week){state.approvedLeaves=leaves;state.assignments=assignments.assignments;state.shifts=shifts;render();
+        $("#leaveApplyStatus").textContent=`Congés appliqués : ${result.adjustedShifts||0} quart(s) ajusté(s) avec absence partielle; ${result.releasedShifts} quart(s) remis à couvrir.`;
       }
     }
   }catch(error){$("#leaveApplyStatus").textContent=error.message;showError(error);}

@@ -5,6 +5,8 @@ import vm from 'node:vm';
 import {backupBeforeRegeneration,installScheduleBackup,restorationPreview} from '../schedule-backup.js';
 import {beginUndo} from '../undo.js';
 import {applyServiceRoleDefault} from '../service-role-defaults.js';
+import {shiftWithApprovedLeave} from '../public/approved-shift-leave.js';
+import {saveShiftLeave} from '../approved-shift-leave.js';
 
 const week='2026-10-12';
 const shift=(id,day=0)=>({id:String(id),area:'front',role:'cashier',day_index:day,start_minute:675,end_minute:1035,break_minutes:0});
@@ -126,7 +128,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       return {rows:[]};
     }};
     const context=vm.createContext({app:{post(_path,...handlers){handler=handlers.at(-1);}},pool:{connect:async()=>client},requireManager(){},sameOrigin(){},validDate:()=>true,
-      mapShift:r=>({...r,id:Number(r.id)}),mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,applyServiceRoleDefault,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
+      mapShift:r=>({...r,id:Number(r.id)}),mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,applyServiceRoleDefault,shiftWithApprovedLeave,saveShiftLeave,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
     vm.runInContext(route,context);
     const res={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
     await handler({params:{weekStart:week},body:{replaceAll:true}},res);

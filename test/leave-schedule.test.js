@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {releaseLeaveConflicts} from '../leave-schedule.js';
+import {applyApprovedLeave} from '../leave-schedule.js';
 import {installLeave} from '../leave.js';
 import {uncoveredLeavePeriods, leaveStatistics} from '../leave-rules.js';
 
@@ -18,6 +18,7 @@ function clientFor(rows,{failDelete=false}={}) {
       assert.match(sql,/FOR UPDATE OF a/);
       return {rows:[...remaining.values()].filter(r=>(!args[0]||r.week_start===args[0])&&(!args[1]||r.request_id===String(args[1])))};
     }
+    if(sql.startsWith('UPDATE schedule_shifts SET absence=')){remaining.get(String(args[1])).absence=args[0];return {rows:[]};}
     if(sql.startsWith('DELETE FROM schedule_assignments')){
       if(failDelete)throw new Error('Simulated database error');
       const deleted=args[0].filter(id=>remaining.delete(id)).map(shift_id=>({shift_id}));
@@ -26,26 +27,27 @@ function clientFor(rows,{failDelete=false}={}) {
     return {rows:[]};
   }};
 }
-test('un congé libère seulement le quart chevauché, pas les quarts avant/après ni les autres semaines',async()=>{
+test('un congé partiel conserve le quart avec absence, sans modifier les quarts avant/après ni les autres semaines',async()=>{
   const rows=[assignment(1,5),assignment(2,4),assignment(3,5,480,600),assignment(4,5,720,1020),assignment(5,5,480,1020,'2026-10-19')];
   for(const r of rows)r.periods=[period('2026-10-17',600,720),period('2026-10-24')];
   const client=clientFor(rows);
-  const released=await releaseLeaveConflicts(client,{weekStart:'2026-10-12'});
-  assert.deepEqual(released.map(s=>s.shiftId),[1]);
-  assert.deepEqual([...client.remaining.keys()],['2','3','4','5']);
+  const changes=await applyApprovedLeave(client,{weekStart:'2026-10-12'});
+  assert.deepEqual(changes.released,[]);
+  assert.deepEqual(changes.adjusted.map(s=>s.shiftId),[1]);
+  assert.deepEqual([...client.remaining.keys()],['1','2','3','4','5']);
   assert.equal(client.calls.filter(c=>c.sql.startsWith('INSERT INTO schedule_leave_events')).length,1);
-  assert.deepEqual(await releaseLeaveConflicts(client,{weekStart:'2026-10-12'}),[]);
+  assert.deepEqual(await applyApprovedLeave(client,{weekStart:'2026-10-12'}),{released:[],adjusted:[]});
 });
 test('une approbation multisemaine est limitée à cette demande',async()=>{
   const a=assignment(1,5),b=assignment(2,5,480,1020,'2026-10-19'),other=assignment(3,5);
   a.periods=b.periods=[period('2026-10-17'),period('2026-10-24')];other.request_id='21';other.employee_id='8';
   const client=clientFor([a,b,other]);
-  assert.deepEqual((await releaseLeaveConflicts(client,{requestId:'20'})).map(s=>s.shiftId),[1,2]);
+  assert.deepEqual((await applyApprovedLeave(client,{requestId:'20'})).released.map(s=>s.shiftId),[1,2]);
   assert.deepEqual([...client.remaining.keys()],['3']);
 });
 test('une portée explicite est obligatoire et une erreur de retrait remonte au gestionnaire de transaction',async()=>{
-  await assert.rejects(releaseLeaveConflicts(clientFor([])),/semaine ou une demande/);
-  await assert.rejects(releaseLeaveConflicts(clientFor([assignment(1,5)],{failDelete:true}),{requestId:'20'}),/database error/);
+  await assert.rejects(applyApprovedLeave(clientFor([])),/semaine ou une demande/);
+  await assert.rejects(applyApprovedLeave(clientFor([assignment(1,5)],{failDelete:true}),{requestId:'20'}),/database error/);
 });
 
 async function routesFor(client,{status='pending',isTest=false,version=1,periods=[period('2026-10-17')],other=[]}={}){
@@ -63,6 +65,7 @@ async function routesFor(client,{status='pending',isTest=false,version=1,periods
     if(sql.startsWith('UPDATE schedule_leave_requests SET effective_periods=')){
       for(const r of client.remaining.values())if(r.request_id===args[1])r.periods=JSON.parse(args[0]);
     }
+    if(sql.startsWith('UPDATE schedule_leave_requests SET status=')&&args[0]==='cancelled')for(const r of client.remaining.values()){r.periods=[];r.request_id=null;}
     if(sql.startsWith('SELECT code FROM schedule_leave_departments'))return {rows:[{code:'service'}]};
     return original(sql,args);
   };
