@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
-function print(data){const c=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data)',c);}
+function print(data,options={}){const c=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.options=options;c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data,options)',c);}
 const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
 
@@ -73,4 +73,16 @@ test('sixteen cashiers and a packer with a partial leave stay on their own singl
  assert.match(sheets[1],/data-row-unit="36"/);
  assert.match(sheets[2],/À couvrir/);
  for(const sheet of sheets)assert.match(sheet,/Feuille [123] \/ 3/);
+});
+
+test('blank Service master preserves active roster, order, seniority and availability without modifying the schedule',()=>{
+ const data={employees:[person(2),person(1,'manager'),{...person(3),active:false}],shifts:[shift(1,'manager'),shift(2),shift(3)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:3}],approvedLeaves:[{employee_id:1,periods:[{date:'2026-10-12',allDay:true}]}],timeOff:[{employeeId:2,dayIndex:1}]};
+ const before=structuredClone(data),filled=print(data),html=print(data,{blank:true});
+ assert.deepEqual(data,before);
+ assert.match(html,/MASTER VIDE/);assert.match(html,/Employé témoin 1/);assert.match(html,/Employé témoin 2/);
+ assert.doesNotMatch(html,/Employé témoin 3|class="print-start"|CONGÉ|Indisponible|À couvrir|Bonne fête/);
+ assert.match(html,/<span>8–17<\/span>/);assert.match(html,/<span>J<\/span>/);
+ assert.match(html,/2020/);assert.match(html,/Cette feuille : ________ h/);
+ assert.match(html,/sheet-total print-hours"><\/td>/);assert.equal((html.match(/<article class="service-sheet/g)||[]).length,3);
+ assert.equal(print(data),filled,'ordinary print remains unchanged after preparing a blank master');
 });

@@ -58,7 +58,8 @@ function assignedName(id){const a=state.assignments.find(a=>a.shiftId===id);retu
 function shiftCard(shift){const detail=shift.role==="support"&&shift.sourceDepartment?` · ${escapeHtml(shift.sourceDepartment)}`:"";const name=assignedName(shift.id);return `<button class="shift-card ${shift.role}" data-id="${shift.id}"><b>${roleNames[shift.role]}${detail}</b><span>${timeText(shift.startMinute)} à ${timeText(shift.endMinute)}</span><small>${durationText(shift.paidMinutes)} payées${shift.breakMinutes?` · repas ${shift.breakMinutes} min non payé`:""}${shift.absence?` · ${escapeHtml(absenceLabel(shift.absence))}`:""}${shift.notes?` · ${escapeHtml(shift.notes)}`:""}</small>${name?`<strong>${escapeHtml(name)}</strong>`:""}</button>`;}
 function renderBoard(area,target){$(target).innerHTML=dayNames.map((day,index)=>{const date=addDays(state.weekStart,index);const shifts=state.shifts.filter(s=>s.area===area&&s.dayIndex===index).sort((a,b)=>a.startMinute-b.startMinute);return `<article class="day-column">${salesForecasts.dayHTML(date)}<div class="day-head"><strong>${day}</strong><small>${fmtDate.format(new Date(`${date}T12:00:00Z`))}</small></div><div class="shift-list">${shifts.length?shifts.map(shiftCard).join(""):'<div class="empty">Aucun quart</div>'}</div><div class="day-total">${durationText(dayTotal(area,index))}</div></article>`;}).join("");document.querySelectorAll(`${target} .shift-card`).forEach(button=>button.onclick=()=>editShift(Number(button.dataset.id)));}
 function renderWarnings(){const warnings=[];for(let day=0;day<7;day++){const front=state.shifts.filter(s=>s.area==="front"&&s.dayIndex===day);if(front.length&&!front.some(s=>s.role==="supervisor"||s.role==="manager"))warnings.push(`${shortDays[day]} sans gérante ni superviseur`);}$("#frontWarnings").innerHTML=warnings.map(w=>`<span class="warning">${w}</span>`).join("");}
-function servicePrintHTML(data){
+function servicePrintHTML(data,{blank=false}={}){
+  if(blank)data={...data,shifts:[],assignments:[],approvedLeaves:[],timeOff:[],relatedDepartments:[]};
   const e=escapeHtml,hours=n=>(n/60).toLocaleString('fr-CA',{maximumFractionDigits:2}),time=n=>n>1440?time(n%1440)+' +1':`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
   const shortTime=n=>`${Math.floor(n/60)}${n%60?'h'+String(n%60).padStart(2,'0'):''}`;
   const paid=s=>s.external?s.paidMinutes:serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes;
@@ -67,6 +68,7 @@ function servicePrintHTML(data){
   const availability=(person,day)=>{const windows=person.availability?.[day]||[];return !windows.length?'0':windows.some(([a,b])=>a===0&&b===1440)?'J':windows.map(([a,b])=>shortTime(a)+'–'+shortTime(b)).join(' / ');};
   const approved=(id,day)=>data.approvedLeaves.filter(r=>Number(r.employee_id)===id).flatMap(r=>r.periods).filter(p=>p.date===addDays(data.weekStart,day));
   const cell=(person,jobs,day,pending=false)=>{
+    if(blank)return {content:'',unavailable:false,hours:'',availability:availability(person,day),height:13};
     const own=jobs.filter(s=>s.dayIndex===day),external=pending?[]:serviceDayPortions(data,person.id,day);
     const shifts=[...own.map(s=>external.length?{...s,sharedDay:true,sourceDepartment:'Service'}:s),...external].sort((a,b)=>a.startMinute-b.startMinute),periods=pending?[]:approved(person.id,day);
     const manual=!pending&&data.timeOff.some(t=>t.employeeId===person.id&&t.dayIndex===day);
@@ -96,13 +98,13 @@ function servicePrintHTML(data){
     return {...plan,rows,units,rowUnit:Math.max(32,Math.min(42,Math.floor(588/Math.max(14,units))))};
   });
   const total=data.shifts.reduce((n,s)=>n+paid(s),0),unfilledMinutes=data.shifts.filter(s=>!assigned.has(s.id)).reduce((n,s)=>n+paid(s),0);
-  const rowHTML=r=>`<tr class="sheet-person${r.pending?' service-unfilled':''}" data-row-units="${Math.min(15,r.units)}"${r.person.id?` data-person="${r.person.id}"`:''}><th scope="row" class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}${r.person.role==='manager'?'<small class="sheet-job-title">Gérante</small>':''}</div></th><td class="sheet-seniority">${r.pending?'':e(seniorityText(r.person.seniority))}</td>${r.cells.map(c=>`<td class="sheet-day${c.unavailable?' service-off':''}"><div class="sheet-work">${c.content}</div><div class="sheet-day-detail"><span>${c.hours}</span><span>${e(c.availability)}</span></div></td>`).join('')}<td class="sheet-total print-hours">${r.minutes?hours(r.minutes):'—'}</td></tr>`;
+  const rowHTML=r=>`<tr class="sheet-person${r.pending?' service-unfilled':''}" data-row-units="${Math.min(15,r.units)}"${r.person.id?` data-person="${r.person.id}"`:''}><th scope="row" class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}${r.person.role==='manager'?'<small class="sheet-job-title">Gérante</small>':''}</div></th><td class="sheet-seniority">${r.pending?'':e(seniorityText(r.person.seniority))}</td>${r.cells.map(c=>`<td class="sheet-day${c.unavailable?' service-off':''}"><div class="sheet-work">${c.content}</div><div class="sheet-day-detail"><span>${c.hours}</span><span>${e(c.availability)}</span></div></td>`).join('')}<td class="sheet-total print-hours">${blank?'':r.minutes?hours(r.minutes):'—'}</td></tr>`;
   const blankRow=()=>`<tr class="sheet-person blank-row"><th class="sheet-name"><div class="sheet-person-label"></div></th><td></td>${dayNames.map(()=>'<td><div class="sheet-work"></div><div class="sheet-day-detail"><span></span><span></span></div></td>').join('')}<td></td></tr>`;
   return pages.map((page,index)=>{
     const groupNames=[...new Set(page.rows.map(r=>r.group))];if(!groupNames.length)groupNames.push(page.title);
     const subtotal=page.rows.reduce((n,r)=>n+r.minutes,0),vacant=page.rows.filter(r=>r.pending).reduce((n,r)=>n+r.minutes,0);
-    const table=groupNames.map((name,i)=>{const rows=page.rows.filter(r=>r.group===name),sum=rows.reduce((n,r)=>n+r.minutes,0);return `<tbody><tr class="sheet-group"><th colspan="10">${e(name)}</th></tr>${rows.map(rowHTML).join('')}${i===groupNames.length-1?Array.from({length:Math.max(0,14-page.units)},blankRow).join(''):''}<tr class="sheet-subtotal"><td colspan="9">Sous-total sur cette feuille · ${e(name)}</td><td>${hours(sum)}</td></tr></tbody>`;}).join('');
-    return `<article class="service-sheet${page.units>14?' compact-service':''}" data-page="${index+1}" data-row-unit="${page.rowUnit}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>Service</h1><p>HORAIRE HEBDOMADAIRE · ${e(page.title)}</p><strong>Du ${formatWeek(data.weekStart)}</strong><small>Feuille ${index+1} / ${pages.length}</small></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${dayNames.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(data.weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-totals"><strong>Cette feuille : ${hours(subtotal)} h</strong><span>dont ${hours(vacant)} h à couvrir</span></div></div><div class="service-week-total"><strong>Service · semaine complète : ${hours(total)} h</strong><span>dont ${hours(unfilledMinutes)} h à couvrir · Total identique sur chaque feuille</span></div><div class="sheet-notes"><strong>Notes / précisions</strong><p></p></div></article>`;
+    const table=groupNames.map((name,i)=>{const rows=page.rows.filter(r=>r.group===name),sum=rows.reduce((n,r)=>n+r.minutes,0);return `<tbody><tr class="sheet-group"><th colspan="10">${e(name)}</th></tr>${rows.map(rowHTML).join('')}${i===groupNames.length-1?Array.from({length:Math.max(0,14-page.units)},blankRow).join(''):''}<tr class="sheet-subtotal"><td colspan="9">Sous-total sur cette feuille · ${e(name)}</td><td>${blank?'':hours(sum)}</td></tr></tbody>`;}).join('');
+    return `<article class="service-sheet${page.units>14?' compact-service':''}" data-page="${index+1}" data-row-unit="${page.rowUnit}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>Service</h1><p>${blank?'MASTER VIDE':'HORAIRE HEBDOMADAIRE'} · ${e(page.title)}</p><strong>Du ${formatWeek(data.weekStart)}</strong><small>Feuille ${index+1} / ${pages.length}</small></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${dayNames.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(data.weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-totals"><strong>Cette feuille : ${blank?'________':hours(subtotal)} h</strong><span>${blank?'':'dont '+hours(vacant)+' h à couvrir'}</span></div></div><div class="service-week-total"><strong>Service · semaine complète : ${blank?'________':hours(total)} h</strong><span>${blank?'À remplir à la main':'dont '+hours(unfilledMinutes)+' h à couvrir · Total identique sur chaque feuille'}</span></div><div class="sheet-notes"><strong>Notes / précisions</strong><p></p></div></article>`;
   }).join('');
 }
 function renderPrint(){$('#printSheet').innerHTML=servicePrintHTML(state);}
@@ -259,9 +261,10 @@ $("#role").onchange=e=>{$("#departmentWrap").hidden=e.target.value!=="support";}
 $("#shiftForm").onsubmit=async event=>{event.preventDefault();try{const id=Number($("#shiftId").value)||null;const days=[...document.querySelectorAll("#dayChoices input:checked")].map(x=>Number(x.value));const body={absence:readServiceAbsence(),role:$("#role").value,startMinute:minutes($("#startTime").value),endMinute:minutes($("#endTime").value),breakMinutes:Number($("#breakMinutes").value),sourceDepartment:$("#sourceDepartment").value,notes:$("#shiftNotes").value};if(id){body.dayIndex=days[0];const result=await api(`/api/shifts/${id}`,{method:"PUT",body:JSON.stringify(body)});state.shifts=state.shifts.map(s=>s.id===id?result.shift:s);}else{const result=await api(`/api/weeks/${state.weekStart}/shifts`,{method:"POST",body:JSON.stringify({...body,days})});state.shifts.push(...result.shifts);}resetForm(days[0]||0);render();toast(id?"Quart modifié":"Quart ajouté");}catch(error){showError(error);}};
 $("#cancelEdit").onclick=()=>resetForm();$("#deleteShift").onclick=async()=>{const id=Number($("#shiftId").value);if(!id||!confirm("Supprimer ce quart?"))return;try{await api(`/api/shifts/${id}`,{method:"DELETE"});state.shifts=state.shifts.filter(s=>s.id!==id);resetForm();render();toast("Quart supprimé");}catch(error){showError(error);}};
 for(const id of ["frontBudget","packerBudget","weekNotes"])$("#"+id).oninput=queueSave;
-let servicePdfUrl=null,servicePdfBusy=false;
-function showServicePreview(){
-  renderPrint();$('#previewPages').innerHTML=$('#printSheet').innerHTML;$('#servicePdfStatus').textContent='Format légal · 8½ × 14 po · Portrait';$('#servicePdfResult').hidden=true;
+let servicePdfUrl=null,servicePdfBusy=false,servicePreviewKind='filled';
+function showServicePreview(kind=servicePreviewKind){
+  servicePreviewKind=kind==='blank'?'blank':'filled';$('#servicePrintKind').value=servicePreviewKind;
+  $('#printSheet').innerHTML=servicePrintHTML(state,{blank:servicePreviewKind==='blank'});$('#previewPages').innerHTML=$('#printSheet').innerHTML;$('#servicePdfStatus').textContent='Format légal · 8½ × 14 po · Portrait';$('#servicePdfResult').hidden=true;
   if(!$('#printPreview').open)$('#printPreview').showModal();
 }
 async function checkedServiceSheets(){
@@ -269,23 +272,25 @@ async function checkedServiceSheets(){
   await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
   return sheets;
 }
-async function printService(){
-  document.body.classList.remove('printing-planogram');showServicePreview();
+async function printService(kind=servicePreviewKind){
+  document.body.classList.remove('printing-planogram');showServicePreview(kind);
   try{const {prepareSchedulePages}=await import('./schedule-layout.js');const prepared=prepareSchedulePages(await checkedServiceSheets());try{$('#printSheet').innerHTML=prepared.pages.map(page=>page.outerHTML).join('');}finally{prepared.cleanup();}$('#printPreview').close();window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
 }
-$('#printBtn').onclick=printService;
-$('#previewBtn').onclick=showServicePreview;
+$('#printBtn').onclick=()=>printService('filled');
+$('#blankMasterBtn').onclick=()=>showServicePreview('blank');
+$('#servicePrintKind').onchange=event=>showServicePreview(event.target.value);
+$('#previewBtn').onclick=()=>showServicePreview('filled');
 $('#previewClose').onclick=()=>$('#printPreview').close();
-$('#previewPrint').onclick=printService;
+$('#previewPrint').onclick=()=>printService();
 $('#printPreview').addEventListener('cancel',event=>{if(servicePdfBusy)event.preventDefault();});
 $('#previewPdf').onclick=async()=>{
   if(servicePdfBusy)return;
-  const weekStart=state.weekStart,buttons=[$('#previewPdf'),$('#previewPrint'),$('#previewClose')];servicePdfBusy=true;buttons.forEach(button=>button.disabled=true);$('#servicePdfResult').hidden=true;$('#servicePdfStatus').textContent='Préparation du PDF…';
+  const weekStart=state.weekStart,buttons=[$('#previewPdf'),$('#previewPrint'),$('#previewClose'),$('#servicePrintKind')];servicePdfBusy=true;buttons.forEach(button=>button.disabled=true);$('#servicePdfResult').hidden=true;$('#servicePdfStatus').textContent='Préparation du PDF…';
   try{
     const sheets=await checkedServiceSheets(),{schedulePagesPDF}=await import('./department-pdf.js');
     const blob=await schedulePagesPDF(sheets,{previewSelector:'#previewPages .service-sheet'});
     if(servicePdfUrl)URL.revokeObjectURL(servicePdfUrl);servicePdfUrl=URL.createObjectURL(blob);
-    $('#servicePdfDownload').href=servicePdfUrl;$('#servicePdfDownload').download='Horaire-Service-'+weekStart+'.pdf';$('#servicePdfOpen').href=servicePdfUrl;
+    $('#servicePdfDownload').href=servicePdfUrl;$('#servicePdfDownload').download=(servicePreviewKind==='blank'?'Master-vide-Service-':'Horaire-Service-')+weekStart+'.pdf';$('#servicePdfOpen').href=servicePdfUrl;
     $('#servicePdfResult').hidden=false;$('#servicePdfStatus').textContent='PDF prêt : '+blob.pageCount+' feuilles légales, sans adresse Web ni date d’impression.';
   }catch(error){$('#servicePdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}finally{servicePdfBusy=false;buttons.forEach(button=>button.disabled=false);}
 };
