@@ -176,8 +176,8 @@ export function draftWarnings(draft,people){
 }
 export const isBirthday=(birth,date)=>Boolean(birth&&date&&String(birth).slice(-5)===String(date).slice(-5));
 export const birthdayGreeting=(birth,date)=>isBirthday(birth,date)?'Bonne fête !':'';
-export function publicSnapshot(draft,people,departmentId){
-  if(departmentId!==undefined)draft=orderDraft(draft,people,departmentId);
+export function publicSnapshot(draft,people,departmentId,departmentKey){
+  if(departmentId!==undefined)draft=orderDraft(draft,people,departmentId,departmentKey);
   return {rows:draft.rows.map(row=>({personId:row.personId,name:people.find(p=>p.id===row.personId).name,jobTitle:people.find(p=>p.id===row.personId).jobTitle||'',specification:people.find(p=>p.id===row.personId).specification||'',birthdayMonthDay:(people.find(p=>p.id===row.personId).birthday||'').slice(5),group:people.find(p=>p.id===row.personId).group,cells:row.cells.map(normalizeCell)})),notes:draft.notes};
 }
 export function sheetHTML({department,weekStart,people,draft,blank=false,related=[]}){
@@ -201,17 +201,18 @@ export function sheetHTML({department,weekStart,people,draft,blank=false,related
     const label=entry=>r.shared?shiftAssignment(entry,entry.printDepartment||department.key):cellDetail(entry);
     return `<td class="sheet-day ${blank?'':cellTone(c)}"><div class="sheet-work ${!blank&&entries.some(v=>label(v))?'has-detail':''} ${multiple?'multiple-shifts':''} ${blank?'':cellTone(c)}">${!blank&&multiple?`<small class="printed-day-total">Quart complet · ${hoursLabel(timed.reduce((n,v)=>n+cellMinutes(v),0))} h</small>`:''}${blank?'':entries.map(entry=>isTimedCell(entry)?`<div class="printed-shift shift-theme-${e(entry.printDepartment||department.key)} ${cellTone(entry)}">${label(entry)?`<small class="assignment-label">${e(label(entry))}</small>`:''}<span class="printed-shift-range"><b>${timeLabel(entry.start)}</b><span>–</span><b>${timeLabel(entry.end)}</b></span></div>`:e(cellLabel(entry))).join('')}${!blank&&isBirthday(r.person.birthday,addDays(weekStart,d))?'<small class="birthday-greeting">Bonne fête !</small>':''}</div><div class="sheet-day-detail"><span class="sheet-daily-hours">${blank||!timed.length?'':hoursLabel(timed.reduce((n,v)=>n+cellMinutes(v),0))}</span><span class="sheet-availability">${e(availabilityLabel(r.person.availability?.[d]))}</span></div></td>`;
   };
-  if(department.id!==undefined)rows.sort((a,b)=>comparePeople(a.person,b.person,department.id));
-  const regularCount=rows.filter(r=>r.person.group==='regular').length,partTimeCount=rows.filter(r=>r.person.group==='part_time').length;
-  const count=regularCount+partTimeCount,units=rows.reduce((n,r)=>n+r.printUnits,0),capacity=Math.max(count,PRINT_ROW_CAPACITY-(units-count));
-  const regularSlots=count?Math.max(regularCount,Math.min(Math.round(capacity*regularCount/count),capacity-partTimeCount)):7;
-  const slots={regular:regularSlots,part_time:Math.max(partTimeCount,capacity-regularSlots)};
-  const groups=[['regular','Réguliers'],['part_time','Temps partiel']];let sum=0,trainingSum=0,buffetSum=0,kitchenSum=0;
+  for(const row of rows)row.scheduleGroup=scheduleGroup(row.person,blank?draft.rows.find(r=>r.personId===row.person.id):row,department.key);
+  if(department.id!==undefined||department.key==='epicerie')rows.sort((a,b)=>({regular:0,part_time:1,night:2}[a.scheduleGroup]-{regular:0,part_time:1,night:2}[b.scheduleGroup])||comparePeople(a.scheduleGroup==='night'?{...a.person,group:'night'}:a.person,b.scheduleGroup==='night'?{...b.person,group:'night'}:b.person,department.id));
+  const regularCount=rows.filter(r=>r.scheduleGroup==='regular').length,partTimeCount=rows.filter(r=>r.scheduleGroup==='part_time').length,nightCount=rows.filter(r=>r.scheduleGroup==='night').length;
+  const count=regularCount+partTimeCount,units=rows.reduce((n,r)=>n+r.printUnits,0),capacity=Math.max(count,PRINT_ROW_CAPACITY-(units-count)-(nightCount?2:0));
+  const regularSlots=count?Math.max(regularCount,Math.min(Math.round(capacity*regularCount/count),capacity-partTimeCount)):nightCount?0:7;
+  const slots={regular:regularSlots,part_time:nightCount&&!count?0:Math.max(partTimeCount,capacity-regularSlots),night:nightCount};
+  const groups=[['regular','Réguliers'],['part_time','Temps partiel'],['night','Équipe de nuit']];let sum=0,trainingSum=0,buffetSum=0,kitchenSum=0;
   const totals=(regular,training,empty=false,buffet=0,kitchen=0)=>`<span class="regular-hours">${empty?'':hoursLabel(regular)}</span>${!empty&&training>0?`<small class="training-hours">Form. ${hoursLabel(training)}</small>`:''}${!empty&&buffet>0?`<small class="buffet-hours">Buffet ${hoursLabel(buffet)}</small>`:''}${!empty&&kitchen>0?`<small class="kitchen-hours">Cuisine ${hoursLabel(kitchen)}</small>`:''}`;
-  const table=groups.filter(([key])=>slots[key]>0).map(([key,label])=>{const selected=rows.filter(r=>r.person.group===key);while(selected.length<slots[key])selected.push({person:{name:'',seniorityDate:'',group:key,availability:{}},cells:Array.from({length:7},blankCell)});const subtotal=selected.reduce((n,r)=>n+totalMinutes(r),0),trainingSubtotal=selected.reduce((n,r)=>n+trainingMinutes(r),0);sum+=subtotal;trainingSum+=trainingSubtotal;buffetSum+=selected.reduce((n,r)=>n+buffetMinutes(r),0);kitchenSum+=selected.reduce((n,r)=>n+kitchenMinutes(r),0);
+  const table=groups.filter(([key])=>slots[key]>0).map(([key,label])=>{const selected=rows.filter(r=>r.scheduleGroup===key);while(selected.length<slots[key])selected.push({person:{name:'',seniorityDate:'',group:key,availability:{}},cells:Array.from({length:7},blankCell)});const subtotal=selected.reduce((n,r)=>n+totalMinutes(r),0),trainingSubtotal=selected.reduce((n,r)=>n+trainingMinutes(r),0);sum+=subtotal;trainingSum+=trainingSubtotal;buffetSum+=selected.reduce((n,r)=>n+buffetMinutes(r),0);kitchenSum+=selected.reduce((n,r)=>n+kitchenMinutes(r),0);
     return `<tbody data-group="${key}"><tr class="sheet-group"><th colspan="10">${label}</th></tr>${selected.map(r=>`<tr class="sheet-person${r.printUnits>1?' multi-shift-row':''}"><th class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}${r.person.jobTitle?`<small class="sheet-job-title">${e(r.person.jobTitle)}</small>`:''}${r.person.specification?`<small class="sheet-specification">${e(r.person.specification)}</small>`:''}</div></th><td class="sheet-seniority">${r.person.name?e(r.person.seniorityDate?dateLabel(r.person.seniorityDate):'À compléter'):''}</td>${r.cells.map((c,d)=>printDay(r,c,d)).join('')}<td class="sheet-total">${totals(totalMinutes(r),trainingMinutes(r),blank||!r.person.name,buffetMinutes(r),kitchenMinutes(r))}${!blank&&r.shared?`<small class="all-posts-total">Sem. ${hoursLabel(r.allMinutes)} h</small>`:''}</td></tr>`).join('')}<tr class="sheet-subtotal"><td colspan="9">Sous-total ${label.toLowerCase()}</td><td>${totals(subtotal,0,blank)}</td></tr></tbody>`;
   }).join('');
-  return `<article class="department-sheet theme-${e(style.key)} standard-fourteen${units>PRINT_ROW_CAPACITY?' compact-sheet':''}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>régulier</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-department-totals"><strong>Régulier : ${blank?'________':hoursLabel(sum)} h</strong>${!blank&&trainingSum>0?`<strong class="department-training-total">Formation : ${hoursLabel(trainingSum)} h</strong>`:''}${!blank&&buffetSum>0?`<strong class="department-buffet-total">Buffet : ${hoursLabel(buffetSum)} h</strong>`:''}${!blank&&kitchenSum>0?`<strong class="department-kitchen-total">Cuisine : ${hoursLabel(kitchenSum)} h</strong>`:''}<strong class="grand-total">Grand total : ${blank?'________':hoursLabel(sum+trainingSum+buffetSum+kitchenSum)} h</strong></div></div></article>`;
+  return `<article class="department-sheet theme-${e(style.key)} standard-fourteen${units>PRINT_ROW_CAPACITY||nightCount?' compact-sheet':''}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>régulier</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-department-totals"><strong>Régulier : ${blank?'________':hoursLabel(sum)} h</strong>${!blank&&trainingSum>0?`<strong class="department-training-total">Formation : ${hoursLabel(trainingSum)} h</strong>`:''}${!blank&&buffetSum>0?`<strong class="department-buffet-total">Buffet : ${hoursLabel(buffetSum)} h</strong>`:''}${!blank&&kitchenSum>0?`<strong class="department-kitchen-total">Cuisine : ${hoursLabel(kitchenSum)} h</strong>`:''}<strong class="grand-total">Grand total : ${blank?'________':hoursLabel(sum+trainingSum+buffetSum+kitchenSum)} h</strong></div></div></article>`;
 }
 
 // Ranks belong to a department and employment group; missing ranks follow members.
@@ -221,8 +222,18 @@ export function comparePeople(a={},b={},departmentId){
     || (a.seniorityDate||'9999').localeCompare(b.seniorityDate||'9999')
     || (a.name||'').localeCompare(b.name||'','fr-CA') || (a.id||0)-(b.id||0);
 }
-export function orderDraft(draft,people,departmentId){
+export function scheduleGroup(person={},row={},departmentKey){
+  const nightLabel=/(?:^|\W)nuit(?:s)?(?:$|\W)/i.test(`${person.jobTitle||''} ${person.specification||''}`);
+  const nightCells=(row.cells||[]).some(c=>isTimedCell(c)&&isNightShift(c.start,c.end,c.post)&&(!c.workDepartment||c.workDepartment==='epicerie'));
+  return departmentKey==='epicerie'&&(nightLabel||nightCells)?'night':person.group||'regular';
+}
+export function compareScheduleRows(a,b,people,departmentId,departmentKey){
+  const pa=people.get(a.personId)||a.person||{},pb=people.get(b.personId)||b.person||{};
+  const ga=scheduleGroup(pa,a,departmentKey),gb=scheduleGroup(pb,b,departmentKey),rank={regular:0,part_time:1,night:2};
+  return (rank[ga]??0)-(rank[gb]??0)||comparePeople(ga==='night'?{...pa,group:'night'}:pa,gb==='night'?{...pb,group:'night'}:pb,departmentId);
+}
+export function orderDraft(draft,people,departmentId,departmentKey){
   const byId=new Map(people.map(p=>[p.id,p]));
-  return {...draft,rows:[...draft.rows].sort((a,b)=>comparePeople(byId.get(a.personId),byId.get(b.personId),departmentId))};
+  return {...draft,rows:[...draft.rows].sort((a,b)=>compareScheduleRows(a,b,byId,departmentId,departmentKey))};
 }
 

@@ -7,7 +7,7 @@ const charged=c=>isTimedCell(c)?c.departmentMinutes??(isOutgoing(c)?0:cellMinute
 export function controlReport(data){
   const key=data.department.key;
   const prepared=prepareSharedDraft(mergeIncoming(data.draft,data.incoming||[]),data.related||[],data.people,key);
-  const draft=orderDraft(prepared.draft,data.people,data.department.id);
+  const draft=orderDraft(prepared.draft,data.people,data.department.id,data.department.key);
   const rows=draft.rows.map(row=>{
     const person=data.people.find(p=>p.id===row.personId);
     if(!person)throw Error('Une fiche employé est manquante. Actualisez la liste avant de préparer le contrôle.');
