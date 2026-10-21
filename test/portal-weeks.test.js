@@ -1,3 +1,5 @@
+import {assertServiceRevision,commitServiceTransaction} from '../service-concurrency.js';
+import {publishServiceWeek} from '../service-publication.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -72,7 +74,7 @@ test('Service publication needs no shared code and keeps existing links and cred
  const f=await departmentFixture();try{
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8'),start=source.indexOf('async (request, response) => {',source.indexOf('app.put("/api/weeks/:weekStart/share-link"')),end=source.indexOf('\n});',start);
   const ensureWeek=week=>f.pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1) ON CONFLICT DO NOTHING',[week]);
-  const handler=new Function('pool','crypto','validDate','ensureWeek','return ('+source.slice(start,end)+'\n});')(f.pool,crypto,core.isDate,ensureWeek);
+  const handler=new Function('assertServiceRevision','commitServiceTransaction','publishServiceWeek','pool','crypto','validDate','ensureWeek','return ('+source.slice(start,end)+'\n});')(assertServiceRevision,commitServiceTransaction,publishServiceWeek,f.pool,crypto,core.isDate,ensureWeek);
   const reply=()=>({code:200,status(n){this.code=n;return this;},set(){return this;},json(body){this.body=body;return this;}});
   let res=reply();await handler({params:{weekStart:'2026-10-12'},body:{}},res);assert.equal(res.code,200);const path=res.body.path;
   await f.pool.query("UPDATE schedule_public_links SET access_code_hash='previous-hash'");res=reply();await handler({params:{weekStart:'2026-10-12'},body:{}},res);assert.equal(res.body.path,path);assert.equal((await f.pool.query('SELECT access_code_hash FROM schedule_public_links')).rows[0].access_code_hash,'previous-hash');

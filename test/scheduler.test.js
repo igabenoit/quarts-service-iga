@@ -1,3 +1,4 @@
+import {commitServiceTransaction} from '../service-concurrency.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -82,7 +83,7 @@ test('la route manuelle accepte le dépassement souhaité et renvoie le motif ex
       if(sql.includes('INSERT INTO schedule_assignments'))writes.push(args);
       return {rowCount:0,rows:[]};
     }};
-    const context=vm.createContext({app:{put(_path,...handlers){handler=handlers.at(-1);}},
+    const context=vm.createContext({commitServiceTransaction,app:{put(_path,...handlers){handler=handlers.at(-1);}},
       pool:{connect:async()=>client},requireManager(){},sameOrigin(){},beginUndo:async()=>{},isoDate:d=>d,
       mapShift:s=>s,mapEmployee:e=>({...e}),approvedLeave:async()=>[],conflictsWithLeave,assignmentConflict,applyServiceRoleDefault,shiftWithApprovedLeave,saveShiftLeave});
     vm.runInContext(route,context);

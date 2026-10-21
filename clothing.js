@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {mailResult,logEvent,errorCode} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {MODELS,COLORS,SIZES,PRICE,normalizeItems,orderTotal,supplierRows,money} from './public/clothing-core.js';
 import {supplierWorkbook,internalWorkbook} from './clothing-xlsx.js';
@@ -22,9 +23,9 @@ export async function installClothing(app,pool,{requireStaff,requireManager,same
     const lines=job.items.map(i=>`${i.quantity} × ${MODELS.find(m=>m.id===i.model).name} (${i.model}) — ${i.color} — ${i.size} — ${money(i.quantity*i.unitPrice)}`);
     try{
       const response=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(20000),headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json','Idempotency-Key':'clothing-'+id},body:JSON.stringify({from:process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'Quarts Service <onboarding@resend.dev>',to:job.recipients,subject:`Commande de chandails — ${job.employee_name}`,text:`${job.campaign_title}\nBon de commande ${id}\n${job.employee_name} — ${job.department_name}\n\n${lines.join('\n')}\n\nTotal employé : ${money(job.total_cents)}\nCommande enregistrée dans la gestion des chandails. Aucun paiement en ligne.`})});
-      const result=await response.json();if(!response.ok||!result.id)throw Error('provider');
+      const result=await response.json();mailResult('clothing',id,response,result);if(!response.ok||!result.id)throw Error('provider');
       await pool.query("UPDATE schedule_clothing_orders SET mail_status='sent',provider_id=$2 WHERE id=$1",[id,result.id]);return 'sent';
-    }catch{await pool.query("UPDATE schedule_clothing_orders SET mail_status='error' WHERE id=$1",[id]);return 'error';}
+    }catch(error){logEvent('mail_attempt_failed',{component:'clothing',jobId:String(id),code:errorCode(error)},'error');await pool.query("UPDATE schedule_clothing_orders SET mail_status='error' WHERE id=$1",[id]);return 'error';}
   }
   app.get('/api/leave/clothing',requireStaff,endpoint(async(_req,res)=>{
     const c=(await pool.query('SELECT id,title,deadline,opened,version FROM schedule_clothing_campaigns ORDER BY opened DESC,id DESC LIMIT 1')).rows[0];

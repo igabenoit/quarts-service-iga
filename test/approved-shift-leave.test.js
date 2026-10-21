@@ -1,3 +1,4 @@
+import {commitServiceTransaction} from '../service-concurrency.js';
 import {startupPhase} from '../runtime-diagnostics.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,7 +54,7 @@ test('multiple requests do not silently deduct worked gaps, full days still bloc
 
 test('Service selector offers a partially absent employee and excludes full-day leave',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
-  const context=vm.createContext({startupPhase,state:{weekStart:week,timeOff:[]},shiftWithApprovedLeave,workingIntervals,
+  const context=vm.createContext({commitServiceTransaction,startupPhase,state:{weekStart:week,timeOff:[]},shiftWithApprovedLeave,workingIntervals,
     approvedForDay:()=>[period()],canWorkRole:()=>true});
   vm.runInContext(source.slice(source.indexOf('function candidateShift('),source.indexOf('function shiftAvailabilityPanel(')),context);
   context.employee=employee;context.shift=shift;
@@ -68,7 +69,7 @@ test('PostgreSQL approval, assignment, cancellation, editing, undo and regenerat
   try{
     await installScheduleBackup(f.app,f.pool,f.options);
     const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-    const context=vm.createContext({startupPhase,app:f.app,pool:f.pool,...f.options,serviceShiftTiming,employeeAvailability,availabilityRevision,
+    const context=vm.createContext({commitServiceTransaction,startupPhase,app:f.app,pool:f.pool,...f.options,serviceShiftTiming,employeeAvailability,availabilityRevision,
       approvedLeave,conflictsWithLeave,assignmentConflict,generateAssignments,beginUndo,applyServiceRoleDefault,
       backupBeforeRegeneration,finishRegenerationBackup,shiftWithApprovedLeave,saveShiftLeave,storedShiftAbsence,editedShiftLeave});
     for(const [start,end] of [

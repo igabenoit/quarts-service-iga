@@ -1,3 +1,4 @@
+import {assertServiceRevision} from './service-concurrency.js';
 // Parent tables precede children when rows are restored; deletions use reverse order.
 const keys={schedule_weeks:['week_start'],schedule_employees:['id'],schedule_leave_requests:['id'],schedule_availability_requests:['id'],
   schedule_shifts:['id'],schedule_time_off:['week_start','employee_id','day_index'],
@@ -51,6 +52,7 @@ export async function installUndoSchema(pool){
 
 export async function beginUndo(client,label,weekStart=null,request={}){
   await client.query('SELECT pg_advisory_xact_lock(8675309)');
+  await assertServiceRevision(client,weekStart,request);
   const supplied=request.headers?.['x-undo-group'];
   const group=typeof supplied==='string'&&/^[a-f0-9-]{36}$/i.test(supplied)?supplied:null;
   let action=group?(await client.query(`SELECT id FROM schedule_undo_actions WHERE id=(SELECT MAX(id) FROM schedule_undo_actions)

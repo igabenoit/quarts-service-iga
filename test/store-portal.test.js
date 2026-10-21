@@ -1,3 +1,4 @@
+import {publishServiceWeek} from '../service-publication.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -38,6 +39,7 @@ test('store portal: existing admin only, published Service and departments, shar
     const sid=(await f.pool.query("INSERT INTO schedule_shifts(week_start,area,role,day_index,start_minute,end_minute) VALUES($1,'front','cashier',1,480,960) RETURNING id",[week])).rows[0].id;
     await f.pool.query('INSERT INTO schedule_assignments(shift_id,employee_id) VALUES($1,$2)',[sid,serviceId]);
     await f.pool.query("INSERT INTO schedule_public_links(week_start,token,access_code_hash) VALUES($1,$2,'legacy-secret')",[week,'x'.repeat(43)]);
+    await publishServiceWeek(f.pool,week);
     const account=await fetch(base+'/api/manager-accounts',{method:'POST',headers:{'Content-Type':'application/json','x-test-session':JSON.stringify({role:'manager'})},body:JSON.stringify({name:'Gérant Fruits',login:'fruit.test',password:'Example-password-123',departments:[dept('fruits').id],active:true})});
     const a=(await account.json()).accounts[0];
     for(const path of ['/api/store-portal','/api/store-portal/weeks/'+week]){

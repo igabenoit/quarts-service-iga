@@ -3,6 +3,7 @@ import {installFamilyGoogleCalendar} from './family-google-calendar.js';
 import {isDate,monday,today} from './public/departments-core.js';
 import {personalDays} from './public/portal-weeks.js';
 import {serviceShiftTiming} from './public/service-rules.js';
+import {publishedServiceResult} from './service-publication.js';
 
 const iso=value=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -63,13 +64,7 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
     if(!isDate(start)||monday(start)!==start)fail('Choisissez le lundi de la semaine.');
     const all=await directory(pool,start),group=await members(family,all),published=await readPublishedWeek(start,all),service=[];
     const serviceIds=group.people.map(p=>p.serviceEmployeeId).filter(Boolean);
-    if(serviceIds.length&&(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[start])).rows.length){
-      const records=(await pool.query(`SELECT e.id,s.day_index,s.start_minute,s.end_minute,s.absence,s.role
-        FROM schedule_employees e LEFT JOIN schedule_assignments a ON a.employee_id=e.id AND a.shift_id IN(SELECT id FROM schedule_shifts WHERE week_start=$1)
-        LEFT JOIN schedule_shifts s ON s.id=a.shift_id WHERE e.id=ANY($2::bigint[]) AND e.active AND e.departed_at IS NULL
-        ORDER BY e.id,s.day_index,s.start_minute`,[start,serviceIds])).rows;
-      for(const id of serviceIds)service.push({id,shifts:records.filter(r=>Number(r.id)===id&&r.day_index!==null).map(r=>({dayIndex:Number(r.day_index),startMinute:Number(r.start_minute),endMinute:Number(r.end_minute),role:r.role,...serviceShiftTiming(Number(r.start_minute),Number(r.end_minute),r.absence)}))});
-    }
+    if(serviceIds.length){const publishedService=await publishedServiceResult(pool,start);service.push(...(publishedService?.data.employees||[]).filter(e=>serviceIds.includes(e.id)));}
     const people=group.roots.map(person=>{
       const records=group.people.filter(p=>owner(p)===person.id),ids=new Set(records.map(p=>p.id)),results=[];
       for(const data of published){const rows=data.schedule.rows.filter(r=>ids.has(r.personId));if(rows.length)results.push({kind:'department',data:{department:data.department,weekStart:start,schedule:{rows,notes:''}}});}
