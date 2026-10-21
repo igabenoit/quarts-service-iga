@@ -19,6 +19,7 @@ test('individual accounts: administration, department boundaries, revocation and
   for(const [key,handlers] of f.routes){const space=key.indexOf(' '),method=key.slice(0,space),path=key.slice(space+1);if(path.startsWith('/api/departments')||path.startsWith('/api/leave/'))app[method](path,guard,handlers.at(-1));}
   for(const path of ['/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool','/api/sales-forecasts/:weekStart'])app.get(path,guard,(_q,res)=>res.json({ok:true}));
   app.post('/api/sales-forecasts/:weekStart',guard,(_q,res)=>res.json({ok:true}));
+  app.post('/api/departments/publication-status',guard,(_q,res)=>res.json({ok:true}));
   const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base='http://127.0.0.1:'+server.address().port;
   const admin={role:'manager'},call=async(path,{session=admin,method='GET',body,origin}={})=>{const r=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(session?{'x-test-session':JSON.stringify(session)}:{}),...(origin?{origin}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json(),cookie:r.headers.get('set-cookie')};};
   try{
@@ -39,6 +40,7 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call(reveal,{method:'POST'})).status,409);
     assert.equal((await call('/api/manager-accounts',{method:'POST',body})).status,409);
     const login=await call('/api/manager-login',{method:'POST',session:null,body:{login:'GERANT.TEST',password:body.password}});assert.equal(login.status,200);assert.match(login.cookie,/HttpOnly; SameSite=Strict/);assert.match(login.cookie,/Secure/);
+    assert.equal(login.body.path,'/departements');
     const session=JSON.parse(decodeURIComponent(login.cookie.split(';')[0].split('=').slice(1).join('=')));
     assert.equal((await call('/api/sales-forecasts/2026-10-19',{session:null})).status,401);
     assert.equal((await call('/api/sales-forecasts/2026-10-19',{session:{role:'employee'}})).status,401);
@@ -49,6 +51,16 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/manager-accounts',{session})).status,403);
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',session,body:{...body,version:1,departments:[meat]}})).status,403);
     const meta=await call('/api/departments/meta',{session});assert.deepEqual(meta.body.departments.map(d=>d.id),[fruit]);
+    // The department page loads its sheet and publication status together.
+    // Both must succeed for a scoped manager, without exposing other departments.
+    const publicationPath='/api/departments/publication-status?weekStart=2026-10-12';
+    assert.equal((await call(publicationPath,{session:null})).status,401);
+    assert.equal((await call(publicationPath,{session:{role:'employee'}})).status,401);
+    const unpublished=await call(publicationPath,{session});
+    assert.equal(unpublished.status,200,JSON.stringify(unpublished.body));
+    assert.deepEqual(unpublished.body,{weekStart:'2026-10-12',publications:[]});
+    assert.equal((await call(publicationPath,{session,method:'POST'})).status,403);
+    assert.equal((await call('/api/departments/publication-status?weekStart=invalid',{session})).status,400);
     assert.equal((await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session})).status,200);
     assert.equal((await call(`/api/departments/${fruit}/weeks/2026-10-12/views`,{session})).status,200);
     assert.equal((await call(`/api/departments/${meat}/weeks/2026-10-12/views`,{session})).status,403);
@@ -79,8 +91,14 @@ test('individual accounts: administration, department boundaries, revocation and
     const week=(await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session})).body;
     const draftSaved=await call(`/api/departments/${fruit}/weeks/2026-10-12`,{session,method:'PUT',body:{revision:week.revision,draft:week.draft}});assert.equal(draftSaved.status,200);
     const published=await call(`/api/departments/${fruit}/weeks/2026-10-12/publish`,{session,method:'POST',body:{revision:draftSaved.body.revision,verified:true,warningsReviewed:true}});assert.equal(published.status,200);
+    const otherWeek=(await call(`/api/departments/${meat}/weeks/2026-10-12`)).body;
+    assert.equal((await call(`/api/departments/${meat}/weeks/2026-10-12/publish`,{method:'POST',body:{revision:otherWeek.revision,verified:true,warningsReviewed:true}})).status,200);
+    const ownPublications=await call(publicationPath+'&departmentId='+meat,{session});
+    assert.equal(ownPublications.status,200);assert.deepEqual(ownPublications.body.publications.map(p=>p.departmentId),[fruit]);
+    assert.equal((await call(publicationPath)).body.publications.length,2);
     const saved=await call('/api/manager-accounts/'+account.id,{method:'PUT',body:{...body,password:'',version:account.version,departments:[service]}});assert.equal(saved.status,200);
     assert.equal((await call('/api/departments/meta',{session})).status,401,'permission change revokes existing sessions');
+    assert.equal((await call(publicationPath,{session})).status,401);
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',body:{...body,version:1}})).status,409);
     const serviceLogin=await call('/api/manager-login',{method:'POST',session:null,body:{login:body.login,password:body.password}});assert.equal(serviceLogin.body.path,'/');
     const serviceSession=JSON.parse(decodeURIComponent(serviceLogin.cookie.split(';')[0].split('=').slice(1).join('=')));
