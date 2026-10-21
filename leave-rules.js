@@ -52,7 +52,7 @@ export function uncoveredLeavePeriods(periods, approved) {
 export function conflictsWithLeave(shift, periods = []) {
   if (!shift.weekStart) return false;
   const date = addDays(shift.weekStart, shift.dayIndex);
-  return periods.some(p=>p.date===date && workingIntervals(shift.startMinute,shift.endMinute,shift.absence).some(([a,b])=>p.startMinute<b&&p.endMinute>a));
+  return periods.some(p=>p.date===date && (p.allDay || workingIntervals(shift.startMinute,shift.endMinute,shift.absence).some(([a,b])=>p.startMinute<b&&p.endMinute>a)));
 }
 export function leaveStatistics(rows) {
   const counts = {total:rows.length,pending:0,conditional:0,approved:0,refused:0,cancelled:0,late:0,fullDays:0,partialHours:0};

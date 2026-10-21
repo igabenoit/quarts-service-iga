@@ -5,6 +5,8 @@ import vm from 'node:vm';
 import {departmentFixture} from './department-fixture.js';
 import {applyServiceRoleDefault,copyServiceShifts} from '../service-role-defaults.js';
 import {assignmentConflict,generateAssignments} from '../scheduler.js';
+import {shiftWithApprovedLeave} from '../public/approved-shift-leave.js';
+import {saveShiftLeave} from '../approved-shift-leave.js';
 import {serviceShiftTiming} from '../public/service-rules.js';
 import {employeeAvailability} from '../availability-rules.js';
 import {availabilityRevision} from '../availability.js';
@@ -20,7 +22,7 @@ test('manager defaults persist through manual assignment, generation, copying an
     const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
     const context=vm.createContext({app:f.app,pool:f.pool,...f.options,serviceShiftTiming,employeeAvailability,availabilityRevision,
       approvedLeave,conflictsWithLeave,assignmentConflict,generateAssignments,beginUndo,applyServiceRoleDefault,copyServiceShifts,
-      backupBeforeRegeneration,finishRegenerationBackup});
+      backupBeforeRegeneration,finishRegenerationBackup,shiftWithApprovedLeave,saveShiftLeave});
     for(const [start,end] of [
       ['function validDate(','function normalizeShift('],
       ['async function ensureWeek(','function mapWeek('],

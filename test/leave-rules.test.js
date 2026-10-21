@@ -30,13 +30,15 @@ test('dates réelles, motif, heures et périodes incohérentes refusés',()=>{
  for(const [startTime,endTime] of [['14:00','13:00'],['09:00','09:00'],['24:00','25:00']])assert.throws(()=>normalizeLeave(body('2026-10-20',{periods:[{startDate:'2026-10-20',endDate:'2026-10-20',allDay:false,startTime,endTime}]}),new Date()));
  assert.throws(()=>normalizeLeave(body('2026-10-20',{periods:[{startDate:'2026-10-20',endDate:'2026-10-20',allDay:true},{startDate:'2026-10-20',endDate:'2026-10-20',allDay:true}]}),new Date()));
 });
-test('une absence partielle ne bloque que les quarts qui la chevauchent',()=>{
+test('une absence partielle permet le reste du quart, mais pas un quart entièrement couvert',()=>{
  const periods=[{date:'2026-10-19',startMinute:600,endMinute:720,allDay:false}];
  const shift={id:1,role:'cashier',weekStart:'2026-10-19',dayIndex:0,startMinute:480,endMinute:600,paidMinutes:120};
  const employee={id:1,active:true,role:'cashier',availability:{0:[[0,1440]]},maxMinutes:2400,targetMinutes:2400,seniority:'2000-01-01',leavePeriods:periods};
  assert.equal(conflictsWithLeave(shift,periods),false);assert.equal(canAssign(employee,shift,[shift]),true);
- const overlap={...shift,endMinute:601};assert.equal(canAssign(employee,overlap,[overlap]),false);
- assert.equal(generateAssignments([overlap],[employee]).assignments.length,0);
+ const overlap={...shift,endMinute:601};assert.equal(canAssign(employee,overlap,[overlap]),true);
+ assert.equal(generateAssignments([overlap],[employee]).assignments.length,1);
+ const covered={...shift,startMinute:600,endMinute:720};assert.equal(canAssign(employee,covered,[covered]),false);
+ assert.equal(generateAssignments([covered],[employee]).assignments.length,0);
  assert.equal(conflictsWithLeave({...shift,startMinute:720,endMinute:800},periods),false);
 });
 test('statistiques : une demande multisemaine compte une fois, journées et heures séparées',()=>{

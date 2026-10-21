@@ -1,8 +1,10 @@
+import {shiftWithApprovedLeave} from './public/approved-shift-leave.js';
 import {conflictsWithLeave} from "./leave-rules.js";
 import {defaultServiceRole} from './service-role-defaults.js';
 const hoursText = minutes => `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${String(minutes % 60).padStart(2, "0")}` : ""}`;
 
 export function assignmentConflict(employee, shift, shifts, assigned = []) {
+  shift=shiftWithApprovedLeave(shift,employee.leavePeriods,employee.id);
   if (conflictsWithLeave(shift,employee.leavePeriods)) return "Un congé approuvé chevauche ce quart.";
   if (!employee.active) return "Cet employé est inactif.";
   if (shift.role === "support") return "Ce quart est réservé à l’aide d’un autre département.";
@@ -10,7 +12,7 @@ export function assignmentConflict(employee, shift, shifts, assigned = []) {
   const windows = employee.availability?.[shift.dayIndex] || [];
   if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute))
     return `Les disponibilités de cet employé ne couvrent pas le quart complet de ${hoursText(shift.startMinute)} à ${hoursText(shift.endMinute)}.`;
-  const jobs = assigned.filter(a => a.employeeId === employee.id).map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean);
+  const jobs = assigned.filter(a => a.employeeId === employee.id).map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean).map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
   const sameDay = jobs.find(s => s.dayIndex === shift.dayIndex);
   if (sameDay) return `Cet employé a déjà un quart ce jour-là, de ${hoursText(sameDay.startMinute)} à ${hoursText(sameDay.endMinute)}. Un seul quart par jour est permis.`;
   if (!employee.allowSixOrSevenDays && jobs.length >= 5)
@@ -35,7 +37,7 @@ export function generateAssignments(shifts, employees, existing = []) {
   const assignments = [];
   const open = shifts.filter(s => s.role !== "support" && !assigned.some(a => a.shiftId === s.id));
   const load = employee => assigned.filter(a => a.employeeId === employee.id)
-    .reduce((sum, a) => sum + (shifts.find(s => s.id === a.shiftId)?.paidMinutes || 0), 0);
+    .reduce((sum, a) => {const shift=shifts.find(s=>s.id===a.shiftId);return sum+(shift?shiftWithApprovedLeave(shift,employee.leavePeriods,employee.id).paidMinutes:0);}, 0);
   const rankedEmployees = [...employees].sort((a, b) =>
     (a.assignmentRank ?? 9999) - (b.assignmentRank ?? 9999)
     || a.seniority.localeCompare(b.seniority) || a.id - b.id);
@@ -45,11 +47,12 @@ export function generateAssignments(shifts, employees, existing = []) {
   function bestShifts(employee, limit) {
     if (limit <= 0) return [];
     const currentJobs = assigned.filter(a => a.employeeId === employee.id)
-      .map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean);
+      .map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean).map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
     const maxDays = employee.allowSixOrSevenDays ? 7 : 5;
     const maxWeekdays = employee.isMinor ? 2 : 5;
     const existingWeekdays = currentJobs.filter(s => s.dayIndex < 5).length;
-    const choices = Array.from({ length: 7 }, (_, day) => open.filter(s =>
+    const candidates=open.map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
+    const choices = Array.from({ length: 7 }, (_, day) => candidates.filter(s =>
       s.dayIndex === day && s.paidMinutes <= limit && canAssign(employee, s, shifts, assigned)));
     const memo = new Map();
     function solve(day, remaining, daysUsed, weekdaysUsed) {
@@ -83,7 +86,7 @@ export function generateAssignments(shifts, employees, existing = []) {
       const assignment = { shiftId: shift.id, employeeId: employee.id };
       assigned.push(assignment);
       assignments.push(assignment);
-      open.splice(open.indexOf(shift), 1);
+      open.splice(open.findIndex(s=>s.id===shift.id), 1);
     }
   }
   return { assignments, unfilled: shifts.filter(s => !assigned.some(a => a.shiftId === s.id)).map(s => s.id) };

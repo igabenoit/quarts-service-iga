@@ -99,7 +99,7 @@ export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}
       await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN (SELECT id FROM schedule_shifts WHERE week_start=$1)`,[weekStart]);
       if(backup.snapshot.generatedShifts)for(const shift of backup.snapshot.shifts){
         const now=current.shifts.find(s=>String(s.id)===String(shift.id));
-        if(now.role!==shift.role)await client.query('UPDATE schedule_shifts SET role=$1,updated_at=NOW() WHERE id=$2',[shift.role,shift.id]);
+        if(now.role!==shift.role||serialized(now.absence)!==serialized(shift.absence))await client.query('UPDATE schedule_shifts SET role=$1,absence=$2,updated_at=NOW() WHERE id=$3',[shift.role,shift.absence||null,shift.id]);
       }
       for(const a of backup.snapshot.assignments)await client.query('INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)',[a.shift_id,a.employee_id]);
       await client.query(`UPDATE schedule_regeneration_backups SET restored_at=clock_timestamp(),replaced_snapshot=$1::jsonb WHERE id=$2`,[JSON.stringify(current),backup.id]);

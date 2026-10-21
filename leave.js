@@ -10,7 +10,7 @@ import {installLeaveAcknowledgements} from './leave-acknowledgements.js';
 import {installAvailability} from './availability.js';
 import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
-import {releaseLeaveConflicts} from './leave-schedule.js';
+import {applyApprovedLeave} from './leave-schedule.js';
 
 export async function approvedLeave(pool, weekStart) {
   const result = await pool.query(`SELECT employee_id, COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests
@@ -175,13 +175,13 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       await client.query(`UPDATE schedule_leave_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3`,[b.status,note,row.id]);
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
       if(row.status==='conditional'&&b.status==='approved')await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,'approved','Validation finale : la gestion confirme que les conditions sont remplies ou levées.']);
-      const released=b.status==='approved'&&!row.is_test?await releaseLeaveConflicts(client,{requestId:row.id}):[];
+      const changes=['approved','cancelled'].includes(b.status)&&!row.is_test?await applyApprovedLeave(client,{requestId:row.id}):{released:[],adjusted:[]};
       if(b.status==='approved')await approvalMail.queue(client,row.id);
       if(['refused','conditional'].includes(b.status))await employeeNotices.queue(client,row.id,b.status);
       await client.query('COMMIT');
       approvalMail.run().catch(()=>{});
       employeeNotices.run().catch(()=>{});
-      res.json({ok:true,releasedShifts:released.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
+      res.json({ok:true,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
   });
   app.post('/api/leave/requests/:id/late-notice',requireManager,sameOrigin,async(req,res)=>{
@@ -204,8 +204,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(8675309)');
       await beginUndo(client,'Appliquer les congés approuvés',weekStart,req);
-      const released=await releaseLeaveConflicts(client,{weekStart});
-      await client.query('COMMIT');res.json({ok:true,releasedShifts:released.length});
+      const changes=await applyApprovedLeave(client,{weekStart});
+      await client.query('COMMIT');res.json({ok:true,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’appliquer les congés. Aucun changement enregistré.'});}
     finally{client.release();}
   });

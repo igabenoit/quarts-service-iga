@@ -2,6 +2,8 @@ import {installSalesForecasts} from './sales-forecasts.js';
 import {installServiceChat} from './service-chat.js';
 import {createServiceChatPush} from './service-chat-push.js';
 import {installClothing} from './clothing.js';
+import {shiftWithApprovedLeave,storedShiftAbsence,editedShiftLeave} from './public/approved-shift-leave.js';
+import {saveShiftLeave} from './approved-shift-leave.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
@@ -269,6 +271,7 @@ function mapShift(row) {
     id: Number(row.id), weekStart: isoDate(row.week_start), area: row.area, role: row.role,
     dayIndex: Number(row.day_index), startMinute: Number(row.start_minute), endMinute: Number(row.end_minute),
     ...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),
+    ...(row.absence?.approvedLeave?{approvedLeaveAbsence:row.absence.approvedLeave}:{}),
     sourceDepartment: row.source_department, notes: row.notes,
   };
 }
@@ -514,13 +517,17 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     await beginUndo(client,"Modifier une affectation",isoDate(shiftResult.rows[0].week_start),request);
     if (request.body?.employeeId === null) {
       await client.query("DELETE FROM schedule_assignments WHERE shift_id=$1", [id]);
+      const before=mapShift(shiftResult.rows[0]);
+      const shift=await saveShiftLeave(client,before,shiftWithApprovedLeave(before));
       await client.query("COMMIT");
-      return response.json({ ok:true });
+      return response.json({ ok:true,shift });
     }
     const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
     if (!people.rowCount) throw new Error("Employé introuvable.");
-    const s = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0],s.weekStart);
+    const before = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0],before.weekStart);
+    let s=before;
     e.leavePeriods=(await approvedLeave(client,s.weekStart)).filter(r=>Number(r.employee_id)===employeeId).flatMap(r=>r.periods);
+    s=shiftWithApprovedLeave(s,e.leavePeriods,employeeId);
     if(conflictsWithLeave(s,e.leavePeriods)) throw new Error("Un congé approuvé chevauche ce quart.");
     e.allowSixOrSevenDays = !!(await client.query("SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [s.weekStart,employeeId])).rowCount;
     const leave = await client.query(`SELECT 1 FROM schedule_time_off
@@ -533,6 +540,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     if (conflict) throw new Error(conflict);
     await client.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
       ON CONFLICT (shift_id) DO UPDATE SET employee_id=EXCLUDED.employee_id`, [id,employeeId]);
+    await saveShiftLeave(client,before,s);
     const savedShift=await applyServiceRoleDefault(client,s,e);
     await client.query("COMMIT");
     response.json({ ok:true,shift:savedShift });
@@ -565,6 +573,10 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     const current = (await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
       WHERE s.week_start=$1`, [request.params.weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
     const result = generateAssignments(shifts, employees, current);
+    for(const shift of shifts.filter(s=>!current.some(a=>a.shiftId===s.id))){
+      const employee=employees.find(e=>e.id===result.assignments.find(a=>a.shiftId===shift.id)?.employeeId);
+      await saveShiftLeave(client,shift,shiftWithApprovedLeave(shift,employee?.leavePeriods,employee?.id));
+    }
     for (const a of result.assignments) {
       await client.query("INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)", [a.shiftId,a.employeeId]);
       await applyServiceRoleDefault(client,shifts.find(s=>s.id===a.shiftId),employees.find(e=>e.id===a.employeeId));
@@ -771,16 +783,17 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const id = Number(request.params.id);
     if (!Number.isInteger(id) || id <= 0) throw new Error("Quart invalide.");
-    const shift = normalizeShift(request.body || {});
+    let shift = normalizeShift(request.body || {});
     const dayIndex = parseMinutes(request.body?.dayIndex, "Journée", 0, 6);
-    const existing=(await client.query("SELECT s.week_start,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1",[id])).rows[0];
+    const existing=(await client.query("SELECT s.week_start,s.absence,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1",[id])).rows[0];
     await beginUndo(client,"Modifier un quart",existing?isoDate(existing.week_start):null,request);
     if(existing?.employee_id){
       const weekStart=isoDate(existing.week_start);
       const periods=(await approvedLeave(client,weekStart)).filter(r=>String(r.employee_id)===String(existing.employee_id)).flatMap(r=>r.periods);
-      if(conflictsWithLeave({...shift,weekStart,dayIndex},periods))throw new Error("Ce changement chevauche un congé approuvé. Réattribuez le quart d’abord.");
+      shift=shiftWithApprovedLeave(editedShiftLeave({...shift,weekStart,dayIndex},existing),periods,existing.employee_id);
+      if(conflictsWithLeave(shift,periods))throw new Error("Ce changement chevauche un congé approuvé. Réattribuez le quart d’abord.");
     }
-    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, shift.absence]);
+    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, storedShiftAbsence(shift)]);
     if (!result.rowCount) throw new Error("Quart introuvable.");
     await client.query("COMMIT");
     response.json({ shift: mapShift(result.rows[0]) });
