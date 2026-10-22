@@ -1,3 +1,5 @@
+import {installCuisineMigration,membershipsAt} from './cuisine-migration.js';
+import {cuisineDraft,CUISINE_START} from './public/cuisine-routing.js';
 import {workingIntervals} from './public/shift-absence.js';
 import {installDepartmentHoursSummary} from './department-hours-summary.js';
 import {prepareSharedDraft} from './public/department-buffet.js';
@@ -45,6 +47,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
   }
   await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
+  await installCuisineMigration(pool);
   await installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl});
   app.use('/api/departments',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   const listDepartments=async client=>(await client.query('SELECT id,name,schedule_key AS key,active FROM schedule_leave_departments WHERE schedule_key IS NOT NULL ORDER BY name')).rows.map(d=>({...d,id:Number(d.id)}));
@@ -53,7 +56,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     await client.query("INSERT INTO schedule_store_people(service_employee_id,name) SELECT id,name FROM schedule_employees ON CONFLICT(service_employee_id) DO NOTHING");
     await client.query("INSERT INTO schedule_store_memberships(person_id,department_id) SELECT p.id,d.id FROM schedule_store_people p CROSS JOIN schedule_leave_departments d WHERE p.service_employee_id IS NOT NULL AND d.code='service' ON CONFLICT DO NOTHING");
     const records=(await client.query('SELECT p.*,e.name AS service_name,e.seniority AS service_seniority,e.active AS service_active,e.departed_at,e.availability AS service_availability,e.availability_history,e.target_minutes FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id ORDER BY p.id')).rows;
-    const memberships=(await client.query('SELECT * FROM schedule_store_memberships')).rows;
+    const memberships=await membershipsAt(client,(await client.query('SELECT * FROM schedule_store_memberships')).rows,weekStart);
     const contacts=records.some(r=>r.service_employee_id)?await loadContactDirectory(client):{employees:[]};
     const people=records.map(r=>{
       const service=!!r.service_employee_id;
@@ -91,6 +94,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   async function transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
   async function saveWeek(client,current,draft,action,published=current.published){
+    draft=cuisineDraft(draft,current.department.key,current.weekStart);
+    if(action==='publish')published=cuisineDraft(published,current.department.key,current.weekStart);
     for(const row of draft.rows)for(const cell of row.cells)validateAssignment(cell,current.department.key);
     const weeks=await transferWeeks(current.weekStart,client),changed={department_id:current.department.id,key:current.department.key,draft,published};
     assertTransferSlots([...weeks.filter(w=>Number(w.department_id)!==current.department.id),changed]);
@@ -259,7 +264,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(!Number.isInteger(req.body.sourceRevision)||source.revision!==req.body.sourceRevision)fail('La semaine à copier a changé. Rechargez-la avant de recommencer.',409);
     const target=await getWeek(id,targetWeek,client);checkRevision(req.body,target);
     if(target.revision&&req.body.replaceConfirmed!==true)fail('Confirmez le remplacement du brouillon de la semaine choisie.');
-    return saveWeek(client,target,normalizeDraft(source.draft,target.people),'copy');
+    return saveWeek(client,target,normalizeDraft(source.department.key==='pam'&&sourceWeek<CUISINE_START&&targetWeek>=CUISINE_START?{...source.draft,rows:source.draft.rows.filter(r=>target.people.some(p=>p.id===r.personId&&p.departments.includes(target.department.id)))}:source.draft,target.people),'copy');
   }))));
   app.post('/api/departments/:id/weeks/:week/publish',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
     const current=await getWeek(integer(req.params.id),week(req.params.week),client);checkRevision(req.body,current);

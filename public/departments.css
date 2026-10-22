@@ -335,3 +335,6 @@ body{background:white}
 .department-sheet .simple-shift .printed-shift-range{display:flex;flex-direction:column;gap:0;font-size:8.5pt;line-height:1.15;order:0}
 .department-sheet .simple-shift .printed-shift-range> :nth-child(2){display:none}
 .department-sheet .simple-shift .assignment-label,.department-sheet .simple-shift .service-role,.department-sheet .simple-shift .shift-absence{order:1}
+
+.theme-cuisine{--accent:#687b28;--pale:#f1f5de}
+.department-sheet .shift-theme-cuisine{--shift-color:#687b28;border-color:#687b28;background:#f1f5de}

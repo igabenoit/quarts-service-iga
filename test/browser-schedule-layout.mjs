@@ -97,7 +97,7 @@ try{
   results.push({department:'control',pages:control.pages.length});control.cleanup();
   fixture.innerHTML=summaryPage(DEPARTMENT_STYLES.map(department=>({...report,department,actual:{minutes:null,note:'Justification conservée intégralement. '.repeat(6)}})));
   const summary=prepareSchedulePages([...fixture.querySelectorAll('article')]);verify(summary);
-  if(summary.pages.reduce((n,p)=>n+p.querySelectorAll('.summary-print-table tbody tr').length,0)!==8)throw Error('Summary rows lost');
+  if(summary.pages.reduce((n,p)=>n+p.querySelectorAll('.summary-print-table tbody tr').length,0)!==DEPARTMENT_STYLES.length)throw Error('Summary rows lost');
   results.push({department:'summary',pages:summary.pages.length});summary.cleanup();
   fixture.innerHTML=window.sample;
   const blob=await schedulePagesPDF([...document.querySelectorAll('#fixture article')]);
