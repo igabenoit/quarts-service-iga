@@ -17,7 +17,7 @@ export async function approvedLeave(pool, weekStart) {
     WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`, [weekStart,addDays(weekStart,6)]);
   return result.rows;
 }
-export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaffAccess}) {
+export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaffAccess,employeeIdentity}) {
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
     id BIGSERIAL PRIMARY KEY, submission_key UUID NOT NULL UNIQUE,
     employee_id BIGINT REFERENCES schedule_employees(id), employee_name TEXT NOT NULL,
@@ -43,7 +43,13 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   app.use('/api/leave',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   await installLeaveArchive(app,pool,{requireManager,sameOrigin});
   const departments=await installDepartments(app,pool,{requireManager,sameOrigin});
-  const requireStoreStaff=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
+  const {requireStaff:requireStoreStaff,hasStaffAccess:hasStoreStaffAccess}=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
+  async function requireLeaveStaff(req,res,next){
+    try{
+      if(await employeeIdentity?.(req)||await hasStoreStaffAccess(req))return next();
+      res.status(401).json({error:'Entrez votre code employé (6 derniers chiffres) pour remplir votre demande.'});
+    }catch{res.status(500).json({error:'Impossible de vérifier l’accès.'});}
+  }
   await installLeaveAcknowledgements(app,pool,{sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
@@ -69,7 +75,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   };
   app.get('/api/public-schedules/:token/leave-form',staff,formInfo(false));
   app.get('/api/leave/test-form',requireManager,formInfo(true));
-  app.get('/api/leave/form',requireStoreStaff,formInfo(false,true));
+  app.get('/api/leave/form',requireLeaveStaff,formInfo(false,true));
   const submit = (isTest,store=false) => async (req,res)=>{
     const client = await pool.connect();
     try {
@@ -115,7 +121,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
     } finally {client.release();}
   };
   app.post('/api/public-schedules/:token/leave-requests',sameOrigin,staff,submit(false));
-  app.post('/api/leave/submit',requireStoreStaff,sameOrigin,submit(false,true));
+  app.post('/api/leave/submit',requireLeaveStaff,sameOrigin,submit(false,true));
   app.post('/api/leave/test-requests',requireManager,sameOrigin,submit(true));
   app.get('/api/leave/requests',requireManager,async(req,res)=>{
     try {

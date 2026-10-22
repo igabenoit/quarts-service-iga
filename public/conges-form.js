@@ -65,7 +65,7 @@ async function load(){
   $('#back').textContent=test?'← Suivi des demandes':'← Retour à mon horaire';
   try{
     const response=await fetch(`${base}/${test?'test-form':store?'form':'leave-form'}`,{cache:'no-store'}),data=await response.json();
-    if(store&&response.status===401){$('#accessForm').hidden=false;form.hidden=true;$('#deadline').textContent='Entrez le code du magasin pour remplir votre demande.';$('#message').textContent='';return;}
+    if(store&&response.status===401){$('#accessForm').hidden=false;form.hidden=true;$('#deadline').textContent='Entrez votre code employé (6 derniers chiffres) pour remplir votre demande.';$('#message').textContent='';return;}
     if(!response.ok)throw new Error(data.error||'Connexion requise.');
     $('#accessForm').hidden=true;
     earliest=data.earliest;updateDeadline();
@@ -79,5 +79,5 @@ async function load(){
     form.hidden=false;
   }catch(error){message(error.message);$('#deadline').textContent='Veuillez vous connecter pour remplir le formulaire.';}
 }
-$('#accessForm').onsubmit=async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;try{const r=await fetch('/api/leave/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})});const d=await r.json();if(!r.ok)throw new Error(d.error);$('#staffCode').value='';await load();}catch(error){message(error.message);}finally{button.disabled=false;}};
+$('#accessForm').onsubmit=async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;try{const r=await fetch('/api/employee-portal/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})});const d=await r.json();if(!r.ok)throw new Error(d.error);$('#staffCode').value='';await load();}catch(error){message(error.message);}finally{button.disabled=false;}};
 load();

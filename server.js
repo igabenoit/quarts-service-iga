@@ -602,7 +602,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 });
 
 startupPhase('schema_leave');
-const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess});
+const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess,employeeIdentity:req=>employeePortal.identity(req)});
 startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
