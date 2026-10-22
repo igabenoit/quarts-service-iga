@@ -38,7 +38,7 @@ test('complete startup, signed sessions for every department, publication and pe
     await start();assert.equal((await call('/health')).body.database,'ok');
     const admin=(await call('/api/login','',{code:'test-admin-123'})).cookie;assert.ok(admin);
     const departments=(await call('/api/manager-accounts',admin)).body.departments;
-    assert.equal(departments.length,9);
+    assert.equal(departments.length,10);
     const bakery=departments.find(d=>d.name==='Boulangerie');let bakeryCookie;
     for(const department of departments){
       const account={name:'Gestionnaire fictif '+department.id,login:'test.'+department.id,password:'Test-password-123!',active:true,departments:[Number(department.id)]};

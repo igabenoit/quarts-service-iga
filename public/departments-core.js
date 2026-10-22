@@ -9,6 +9,7 @@ export const DEPARTMENT_STYLES=[
   {key:'pam',name:'Prêt-à-manger',color:'#c46620',pale:'#fff0df'},
   {key:'poissonnerie',name:'Poissonnerie',color:'#287c9c',pale:'#e4f4fc'},
   {key:'epicerie',name:'Épicerie',color:'#344351',pale:'#e9edf1'},
+  {key:'cuisine',name:'Cuisine',color:'#687b28',pale:'#f1f5de'},
   {key:'administration',name:'Administration',color:'#665489',pale:'#eee9f6'}
 ];
 export const escapeHTML=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
@@ -145,9 +146,10 @@ export function validateAssignment(c,departmentKey){
   if(c.post==='cut_fruit'&&target!=='fruits')throw Error('Le poste Fruits coupés appartient aux Fruits & Légumes.');
   if(Object.hasOwn(BAKERY_POSTS,c.post)&&target!=='boulangerie')throw Error('Ce poste appartient à la Boulangerie.');
   if(c.kind==='buffet'&&!['charcuterie','pam'].includes(target))throw Error('Le poste Buffet appartient à la Charcuterie ou au PAM.');
-  if((c.kind==='kitchen'||Object.hasOwn(PAM_POSTS,c.post)||Object.hasOwn(KITCHEN_POSTS,c.post))&&target!=='pam')throw Error('Ce poste appartient au PAM.');
+  if(Object.hasOwn(PAM_POSTS,c.post)&&target!=='pam')throw Error('Ce poste appartient au PAM.');
+  if((c.kind==='kitchen'||Object.hasOwn(KITCHEN_POSTS,c.post))&&!['pam','cuisine'].includes(target))throw Error('Ce poste appartient à la Cuisine (ou au PAM pour les anciens horaires).');
   if(Object.hasOwn(KITCHEN_POSTS,c.post)&&!['kitchen','training'].includes(c.kind))throw Error('Cuisine Salades doit être compté en Cuisine ou en Formation.');
-  if(c.post&&(c.kind==='buffet'||c.kind==='kitchen'&&!Object.hasOwn(KITCHEN_POSTS,c.post)))throw Error('Choisissez un seul poste.');
+  if(c.post&&(c.kind==='buffet'||c.kind==='kitchen'&&!Object.hasOwn(KITCHEN_POSTS,c.post)&&!Object.hasOwn(COMMON_POSTS,c.post)))throw Error('Choisissez un seul poste.');
   return c;
 }
 export function mergeIncoming(draft,incoming=[]){

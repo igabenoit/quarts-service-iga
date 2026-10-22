@@ -48,6 +48,11 @@ test('Cuisine Salades : sauvegarde, copie et publication gardent le poste et les
     assert.deepEqual((await f.call('get','/api/leave/department-schedules/:id/:week',{params})).body.schedule.rows[0].cells,cells);
     const target={id:pam.id,week:'2026-10-26'};
     assert.equal((await f.call('post',route+'/copy',{params:target,body:{revision:0,sourceWeek:params.week,sourceRevision:2}})).code,200);
-    assert.deepEqual((await f.call('get',route,{params:target})).body.draft.rows[0].cells,cells);
+    const copied=(await f.call('get',route,{params:target})).body.draft.rows[0];
+    assert.deepEqual(copied.cells,cells.map((c,i)=>i<2?{...c,workDepartment:'cuisine'}:c));
+    assert.equal(kitchenMinutes(copied),0);assert.equal(trainingMinutes(copied),0);
+    const cuisine=(await f.call('get','/api/departments/meta')).body.departments.find(d=>d.key==='cuisine');
+    const received=(await f.call('get',route,{params:{...target,id:cuisine.id}})).body.incoming;
+    assert.equal(received.length,2);assert.equal(received[0].cell.post,'kitchen_salads');
   }finally{await f.db.close();}
 });

@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {liveAppFixture} from './live-app-fixture.mjs';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const f=await liveAppFixture();let browser;
+try{
+  const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
+  const meta=(await f.call('GET','/api/departments/meta',{cookie})).body;
+  const cuisine=meta.departments.find(d=>d.key==='cuisine'),pam=meta.departments.find(d=>d.key==='pam');
+  await f.call('POST','/api/departments/people',{cookie,body:{name:'Test Cuisine',group:'regular',active:true,departments:[cuisine.id],availability:{}}});
+  browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.context().addCookies([{name:cookie.split('=')[0],value:cookie.slice(cookie.indexOf('=')+1),url:f.base}]);
+  await page.goto(f.base+`/departements?department=${cuisine.id}&week=2026-10-26`);
+  await page.getByRole('button',{name:'Test Cuisine, Lundi, +',exact:true}).click();
+  await page.locator('#cellStart').fill('7');await page.locator('#cellEnd').fill('4');
+  assert.match(await page.locator('#resolvedShift').innerText(),/8 h en Cuisine/);
+  await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
+  await page.getByRole('button',{name:'Test Cuisine, Mardi, +',exact:true}).click();
+  await page.locator('#cellPost').selectOption('bbq');
+  await page.locator('#cellStart').fill('7');await page.locator('#cellEnd').fill('4');
+  assert.match(await page.locator('#resolvedShift').innerText(),/comptées en Prêt-à-manger/);
+  await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
+  const saved=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().includes('/weeks/'));
+  await page.locator('#saveDraft').click();assert.equal((await saved).status(),200);
+  const read=(await f.call('GET',`/api/departments/${cuisine.id}/weeks/2026-10-26`,{cookie})).body;
+  assert.equal(read.draft.rows[0].cells[0].kind,'kitchen');assert.equal(read.draft.rows[0].cells[1].workDepartment,'pam');
+  const received=(await f.call('GET',`/api/departments/${pam.id}/weeks/2026-10-26`,{cookie})).body;
+  assert.equal(received.incoming.length,1);assert.deepEqual(errors,[]);
+  console.log('Cuisine UI passed: default cuisine, PAM post routing, persistence and incoming projection.');
+}finally{await browser?.close();await f.close();}
