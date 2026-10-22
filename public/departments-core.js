@@ -96,7 +96,7 @@ export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start
 export const departmentLabel=key=>key==='service'?'Service':DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
-export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
+export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',c.kind==='training'&&c.trainingMention?c.note:'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
 export const shiftAssignment=(c,key)=>c.buffetAllocation?[c.buffetAllocation.pam&&`PAM${c.buffetAllocation.charcuterie?' '+hoursLabel(c.buffetAllocation.pam)+' h':''}`,c.buffetAllocation.charcuterie&&`Charcuterie${c.buffetAllocation.pam?' '+hoursLabel(c.buffetAllocation.charcuterie)+' h':''}`].filter(Boolean).join(' / ')+' · Buffet':[c.workDepartment==='pam'||!c.workDepartment&&key==='pam'?'PAM':departmentLabel(c.workDepartment||key),c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
@@ -108,6 +108,7 @@ export function normalizeCell(value){
   const c=value||{},kind=String(c.kind||'blank');
   if(!['blank','shift','training','buffet','kitchen','off','vacation','mobile','requested','sick','note','review'].includes(kind))throw Error('Type de case invalide.');
   const note=String(c.note||'').trim();if(note.length>100)throw Error('Le texte d’une case est limité à 100 caractères.');
+  if(c.trainingMention===true&&(kind!=='training'||!note))throw Error('Ajoutez la mention et les heures de formation.');
   if(isTimedCell({kind})){
     const end=Number.isInteger(c.end)&&c.end>=0&&c.end<c.start?c.end+1440:c.end;
     if(!Number.isInteger(c.start)||!Number.isInteger(end)||c.start<0||c.start>=1440||end<=c.start||end-c.start>1440||!Number.isInteger(c.breakMinutes??0)||(c.breakMinutes??0)<0||(c.breakMinutes??0)>=end-c.start)throw Error('Vérifiez le début, la fin et la pause du quart.');
@@ -117,7 +118,7 @@ export function normalizeCell(value){
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post)&&!Object.hasOwn(BAKERY_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    return {kind,...(c.trainingMention===true?{trainingMention:true}:{}),start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};
