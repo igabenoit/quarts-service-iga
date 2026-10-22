@@ -12,13 +12,18 @@ export async function installLeaveAccess(app,pool,{requireManager,sameOrigin}) {
   const equal=(a,b)=>crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(),crypto.createHash('sha256').update(b).digest());
   const current=async()=> (await pool.query('SELECT code_hash FROM schedule_leave_access WHERE id=1')).rows[0].code_hash;
   const attempts=new Map();
+  function validSession(req,stored){
+    if(!stored)return false;
+    const cookie=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('leave_access='))?.slice(13)||'';
+    const [expires,signature]=cookie.split('.');
+    return /^\d{13}$/.test(expires)&&Number(expires)>Date.now()&&Boolean(signature)&&equal(signature,sign(`leave-access:${stored}:${expires}`));
+  }
+  const hasStaffAccess=async req=>validSession(req,await current());
   async function requireStaff(req,res,next){
     try{
       const stored=await current();
       if(!stored)return res.status(503).json({error:'Le formulaire permanent attend son code d’accès. Veuillez contacter la gérante.'});
-      const cookie=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('leave_access='))?.slice(13)||'';
-      const [expires,signature]=cookie.split('.');
-      if(!/^\d{13}$/.test(expires)||Number(expires)<=Date.now()||!signature||!equal(signature,sign(`leave-access:${stored}:${expires}`)))return res.status(401).json({error:'Entrez le code commun des employés pour remplir votre demande.'});
+      if(!validSession(req,stored))return res.status(401).json({error:'Entrez le code commun des employés pour remplir votre demande.'});
       next();
     }catch{res.status(500).json({error:'Impossible de vérifier l’accès.'});}
   }
@@ -43,5 +48,5 @@ export async function installLeaveAccess(app,pool,{requireManager,sameOrigin}) {
     res.json({ok:true});
   });
   app.get('/conges',(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile('conges.html',{root:'public'}));
-  return requireStaff;
+  return {requireStaff,hasStaffAccess};
 }
