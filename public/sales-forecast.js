@@ -1,3 +1,4 @@
+import {normalizeDepartmentBudget,departmentBudgetHTML} from './department-budget.js';
 const money=new Intl.NumberFormat('fr-CA',{style:'currency',currency:'CAD'});
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -26,26 +27,30 @@ export function forecastDayHTML(date,{status='loading',data=null}={}){
 }
 
 export function createSalesForecastDisplay({root=document,fetchImpl=fetch}={}){
-  let weekStart=null,snapshot={status:'loading',data:null},sequence=0,controller;
+  let department=null,weekStart=null,snapshot={status:'loading',data:null},sequence=0,controller;
   function update(){
+    const budget=root.querySelector('[data-department-budget]');
+    if(department&&budget)budget.innerHTML=departmentBudgetHTML(department.key,snapshot);
     root.querySelectorAll('[data-forecast-date]').forEach(node=>{node.outerHTML=forecastDayHTML(node.dataset.forecastDate,snapshot);});
     const status=root.querySelector('[data-sales-forecast-status]');
     if(status)status.textContent=snapshot.status==='ready'?'Prévisions initiales du magasin':snapshot.status==='loading'?'Chargement des prévisions…':'Prévisions indisponibles. Actualisez pour réessayer.';
   }
-  async function load(start){
+  async function load(start,selectedDepartment=null){
+    department=selectedDepartment;
     const request=++sequence;weekStart=start;controller?.abort();controller=new AbortController();
-    const activeController=controller;
+    const activeController=controller,activeDepartment=department;
     snapshot={status:'loading',data:null};update();
     const timer=setTimeout(()=>activeController.abort(),20000);
     try{
-      const response=await fetchImpl(`/api/sales-forecasts/${encodeURIComponent(start)}`,{cache:'no-store',signal:activeController.signal});
+      const response=await fetchImpl(`/api/sales-forecasts/${encodeURIComponent(start)}${activeDepartment?`?department=${encodeURIComponent(activeDepartment.id)}`:''}`,{cache:'no-store',signal:activeController.signal});
       if(!response.ok)throw Error('Prévisions indisponibles.');
-      const data=normalizeInitialForecasts(await response.json(),start);
+      const source=await response.json(),data=normalizeInitialForecasts(source,start);
+      if(activeDepartment)data.departmentBudget=normalizeDepartmentBudget(source.departmentBudget,activeDepartment.key);
       if(request===sequence){snapshot={status:'ready',data};update();}
     }catch{
       if(request===sequence){snapshot={status:'unavailable',data:null};update();}
     }finally{clearTimeout(timer);}
   }
-  root.querySelectorAll('[data-refresh-sales]').forEach(button=>{button.onclick=()=>{if(weekStart)void load(weekStart);};});
+  root.querySelectorAll('[data-refresh-sales]').forEach(button=>{button.onclick=()=>{if(weekStart)void load(weekStart,department);};});
   return {load,dayHTML:date=>forecastDayHTML(date,snapshot)};
 }
