@@ -732,7 +732,7 @@ app.get("/h/:token", (request, response) => {
   response.redirect(302,"/horaires-departements");
 });
 
-installSalesForecasts(app,{requireManager});
+installSalesForecasts(app,{requireManager,pool});
 
 app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
   const client=await pool.connect();
