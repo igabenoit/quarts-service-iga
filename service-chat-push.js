@@ -66,6 +66,13 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     UNIQUE(subscription_id,message_id));
     CREATE INDEX IF NOT EXISTS ${tables.dueIndex} ON ${tables.jobs}(due_at);`);
+    await client.query(`CREATE TABLE IF NOT EXISTS ${tables.jobs}_private(
+      id BIGSERIAL PRIMARY KEY,subscription_id UUID NOT NULL REFERENCES ${tables.subscriptions}(id) ON DELETE CASCADE,
+      message_id BIGINT NOT NULL REFERENCES schedule_service_private_messages(id) ON DELETE CASCADE,
+      attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+      lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+      UNIQUE(subscription_id,message_id));
+      CREATE INDEX IF NOT EXISTS ${tables.dueIndex}_private ON ${tables.jobs}_private(due_at);`);
     config=(await client.query(`SELECT * FROM ${tables.config} WHERE id=1`)).rows[0];
     if(!config){
       const keys=webpush.generateVAPIDKeys();
@@ -116,8 +123,9 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     const origins=(await client.query('SELECT origin FROM schedule_service_push_origins')).rows;
     for(const {origin} of origins){
       const destination=pushTables(origin);
-      await client.query(`INSERT INTO ${destination.jobs}(subscription_id,message_id)
-        SELECT id,$1 FROM ${destination.subscriptions} WHERE owner_key<>$2 ON CONFLICT DO NOTHING`,[message.id,message.authorKey]);
+      if(message.recipientKey&&!(await client.query('SELECT to_regclass($1) AS name',[destination.jobs+'_private'])).rows[0].name)continue;
+      await client.query(`INSERT INTO ${destination.jobs}${message.recipientKey?'_private':''}(subscription_id,message_id)
+        SELECT id,$1 FROM ${destination.subscriptions} WHERE owner_key<>$2 AND ($3::text IS NULL OR owner_key=$3) ON CONFLICT DO NOTHING`,[message.id,message.authorKey,message.recipientKey||null]);
     }
   }
   const payload=(messageId,owner,test=false)=>JSON.stringify({
@@ -132,12 +140,14 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     if(running||stopped)return;running=true;
     try{
       await schedulePush.drain();
-      await pool.query(`DELETE FROM ${tables.jobs} WHERE created_at<clock_timestamp()-interval '24 hours' OR attempts>=8`);
+      for(const privateQueue of [false,true]){
+      const jobTable=tables.jobs+(privateQueue?'_private':'');
+      await pool.query(`DELETE FROM ${jobTable} WHERE created_at<clock_timestamp()-interval '24 hours' OR attempts>=8`);
       // Short leased batches prevent two instances from normally sending the same job.
       for(let batch=0;batch<10;batch++){
         const token=crypto.randomUUID();
-        const jobs=(await pool.query(`UPDATE ${tables.jobs} SET lease_until=clock_timestamp()+interval '2 minutes',lease_token=$1,attempts=attempts+1
-          WHERE id IN(SELECT id FROM ${tables.jobs} WHERE due_at<=clock_timestamp() AND (lease_until IS NULL OR lease_until<clock_timestamp())
+        const jobs=(await pool.query(`UPDATE ${jobTable} SET lease_until=clock_timestamp()+interval '2 minutes',lease_token=$1,attempts=attempts+1
+          WHERE id IN(SELECT id FROM ${jobTable} WHERE due_at<=clock_timestamp() AND (lease_until IS NULL OR lease_until<clock_timestamp())
           ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 10) RETURNING *`,[token])).rows;
         if(!jobs.length)break;
         await Promise.all(jobs.map(async job=>{
@@ -149,14 +159,21 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
             }
             // Generic payload deliberately contains no employee name, message text or photo.
             const age=Math.floor((Date.now()-new Date(job.created_at).getTime())/1000);
-            await send(subscription.subscription,payload(job.message_id,subscription.owner_key),{vapidDetails,TTL:Math.max(0,86400-age),urgency:'high',timeout:10000});
-            await pool.query(`DELETE FROM ${tables.jobs} WHERE id=$1 AND lease_token=$2`,[job.id,token]);
+            const message=privateQueue?(await pool.query('SELECT author_key,recipient_key,leave_request_id,reply_to FROM schedule_service_private_messages WHERE id=$1',[job.message_id])).rows[0]:{recipient_key:null};
+            if(!message||message.recipient_key&&message.recipient_key!==subscription.owner_key){
+              await pool.query(`DELETE FROM ${jobTable} WHERE id=$1 AND lease_token=$2`,[job.id,token]);return;
+            }
+            const notification=message.recipient_key?JSON.stringify({kind:message.leave_request_id&&!message.reply_to?'leave-question':'private-message',
+              tag:'private-'+job.message_id,url:(subscription.owner_key.startsWith('employee:')?'/discussion?':'/discussion?mode=manager&')+'private='+encodeURIComponent(message.author_key)}):payload(job.message_id,subscription.owner_key);
+            await send(subscription.subscription,notification,{vapidDetails,TTL:Math.max(0,86400-age),urgency:'high',timeout:10000});
+            await pool.query(`DELETE FROM ${jobTable} WHERE id=$1 AND lease_token=$2`,[job.id,token]);
           }catch(error){
             if(error.statusCode===404||error.statusCode===410){await pool.query(`DELETE FROM ${tables.subscriptions} WHERE id=$1`,[subscription.id]);return;}
             const delay=Math.min(3600,30*2**job.attempts);
-            await pool.query(`UPDATE ${tables.jobs} SET due_at=clock_timestamp()+$3*interval '1 second',lease_until=NULL,lease_token=NULL WHERE id=$1 AND lease_token=$2`,[job.id,token,delay]);
+            await pool.query(`UPDATE ${jobTable} SET due_at=clock_timestamp()+$3*interval '1 second',lease_until=NULL,lease_token=NULL WHERE id=$1 AND lease_token=$2`,[job.id,token,delay]);
           }
         }));
+      }
       }
     }catch(error){logEvent('push_worker_failed',{component:'service_chat',code:errorCode(error)},'error');}finally{running=false;}
   }

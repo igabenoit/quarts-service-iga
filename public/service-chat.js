@@ -1,3 +1,4 @@
+import {createPrivateControls} from './service-private-chat.js';
 import {createPushControls} from './service-chat-push.js';
 const $=s=>document.querySelector(s);
 const mode=new URLSearchParams(location.search).get('mode')==='manager'?'manager':'employee';
@@ -11,9 +12,10 @@ async function api(path,options={}){
 }
 const json=body=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 const pushControls=createPushControls({api});
+const privateControls=createPrivateControls({api,json,getUser:()=>user});
 const atBottom=()=>box.scrollHeight-box.scrollTop-box.clientHeight<70;
 function clearChat(){
-  pushControls.reset();
+  pushControls.reset();privateControls.reset();
   epoch++;user=null;seen.clear();first=last=null;pending=null;
   box.replaceChildren();$('#pins').replaceChildren();$('#body').value='';$('#photo').value='';
   $('#chat').hidden=true;$('#pinned').hidden=true;$('#older').hidden=true;$('#newMessages').hidden=true;
@@ -72,7 +74,7 @@ async function refresh(initial=false){
     if(generation!==epoch)return;
     if(user&&user.key!==meta.user.key){clearChat();location.reload();return;}
     user=meta.user;$('#identity').textContent=user.name+(user.manager?' · Gestionnaire':'');$('#login').hidden=true;$('#chat').hidden=false;
-    pushControls.refresh();
+    pushControls.refresh();privateControls.refresh();
     const bottom=initial||atBottom();
     let more=true,received=0;
     while(more){
@@ -84,7 +86,7 @@ async function refresh(initial=false){
     await pins();if(generation!==epoch)return;
     if(bottom){box.scrollTop=box.scrollHeight;await markRead();}
     else if(received)$('#newMessages').hidden=false;
-    status(seen.size?'':'Aucun message pour le moment. Lance la discussion !');
+    status(seen.size?'':'Aucun message dans le groupe pour le moment.');
   }catch(error){failed(error);}finally{busy=false;}
 }
 $('#login').onsubmit=async event=>{

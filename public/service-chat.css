@@ -20,3 +20,5 @@
   #compose .photo-label input{width:180px}
   #messages{height:36vh;min-height:180px}
 }
+
+#privateChat{border:2px solid #176747;border-radius:12px;padding:16px;margin:16px 0}#privateChat summary{font-size:1.2rem;font-weight:700;cursor:pointer}#privateChat select{display:block;max-width:100%;padding:12px;margin:10px 0}.private-messages{max-height:45vh;overflow:auto}.leave-question{background:#fff0f0;color:#990d18;border:3px solid #b91c1c;border-radius:12px;padding:20px;margin:16px 0}.leave-question h2{font-size:1.5rem}.leave-question p{white-space:pre-wrap;font-size:1.15rem}.leave-question button{background:#b91c1c;color:white}.private-messages p{white-space:pre-wrap}

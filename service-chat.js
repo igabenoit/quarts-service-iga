@@ -1,3 +1,4 @@
+import {installPrivateChat} from './service-private-chat.js';
 import express from 'express';
 import {ensureChatGuests,isChatGuest} from './service-chat-guests.js';
 
@@ -38,7 +39,14 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     UNIQUE(author_key,request_id));
     CREATE INDEX IF NOT EXISTS schedule_service_messages_author ON schedule_service_messages(author_key,created_at);
     CREATE TABLE IF NOT EXISTS schedule_service_reads(
-    reader_key TEXT PRIMARY KEY,last_id BIGINT NOT NULL DEFAULT 0);`);
+    reader_key TEXT PRIMARY KEY,last_id BIGINT NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS schedule_service_private_messages(
+      id BIGSERIAL PRIMARY KEY,author_key TEXT NOT NULL,author_name TEXT NOT NULL,request_id UUID NOT NULL,
+      body TEXT NOT NULL CHECK(length(body)<=4000),recipient_key TEXT NOT NULL,leave_request_id BIGINT,
+      reply_to BIGINT REFERENCES schedule_service_private_messages(id),created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+      UNIQUE(author_key,request_id));
+    CREATE INDEX IF NOT EXISTS schedule_service_private_recipient ON schedule_service_private_messages(recipient_key,id);
+    CREATE TABLE IF NOT EXISTS schedule_service_private_reads(reader_key TEXT NOT NULL,peer_key TEXT NOT NULL,last_id BIGINT NOT NULL DEFAULT 0,PRIMARY KEY(reader_key,peer_key));`);
   const push=pushFactory?await pushFactory(pool):null;
   async function identity(req){
     const employee=req.query.mode==='manager'?null:await employeePortal.identity(req);
@@ -99,6 +107,7 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     }else await pool.query('DELETE FROM schedule_service_chat_guests WHERE person_id=$1',[personId]);
     res.json({ok:true});
   }));
+  await installPrivateChat(app,pool,{auth,sameOrigin,endpoint,push});
   push?.installRoutes(app,{auth,sameOrigin});
   app.get('/api/service-chat',auth,endpoint(async(req,res)=>{
     const unread=(await pool.query(`SELECT count(*)::int AS count FROM schedule_service_messages
