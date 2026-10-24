@@ -1,4 +1,4 @@
-export function createPrivateControls({api,json,getUser}){
+export function createPrivateControls({api,json,getUser,receipts}){
   const panel=document.querySelector('#privateChat'),contacts=panel.querySelector('select'),messages=panel.querySelector('.private-messages');
   const form=panel.querySelector('form'),body=form.querySelector('textarea'),feedback=panel.querySelector('[role=status]'),alerts=document.querySelector('#leaveQuestions');
   let peer=new URLSearchParams(location.search).get('private')||'',generation=0,pending=null,replyTo=null,loading=false,sending=false,first=null,history=false;
@@ -12,6 +12,7 @@ export function createPrivateControls({api,json,getUser}){
     if(message.leaveId){const context=document.createElement('p');context.textContent=(message.replyTo?'Réponse — ':'Question — ')+'Congé n° '+message.leaveId;article.append(context);}
     const text=document.createElement('p');text.textContent=message.body;article.append(text);
     if(message.leaveId&&!message.replyTo&&message.recipientKey===getUser().key)article.append(button('Répondre à cette question',()=>{replyTo=message.id;pending=null;feedback.textContent='Réponse à la question sur le congé n° '+message.leaveId;body.focus();}));
+    receipts.attach(article,message,'private');
     return article;
   }
   async function load(older=false){

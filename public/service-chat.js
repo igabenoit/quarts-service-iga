@@ -1,5 +1,6 @@
 import {createPrivateControls} from './service-private-chat.js';
 import {createPushControls} from './service-chat-push.js';
+import {createReadReceipts} from './service-chat-receipts.js';
 const $=s=>document.querySelector(s);
 const mode=new URLSearchParams(location.search).get('mode')==='manager'?'manager':'employee';
 let user=null,busy=false,sending=false,first=null,last=null,pending=null,epoch=0;
@@ -12,10 +13,11 @@ async function api(path,options={}){
 }
 const json=body=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 const pushControls=createPushControls({api});
-const privateControls=createPrivateControls({api,json,getUser:()=>user});
+const receipts=createReadReceipts({api,json,getUser:()=>user,onError:failed});
+const privateControls=createPrivateControls({api,json,getUser:()=>user,receipts});
 const atBottom=()=>box.scrollHeight-box.scrollTop-box.clientHeight<70;
 function clearChat(){
-  pushControls.reset();privateControls.reset();
+  pushControls.reset();privateControls.reset();receipts.reset();
   epoch++;user=null;seen.clear();first=last=null;pending=null;
   box.replaceChildren();$('#pins').replaceChildren();$('#body').value='';$('#photo').value='';
   $('#chat').hidden=true;$('#pinned').hidden=true;$('#older').hidden=true;$('#newMessages').hidden=true;
@@ -42,6 +44,7 @@ function card(message){
       }catch(error){failed(error);}finally{pin.disabled=false;}
     };article.append(pin);
   }
+  receipts.attach(article,message);
   return article;
 }
 async function pins(){
@@ -73,7 +76,7 @@ async function refresh(initial=false){
     const meta=await api('/api/service-chat');
     if(generation!==epoch)return;
     if(user&&user.key!==meta.user.key){clearChat();location.reload();return;}
-    user=meta.user;$('#identity').textContent=user.name+(user.manager?' · Gestionnaire':'');$('#login').hidden=true;$('#chat').hidden=false;
+    user=meta.user;$('#identity').textContent=user.name+(user.manager?' · Gestionnaire':'');$('#login').hidden=true;$('#chat').hidden=false;$('#receiptHelp').hidden=!user.manager;
     pushControls.refresh();privateControls.refresh();
     const bottom=initial||atBottom();
     let more=true,received=0;
