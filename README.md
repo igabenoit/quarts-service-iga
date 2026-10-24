@@ -1,5 +1,13 @@
 # Quarts Service IGA
 
+## Départ d’un employé et révocation des accès
+
+Les formulaires utilisent uniquement les codes employés personnels de six chiffres. L’ancien accès commun est retiré, y compris pour les sessions déjà ouvertes. Chaque compte de gérant doit être rattaché à sa fiche employé dans **Gestion des accès** : le départ ou la désactivation de cette fiche bloque automatiquement les accès personnels, les comptes de gérants rattachés et leurs notifications.
+
+Avant le déploiement, préparer le rattachement des comptes existants avec l’administrateur. Les comptes sans fiche seront bloqués. Voir [la procédure de migration et les vérifications](docs/employee-offboarding.md).
+
+Dans le chat, l’administrateur et les gérants peuvent consulter « Vu par… » sous leurs propres messages, dans le groupe et en privé. Le suivi enregistre l’affichage au premier plan; les employés ne peuvent pas accéder à ces listes. Voir [le fonctionnement des consultations](docs/chat-consultations.md).
+
 ## Fiabilité du Service : brouillons, publication et concurrence
 
 Le bouton « Publier cette semaine » enregistre une copie publique distincte du brouillon. Après une modification, utiliser « Publier les modifications » pour la rendre visible aux employés, aux familles et à la vue magasin. Le lien permanent et les codes personnels ne changent pas. Retirer la publication masque immédiatement la copie publique.

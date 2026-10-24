@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {promisify} from 'node:util';
+import {activePersonSQL,activeManagerSQL} from './employee-access.js';
 const scrypt=promisify(crypto.scrypt);
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 export const isScoped=req=>req.manager?.kind==='account';
@@ -22,7 +23,16 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,login TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,
     departments JSONB NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
-    ALTER TABLE schedule_manager_accounts ADD COLUMN IF NOT EXISTS password_encrypted TEXT;`);
+    ALTER TABLE schedule_manager_accounts ADD COLUMN IF NOT EXISTS password_encrypted TEXT;
+    ALTER TABLE schedule_manager_accounts ADD COLUMN IF NOT EXISTS person_id BIGINT;`);
+  async function installEmployeeLinks(){
+    await pool.query(`DO $$ BEGIN
+      IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='schedule_manager_accounts'::regclass AND conname='schedule_manager_person_fk') THEN
+        ALTER TABLE schedule_manager_accounts ADD CONSTRAINT schedule_manager_person_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
+      END IF;
+    END $$;
+    CREATE INDEX IF NOT EXISTS schedule_manager_person ON schedule_manager_accounts(person_id);`);
+  }
   // Authentication still uses scrypt. Only the administrator can request this encrypted copy.
   const credentialKey=()=>{if(!credentialSecret)fail('La clé de protection des accès est indisponible.',503);return crypto.createHmac('sha256',credentialSecret).update('manager-password-v1').digest();};
   const seal=(password,hash)=>{const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',credentialKey(),iv);cipher.setAAD(Buffer.from(hash));const encrypted=Buffer.concat([cipher.update(password,'utf8'),cipher.final()]);return ['v1',iv.toString('base64url'),cipher.getAuthTag().toString('base64url'),encrypted.toString('base64url')].join('.');};
@@ -32,13 +42,23 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     let session;try{session=readSession(req);}catch{return null;}
     if(!session)return null;
     if(!session.accountId)return {kind:'admin',name:'Administration'};
-    const row=(await pool.query('SELECT id,name,departments,active,version FROM schedule_manager_accounts WHERE id=$1',[session.accountId])).rows[0];
-    if(!row?.active||row.version!==session.accountVersion)return null;
-    return {kind:'account',id:Number(row.id),name:row.name,departments:row.departments};
+    const row=(await pool.query(`SELECT a.id,a.name,a.departments,a.version,a.person_id,p.access_version
+      FROM schedule_manager_accounts a JOIN schedule_store_people p ON p.id=a.person_id
+      WHERE a.id=$1 AND a.active AND ${activeManagerSQL()}`,[session.accountId])).rows[0];
+    if(!row||row.version!==session.accountVersion||row.access_version!==session.personVersion)return null;
+    return {kind:'account',id:Number(row.id),name:row.name,departments:row.departments,personId:Number(row.person_id)};
   }
   const admin=endpoint(async(req,res)=>{req.manager=await identity(req);if(!req.manager)fail('Connectez-vous à l’administration.',401);if(req.manager.kind!=='admin')fail('Accès réservé à l’administration.',403);});
   const requireAdmin=async(req,res,next)=>{await admin(req,res);if(!res.headersSent)next();};
-  const list=async()=>({accounts:(await pool.query('SELECT id,name,login,departments,active,version,password_encrypted IS NOT NULL AS "passwordAvailable" FROM schedule_manager_accounts ORDER BY name,id')).rows,departments:(await pool.query('SELECT id,name FROM schedule_leave_departments WHERE active=TRUE ORDER BY name')).rows});
+  const list=async()=>({
+    accounts:(await pool.query(`SELECT a.id,a.name,a.login,a.departments,a.active,a.version,a.person_id AS "personId",
+      a.password_encrypted IS NOT NULL AS "passwordAvailable",a.active AND ${activeManagerSQL()} AS "accessAllowed"
+      FROM schedule_manager_accounts a ORDER BY a.name,a.id`)).rows,
+    people:(await pool.query(`SELECT p.id,COALESCE(e.name,p.name) AS name,${activePersonSQL()} AS active
+      FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
+      WHERE p.portal_person_id IS NULL ORDER BY name,p.id`)).rows,
+    departments:(await pool.query('SELECT id,name FROM schedule_leave_departments WHERE active=TRUE ORDER BY name')).rows
+  });
   app.get('/api/manager-accounts',requireAdmin,endpoint(async(_req,res)=>res.set('Cache-Control','no-store').json(await list())));
   app.post('/api/manager-accounts/:id/password',requireAdmin,sameOrigin,endpoint(async(req,res)=>{
     res.set('Cache-Control','no-store');
@@ -55,16 +75,24 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     if(b.active&&!ids.length)fail('Un compte actif doit avoir au moins un département.');
     const valid=(await pool.query('SELECT id FROM schedule_leave_departments WHERE id=ANY($1::bigint[]) AND active=TRUE',[ids])).rows;
     if(valid.length!==ids.length)fail('Département inconnu ou inactif.');
+    const personId=b.personId===null?null:Number(b.personId);
+    if(personId!==null&&(!Number.isSafeInteger(personId)||personId<=0))fail('Choisissez la fiche employé de ce gérant.');
+    if(b.active&&!personId)fail('Un compte actif doit être rattaché à sa fiche employé.');
+    if(personId){
+      const person=(await pool.query(`SELECT p.id,${activePersonSQL()} AS active FROM schedule_store_people p
+        LEFT JOIN schedule_employees e ON e.id=p.service_employee_id WHERE p.id=$1 AND p.portal_person_id IS NULL`,[personId])).rows[0];
+      if(!person||b.active&&!person.active)fail('Choisissez une fiche employé principale active.');
+    }
     const hash=b.password?await passwordHash(b.password):null;
     const encrypted=hash?seal(b.password,hash):null;
     try{
       if(req.params.id){
         if(!Number.isInteger(b.version))fail('Actualisez la liste des comptes.',409);
-        const saved=await pool.query(`UPDATE schedule_manager_accounts SET name=$1,login=$2,departments=$3,active=$4,password_hash=COALESCE($5,password_hash),password_encrypted=COALESCE($8,password_encrypted),version=version+1,updated_at=clock_timestamp() WHERE id=$6 AND version=$7 RETURNING id`,[name,login,JSON.stringify(ids),b.active,hash,req.params.id,b.version,encrypted]);
+        const saved=await pool.query(`UPDATE schedule_manager_accounts SET name=$1,login=$2,departments=$3,active=$4,password_hash=COALESCE($5,password_hash),password_encrypted=COALESCE($8,password_encrypted),person_id=$9,version=version+1,updated_at=clock_timestamp() WHERE id=$6 AND version=$7 RETURNING id`,[name,login,JSON.stringify(ids),b.active,hash,req.params.id,b.version,encrypted,personId]);
         if(!saved.rowCount)fail('Ce compte a changé. Actualisez la liste.',409);
       }else{
         if(!hash)fail('Choisissez un mot de passe pour ce compte.');
-        await pool.query('INSERT INTO schedule_manager_accounts(name,login,departments,active,password_hash,password_encrypted) VALUES($1,$2,$3,$4,$5,$6)',[name,login,JSON.stringify(ids),b.active,hash,encrypted]);
+        await pool.query('INSERT INTO schedule_manager_accounts(name,login,departments,active,password_hash,password_encrypted,person_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[name,login,JSON.stringify(ids),b.active,hash,encrypted,personId]);
       }
     }catch(error){if(error.code==='23505')fail('Cet identifiant est déjà utilisé.',409);throw error;}
     res.set('Cache-Control','no-store').json({ok:true,...await list()});
@@ -78,12 +106,13 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     for(const [key,v] of attempts)if(now-v.since>900000)attempts.delete(key);
     if(keys.some(k=>(attempts.get(k)?.count||0)>=10))fail('Trop d’essais. Attendez 15 minutes.',429);
     for(const k of keys){const v=attempts.get(k)||{count:0,since:now};v.count++;attempts.set(k,v);}
-    const row=(await pool.query('SELECT * FROM schedule_manager_accounts WHERE login=$1',[login.slice(0,100)])).rows[0];
+    const row=(await pool.query(`SELECT a.*,p.access_version,a.active AND ${activeManagerSQL()} AS access_allowed
+      FROM schedule_manager_accounts a LEFT JOIN schedule_store_people p ON p.id=a.person_id WHERE a.login=$1`,[login.slice(0,100)])).rows[0];
     const correct=await passwordMatches(req.body?.password,row?.password_hash||dummy);
-    if(!correct||!row?.active)fail('Identifiant ou mot de passe incorrect.',401);
+    if(!correct||!row?.access_allowed)fail('Identifiant ou mot de passe incorrect, ou accès désactivé. Communiquez avec l’administration.',401);
     if(!row.password_encrypted&&credentialSecret)await pool.query('UPDATE schedule_manager_accounts SET password_encrypted=$1 WHERE id=$2 AND password_hash=$3 AND password_encrypted IS NULL',[seal(req.body.password,row.password_hash),row.id,row.password_hash]);
     keys.forEach(k=>attempts.delete(k));
-    res.setHeader('Set-Cookie',`schedule_session=${encodeURIComponent(issueSession({accountId:Number(row.id),accountVersion:row.version}))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${production?'; Secure':''}`);
+    res.setHeader('Set-Cookie',`schedule_session=${encodeURIComponent(issueSession({accountId:Number(row.id),accountVersion:row.version,personVersion:row.access_version}))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${production?'; Secure':''}`);
     const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];
     res.json({ok:true,path:row.departments.every(id=>id===Number(service?.id))?'/':'/departements'});
   }));
@@ -114,5 +143,5 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     if(serviceOnly&&ownsDepartment(req,service?.id))return;
     fail('Accès réservé à l’administration ou au département concerné.',403);
   }
-  return {identity,authorize};
+  return {identity,authorize,installEmployeeLinks};
 }

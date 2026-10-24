@@ -42,14 +42,19 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     failure=null;await f.pool.query('UPDATE schedule_service_schedule_push_jobs SET due_at=clock_timestamp()');await workers[0].drain();assert.equal(sent.at(-1).payload.kind,'schedule-updated');
     await f.pool.query('UPDATE schedule_employees SET active=FALSE WHERE id=$1',[employee.id]);await workers[1].drain();assert.equal(sent.length,7,'revoked employee receives nothing; administrator still receives the notice');assert.equal(await jobs(),0);
     await f.pool.query('UPDATE schedule_employees SET active=TRUE WHERE id=$1',[employee.id]);
+    const revokedInventory=await workers[0].scheduleInventory(week,{includeRecipients:true});
+    assert.equal(revokedInventory.employees,0,'reactivation does not restore old subscriptions');
+    // A new authenticated opt-in uses the current access version.
+    await f.pool.query(`UPDATE ${pushTables(scopes[0]).subscriptions} SET credential_hash=$1 WHERE owner_key=$2`,[await workers[0].credential('employee:'+person.id),'employee:'+person.id]);
     const pass=(_q,_s,next)=>next();
     await installScheduleNotifications(f.app,f.pool,{requireManager:pass,sameOrigin:pass,push:workers[0]});
     const inventory=await f.call('get','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
     assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:1,pending:0,recipients:[{name:'Employé fictif',kind:'employee',devices:1},{name:'Accès gestionnaire partagé',kind:'manager',devices:1}],published:true});
     // Same employee on two devices is one person; manager names are separate.
-    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB)');
+    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB,person_id BIGINT)');
     const service=(await f.pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0].id;
-    await f.pool.query("INSERT INTO schedule_manager_accounts VALUES(7,'Gestionnaire exemple',1,TRUE,$1)",[JSON.stringify([Number(service)])]);
+    const managerPerson=(await f.pool.query("INSERT INTO schedule_store_people(name) VALUES('Gestionnaire exemple') RETURNING id")).rows[0].id;
+    await f.pool.query("INSERT INTO schedule_manager_accounts VALUES(7,'Gestionnaire exemple',1,TRUE,$1,$2)",[JSON.stringify([Number(service)]),managerPerson]);
     const extraIds=[];
     for(const owner of ['employee:'+person.id,'manager:7']){
       const id=crypto.randomUUID();extraIds.push(id);

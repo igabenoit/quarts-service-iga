@@ -40,11 +40,11 @@ test('store portal: existing admin only, published Service and departments, shar
     await f.pool.query('INSERT INTO schedule_assignments(shift_id,employee_id) VALUES($1,$2)',[sid,serviceId]);
     await f.pool.query("INSERT INTO schedule_public_links(week_start,token,access_code_hash) VALUES($1,$2,'legacy-secret')",[week,'x'.repeat(43)]);
     await publishServiceWeek(f.pool,week);
-    const account=await fetch(base+'/api/manager-accounts',{method:'POST',headers:{'Content-Type':'application/json','x-test-session':JSON.stringify({role:'manager'})},body:JSON.stringify({name:'Gérant Fruits',login:'fruit.test',password:'Example-password-123',departments:[dept('fruits').id],active:true})});
+    const account=await fetch(base+'/api/manager-accounts',{method:'POST',headers:{'Content-Type':'application/json','x-test-session':JSON.stringify({role:'manager'})},body:JSON.stringify({name:'Gérant Fruits',login:'fruit.test',password:'Example-password-123',departments:[dept('fruits').id],active:true,personId:owner.id})});
     const a=(await account.json()).accounts[0];
     for(const path of ['/api/store-portal','/api/store-portal/weeks/'+week]){
       assert.equal((await call(path,null)).status,401);
-      assert.equal((await call(path,{role:'manager',accountId:a.id,accountVersion:a.version})).status,403);
+      assert.equal((await call(path,{role:'manager',accountId:a.id,accountVersion:a.version,personVersion:1})).status,403);
     }
     const listing=await call('/api/store-portal');assert.equal(listing.status,200);assert.equal(listing.cache,'no-store');assert.equal(listing.body.departments.length,10);assert.ok(listing.body.departments.some(d=>d.key==='administration'));assert.deepEqual(listing.body.weeks,[week]);
     const before=(await f.pool.query('SELECT * FROM schedule_department_weeks ORDER BY department_id')).rows;

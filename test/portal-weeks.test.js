@@ -16,7 +16,7 @@ const published=weekStart=>({department:{key:'fruits',name:'Fruits & Légumes'},
 function fixture(search=''){
  const elements=new Map(),events={},scrolls=[];
  const $=s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',hidden:false,inert:false,setAttribute(k,v){this[k]=v;},getBoundingClientRect:()=>({height:150}),querySelector(){return this.innerHTML.includes(' is-today')?{style:{},scrollIntoView:options=>scrolls.push({selector:s,options})}:null;}});return elements.get(s);};
- const context=vm.createContext({...core,...weeks,scrollToToday,URLSearchParams,location:{search},e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
+ const context=vm.createContext({...core,...weeks,scrollToToday,watchAccess:()=>({activate(){}}),URLSearchParams,location:{search},e:core.escapeHTML,console,setInterval(){},fetch:async()=>{throw Error('Unexpected fetch');},window:{addEventListener(k,f){events[k]=f;}},document:{querySelector:$,visibilityState:'visible',addEventListener(k,f){events[k]=f;}}});
  const source=readFileSync(new URL('../public/horaires-departements.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/\r?\nload\(\);\s*$/,'');
  vm.runInContext(source,context);
  return {$,events,context,scrolls,run:s=>vm.runInContext(s,context),fetch:f=>context.fetch=f};

@@ -1,3 +1,5 @@
+import {watchAccess} from './access-session.js';
+const accessGuard=watchAccess(location.pathname==='/disponibilites-test'?'manager':'employee');
 const $=s=>document.querySelector(s),days=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=m=>`${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')}`;
@@ -56,9 +58,9 @@ async function load(){try{
   if(!res.ok)throw new Error(data.error||'Chargement impossible.');info=data;
   $('#employee').innerHTML='<option value="">Choisir mon nom</option>'+info.employees.map(e=>`<option value="${e.id}">${escape(e.name)}</option>`).join('');
   $('#department').innerHTML='<option value="">Choisir mon département</option>'+info.departments.map(d=>`<option value="${d.id}">${escape(d.name)}</option>`).join('');
-  $('#accessForm').hidden=true;$('#availabilityForm').hidden=false;$('#testBanner').hidden=!test;$('#message').textContent='';updateDepartment();
+  $('#accessForm').hidden=true;accessGuard.activate();$('#availabilityForm').hidden=false;$('#testBanner').hidden=!test;$('#message').textContent='';updateDepartment();
 }catch(error){message(error.message);}}
-$('#accessForm').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const res=await fetch('/api/leave/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})}),data=await res.json();if(!res.ok)throw new Error(data.error);$('#staffCode').value='';await load();}catch(error){message(error.message);}finally{button.disabled=false;}};
+$('#accessForm').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const res=await fetch('/api/employee-portal/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:$('#staffCode').value})}),data=await res.json();if(!res.ok)throw new Error(data.error);$('#staffCode').value='';await load();}catch(error){message(error.message);}finally{button.disabled=false;}};
 $('#availabilityForm').onsubmit=async event=>{
   event.preventDefault();const {errors,a,p,target,dept,employeeName}=validate();if(errors.length||sending)return;sending=true;validate();message('Enregistrement…');
   try{

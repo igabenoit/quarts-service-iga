@@ -1,4 +1,5 @@
 import {chatPayload} from './service-chat.js';
+import {activeManagerSQL} from './employee-access.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const validId=value=>/^[1-9]\d{0,17}$/.test(String(value||''));
@@ -18,7 +19,7 @@ export async function installPrivateChat(app,pool,{auth,sameOrigin,endpoint,push
           SELECT 1 FROM schedule_store_memberships sm JOIN schedule_leave_departments d ON d.id=sm.department_id
           WHERE sm.person_id=m.id AND d.code='service' AND d.active))))) ORDER BY p.name,p.id`)).rows;
     const managers=(await db.query(`SELECT 'manager:'||a.id AS key,a.name FROM schedule_manager_accounts a
-      WHERE a.active AND EXISTS(SELECT 1 FROM schedule_leave_departments d WHERE d.code='service' AND d.active AND a.departments @> to_jsonb(d.id)) ORDER BY a.name`)).rows;
+      WHERE a.active AND ${activeManagerSQL()} AND EXISTS(SELECT 1 FROM schedule_leave_departments d WHERE d.code='service' AND d.active AND a.departments @> to_jsonb(d.id)) ORDER BY a.name`)).rows;
     return [...employees,...managers,{key:'admin',name:'Administration'}];
   }
   app.get('/api/service-chat/private',auth,endpoint(async(req,res)=>{

@@ -1,6 +1,7 @@
 import {installPrivateChat} from './service-private-chat.js';
 import express from 'express';
 import {ensureChatGuests,isChatGuest} from './service-chat-guests.js';
+import {installChatReceipts} from './service-chat-receipts.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const id=value=>{
@@ -60,13 +61,13 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
             WHERE m.person_id=p.id AND d.code='service' AND d.active=TRUE))) LIMIT 1`,
       [employee.portalPersonIds||[employee.id]])).rows.length;
       if(!member&&!await isChatGuest(pool,employee.id))fail('La discussion est réservée à l’équipe du Service.',403);
-      return {key:`employee:${employee.id}`,name:employee.name,manager:false};
+      return {key:`employee:${employee.id}`,name:employee.name,manager:false,personId:Number(employee.id)};
     }
     const manager=await managerAccess.identity(req);
     if(!manager)fail('Connecte-toi avec ton code employé.',401);
     const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service' AND active=TRUE")).rows[0];
     if(manager.kind!=='admin'&&!manager.departments.includes(Number(service?.id)))fail('Accès réservé aux gestionnaires du Service.',403);
-    return {key:manager.kind==='admin'?'admin':`manager:${manager.id}`,name:manager.name,manager:true};
+    return {key:manager.kind==='admin'?'admin':`manager:${manager.id}`,name:manager.name,manager:true,...(manager.personId?{personId:manager.personId}:{})};
   }
   const auth=async(req,res,next)=>{
     res.set('Cache-Control','no-store');
@@ -108,6 +109,7 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     res.json({ok:true});
   }));
   await installPrivateChat(app,pool,{auth,sameOrigin,endpoint,push});
+  await installChatReceipts(app,pool,{auth,sameOrigin,endpoint});
   push?.installRoutes(app,{auth,sameOrigin});
   app.get('/api/service-chat',auth,endpoint(async(req,res)=>{
     const unread=(await pool.query(`SELECT count(*)::int AS count FROM schedule_service_messages

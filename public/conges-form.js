@@ -1,3 +1,5 @@
+import {watchAccess} from './access-session.js';
+const accessGuard=watchAccess(location.pathname==='/conges-test'?'manager':'employee');
 import {deadlineForDate} from './leave-calendar.js';
 import {datesBetween,dayPeriods,quarterHours,hourLabel} from './leave-days.js';
 const $=s=>document.querySelector(s), form=$('#leaveForm');
@@ -67,7 +69,7 @@ async function load(){
     const response=await fetch(`${base}/${test?'test-form':store?'form':'leave-form'}`,{cache:'no-store'}),data=await response.json();
     if(store&&response.status===401){$('#accessForm').hidden=false;form.hidden=true;$('#deadline').textContent='Entrez votre code employé (6 derniers chiffres) pour remplir votre demande.';$('#message').textContent='';return;}
     if(!response.ok)throw new Error(data.error||'Connexion requise.');
-    $('#accessForm').hidden=true;
+    $('#accessForm').hidden=true;accessGuard.activate();
     earliest=data.earliest;updateDeadline();
     $('#employee').replaceChildren(new Option('Sélectionnez votre nom',''));
     $('#department').replaceChildren(new Option('Choisissez votre département',''));

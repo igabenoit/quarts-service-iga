@@ -26,9 +26,10 @@ test('push subscription, durable queue, revocation, retries and private payloads
   process.env.SESSION_SECRET='push-test-secret';process.env.MANAGER_CODE='push-admin-test';
   const f=await departmentFixture();let server,push;
   try{
-    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,version INTEGER,active BOOLEAN,departments JSONB)');
+    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,version INTEGER,active BOOLEAN,departments JSONB,person_id BIGINT)');
     const service=(await f.pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0].id;
-    await f.pool.query('INSERT INTO schedule_manager_accounts VALUES(7,1,TRUE,$1),(8,1,TRUE,\'[]\')',[JSON.stringify([Number(service)])]);
+    const managerPerson=(await f.pool.query("INSERT INTO schedule_store_people(name) VALUES('Manager fixture') RETURNING id")).rows[0].id;
+    await f.pool.query('INSERT INTO schedule_manager_accounts VALUES(7,1,TRUE,$1,$2),(8,1,TRUE,\'[]\',$2)',[JSON.stringify([Number(service)]),managerPerson]);
     const identities=[];
     for(let i=0;i<3;i++){
       const e=(await f.pool.query("INSERT INTO schedule_employees(name,area,role) VALUES($1,'front','cashier') RETURNING id",['Test '+i])).rows[0];
@@ -100,6 +101,11 @@ test('push subscription, durable queue, revocation, retries and private payloads
     assert.equal((await call('/api/service-chat/push',2)).body.enabled,true);
     assert.ok(await push.credential('manager:7'));assert.equal(await push.credential('manager:8'),null);
     const managerHash=await push.credential('manager:7');await f.pool.query('UPDATE schedule_manager_accounts SET version=2 WHERE id=7');assert.notEqual(await push.credential('manager:7'),managerHash);
+    const activeManagerHash=await push.credential('manager:7');
+    await f.pool.query('UPDATE schedule_store_people SET active=FALSE WHERE id=$1',[managerPerson]);
+    assert.equal(await push.credential('manager:7'),null,'a terminated manager cannot receive notifications');
+    await f.pool.query('UPDATE schedule_store_people SET active=TRUE WHERE id=$1',[managerPerson]);
+    assert.notEqual(await push.credential('manager:7'),activeManagerHash,'reactivation cannot revive a previous notification subscription');
     await f.pool.query('UPDATE schedule_employees SET departed_at=clock_timestamp() WHERE id=$1',[identities[2].employee]);
     assert.equal(await push.credential(identities[2].key),null);
     await call('/logout',2,{method:'POST'});assert.equal((await f.pool.query('SELECT count(*)::int AS n FROM schedule_service_push_subscriptions')).rows[0].n,0);
@@ -108,6 +114,10 @@ test('push subscription, durable queue, revocation, retries and private payloads
     assert.equal(await push.credential(identities[2].key),null);
     await f.pool.query("INSERT INTO schedule_service_chat_guests VALUES($1,clock_timestamp()+interval '7 days')",[identities[2].person]);
     assert.ok(await push.credential(identities[2].key));
+    assert.equal((await call('/api/service-chat/push',2,{method:'POST',body:one})).status,401,'departure invalidates the old session even after an explicit new guest grant');
+    const guestLogin={set(){return this;},status(){return this;},json(){},setHeader(_k,value){this.cookie=value.split(';')[0];}};
+    await f.service.employeePortal.login({body:{code:'001232'},ip:'returning-guest'},guestLogin);
+    identities[2].cookie=guestLogin.cookie;
     assert.equal((await call('/api/service-chat/push',2,{method:'POST',body:one})).status,200);
     sent.length=0;
     await call('/api/service-chat/messages',0,{method:'POST',body:{body:'Guest delivery',requestId:crypto.randomUUID()}});

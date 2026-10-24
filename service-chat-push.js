@@ -1,5 +1,6 @@
 import {errorCode,logEvent} from './runtime-diagnostics.js';
 import crypto from 'node:crypto';
+import {activeManagerSQL} from './employee-access.js';
 import {createSchedulePush} from './service-schedule-push.js';
 import webpush from 'web-push';
 import {ensureChatGuests} from './service-chat-guests.js';
@@ -92,12 +93,12 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     if(owner==='admin')return fingerprint('admin:'+process.env.MANAGER_CODE);
     const [kind,id]=owner.split(':');if(!/^\d+$/.test(id||''))return null;
     if(kind==='manager'){
-      const row=(await pool.query(`SELECT a.version FROM schedule_manager_accounts a WHERE a.id=$1 AND a.active AND EXISTS(
+      const row=(await pool.query(`SELECT a.version,p.access_version FROM schedule_manager_accounts a JOIN schedule_store_people p ON p.id=a.person_id WHERE a.id=$1 AND a.active AND ${activeManagerSQL()} AND EXISTS(
         SELECT 1 FROM schedule_leave_departments d WHERE d.code='service' AND d.active AND a.departments @> to_jsonb(d.id))`,[id])).rows[0];
-      return row?fingerprint(owner+':'+row.version):null;
+      return row?fingerprint(owner+':'+row.version+':'+row.access_version):null;
     }
     if(kind!=='employee')return null;
-    const row=(await pool.query(`SELECT p.employee_code FROM schedule_store_people p
+    const row=(await pool.query(`SELECT p.employee_code,p.access_version FROM schedule_store_people p
       LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
       WHERE p.id=$1 AND p.employee_code IS NOT NULL AND
       ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
@@ -107,7 +108,7 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
         AND ((se.active AND se.departed_at IS NULL) OR (m.service_employee_id IS NULL AND m.active AND EXISTS(
           SELECT 1 FROM schedule_store_memberships sm JOIN schedule_leave_departments d ON d.id=sm.department_id
           WHERE sm.person_id=m.id AND d.code='service' AND d.active)))))`,[id,includeGuests])).rows[0];
-    return row?fingerprint(owner+':'+row.employee_code):null;
+    return row?fingerprint(owner+':'+row.employee_code+(row.access_version===1?'':':'+row.access_version)):null;
   }
   function cookie(res,id,maxAge=31536000){
     res.append('Set-Cookie',`service_push_device=${id}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${process.env.NODE_ENV==='production'?'; Secure':''}`);

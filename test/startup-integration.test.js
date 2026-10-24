@@ -41,7 +41,9 @@ test('complete startup, signed sessions for every department, publication and pe
     assert.equal(departments.length,10);
     const bakery=departments.find(d=>d.name==='Boulangerie');let bakeryCookie;
     for(const department of departments){
-      const account={name:'Gestionnaire fictif '+department.id,login:'test.'+department.id,password:'Test-password-123!',active:true,departments:[Number(department.id)]};
+      const managerPerson=await call('/api/departments/people',admin,{name:'Gestionnaire fictif '+department.id,group:'regular',active:true,departments:[Number(bakery.id)],availability:{}});
+      assert.equal(managerPerson.status,200,JSON.stringify(managerPerson.body));
+      const account={name:'Gestionnaire fictif '+department.id,login:'test.'+department.id,password:'Test-password-123!',active:true,departments:[Number(department.id)],personId:managerPerson.body.id};
       assert.equal((await call('/api/manager-accounts',admin,account)).status,200);
       const login=await call('/api/manager-login','',{login:'  '+account.login.toUpperCase()+'  ',password:account.password});
       assert.equal(login.status,200);const cookie=login.cookie;

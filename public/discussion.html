@@ -6,6 +6,7 @@
 <form id="login" hidden><h2>Bienvenue dans l’équipe</h2><label for="code">Code employé — 6 chiffres</label><input id="code" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required><button>Ouvrir la discussion</button><p><a href="/connexion">Connexion des gestionnaires</a></p></form>
 <section id="chat" hidden>
 <div class="identity"><strong id="identity"></strong><button id="logout" type="button" class="quiet">Se déconnecter</button></div>
+<p id="receiptHelp" class="notice" hidden>Sous vos messages, « Vu par… » montre qui les a affichés dans la discussion. Cette liste est réservée à l’expéditeur gestionnaire. Aucun historique de consultation n’est déduit des anciennes connexions.</p>
 <section id="leaveQuestions" aria-label="Questions sur mes congés"></section>
 <details id="privateChat"><summary>Messages privés</summary><p>Ces échanges sont visibles uniquement par toi et la personne choisie.</p><label>Destinataire<select aria-label="Destinataire du message privé"></select></label><button type="button" data-older-private hidden>Messages précédents</button><button type="button" data-latest-private hidden>Revenir aux derniers messages</button><div class="private-messages" aria-label="Conversation privée"></div><form><label>Message privé<textarea rows="3" maxlength="4000" required></textarea></label><button>Envoyer en privé</button></form><p role="status"></p></details>
 <p class="notice">Groupe de l’équipe : les messages ci-dessous sont visibles par tout le Service et ses gestionnaires.</p>

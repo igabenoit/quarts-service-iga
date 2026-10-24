@@ -216,17 +216,6 @@ function secureEqual(left, right) {
   const b = crypto.createHash("sha256").update(String(right)).digest();
   return crypto.timingSafeEqual(a, b);
 }
-function staffCodeHash(code) { return crypto.createHmac("sha256", sessionSecret).update(`staff-code:${code}`).digest("hex"); }
-function staffAccessCookie(token, codeHash) {
-  const expires = Date.now() + 30 * 24 * 60 * 60 * 1000;
-  return `${token}.${expires}.${sign(`staff-access:${token}:${codeHash}:${expires}`)}`;
-}
-function hasStaffAccess(request, token, codeHash) {
-  const cookie = parseCookies(request.headers.cookie).schedule_view || "";
-  const [issuedToken, expires, signature] = cookie.split(".");
-  return issuedToken === token && /^\d{13}$/.test(expires || "") && Number(expires) > Date.now()
-    && typeof signature === "string" && secureEqual(signature, sign(`staff-access:${token}:${codeHash}:${expires}`));
-}
 async function requireManager(request, response, next) {
   try { await managerAccess.authorize(request); next(); }
   catch(error) { response.status(error.status||500).json({error:error.status?error.message:'Impossible de vérifier l’accès.'}); }
@@ -602,10 +591,18 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
 });
 
 startupPhase('schema_leave');
-const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,hasStaffAccess,employeeIdentity:req=>employeePortal.identity(req)});
+const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,employeeIdentity:req=>employeePortal.identity(req)});
 startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
+await managerAccess.installEmployeeLinks();
+app.get('/api/access-session',async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  try{
+    const identity=req.query.mode==='manager'?await managerAccess.identity(req):await employeePortal.identity(req);
+    res.status(identity?200:401).json({active:!!identity});
+  }catch{res.status(503).json({error:'Impossible de vérifier l’accès.'});}
+});
 startupPhase('schema_chat_push');
 chatPush=await installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,
   pushFactory:pool=>createServiceChatPush(pool,{secret:sessionSecret})});

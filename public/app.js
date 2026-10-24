@@ -306,12 +306,12 @@ $("#employeeForm").onsubmit=async event=>{event.preventDefault();const undoGroup
 $("#clearEmployee").onclick=resetEmployeeForm;
 $("#departEmployee").onclick=async()=>{
   const employee=state.employees.find(e=>e.id===Number($("#employeeId").value));
-  if(!employee||!confirm(`Retirer ${employee.name} de la liste pour un départ définitif? Cette personne ne sera plus proposée pour de nouvelles affectations. Les horaires et quarts déjà attribués seront conservés. La touche Annuler permettra de revenir sur ce retrait.`))return;
+  if(!employee||!confirm(`Terminer l’emploi de ${employee.name}? Ses accès personnels et tous ses comptes de gérant rattachés seront immédiatement bloqués. Cette personne ne sera plus proposée pour de nouvelles affectations. Les horaires et quarts déjà attribués seront conservés. Annuler rétablira la fiche, mais une nouvelle connexion sera nécessaire.`))return;
   const button=$("#departEmployee");button.disabled=true;
   try{
     await api(`/api/employees/${employee.id}/departure`,{method:'POST'});
     resetEmployeeForm();await loadEmployees();render();
-    $("#departureStatus").textContent=employee.name+' a été retiré de la liste. Ses quarts déjà attribués sont conservés; vérifiez ceux à venir.';
+    $("#departureStatus").textContent=employee.name+' a été retiré de la liste. Ses accès personnels et ses comptes de gérant rattachés sont bloqués. Ses quarts déjà attribués sont conservés; vérifiez ceux à venir.';
     toast('Employé retiré de la liste');
   }catch(error){$("#departureStatus").textContent=error.message;}
   finally{button.disabled=false;}

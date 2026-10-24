@@ -21,30 +21,23 @@ test('leave form and submission accept the employee session without a common-cod
     assert.equal(form.headers.get('cache-control'),'no-store');
     assert.equal(form.body.nameEntry,'manual');
     // Personal access also works when no common code has been configured yet.
-    assert.equal((await f.call('GET','/api/leave/access-settings',{cookie:admin})).body.configured,false);
+    assert.equal((await f.call('GET','/api/leave/access-settings',{cookie:admin})).status,410);
     const body={submissionKey:randomUUID(),employeeName:person.name,departmentId:form.body.departments[0].id,email:'conges@example.com',reason:'Demande fictive de test',periods:[{startDate:form.body.earliest,endDate:form.body.earliest,allDay:true}]};
     const submitted=await f.call('POST','/api/leave/submit',{cookie,body});
     assert.equal(submitted.status,201,JSON.stringify(submitted.body));
     assert.equal(submitted.body.status,'pending');
     assert.equal((await f.call('POST','/api/leave/submit',{cookie,body,headers:{origin:'https://different.example'}})).status,403);
 
-    // Existing shared sessions remain valid; new visitors use the personal login.
-    assert.equal((await f.call('PUT','/api/leave/access-settings',{cookie:admin,body:{code:'654321'}})).status,200);
-    for(const path of ['/api/leave/form','/api/leave/requests','/api/leave/access-settings']){
+    // Shared login and configuration are retired, including for an administrator.
+    assert.equal((await f.call('PUT','/api/leave/access-settings',{cookie:admin,body:{code:'654321'}})).status,410);
+    const common=await f.call('POST','/api/leave/access',{body:{code:'654321'}});
+    assert.equal(common.status,410);
+    for(const path of ['/api/leave/form','/api/leave/availability/form','/api/leave/clothing']){
       assert.equal((await f.call('GET',path)).status,401,path);
+      assert.equal((await f.call('GET',path,{cookie})).status,200,path);
     }
     assert.equal((await f.call('POST','/api/leave/submit',{body})).status,401);
-    for(const path of ['/api/leave/requests','/api/leave/access-settings']){
-      assert.equal((await f.call('GET',path,{cookie})).status,401,'employee session cannot access management');
-    }
-    const common=await f.call('POST','/api/leave/access',{body:{code:'654321'}});
-    assert.equal(common.status,200);assert.match(common.cookie,/^leave_access=/);
-    assert.equal((await f.call('GET','/api/leave/form',{cookie:common.cookie})).status,200);
-    assert.equal((await f.call('POST','/api/leave/submit',{cookie:common.cookie,body:{...body,submissionKey:randomUUID()}})).status,201);
-    for(let i=0;i<15;i++)assert.equal((await f.call('POST','/api/leave/access',{body:{code:'000000'}})).status,401);
-    assert.equal((await f.call('POST','/api/leave/access',{body:{code:'654321'}})).status,429);
-    assert.equal((await f.call('GET','/api/leave/form',{cookie})).status,200,'shared-code lockout does not block a valid employee');
-    assert.equal((await f.call('POST','/api/leave/submit',{cookie,body:{...body,submissionKey:randomUUID()}})).status,201);
+    assert.equal((await f.call('GET','/api/leave/requests',{cookie})).status,401);
 
     const id=cookie.split('=')[1].split('.')[0],expires=Date.now()-1000;
     const signature=createHmac('sha256','isolated-platform-audit-secret').update(`employee:${id}:${expires}:${person.employeeCode}`).digest('base64url');
@@ -53,7 +46,7 @@ test('leave form and submission accept the employee session without a common-cod
       assert.equal((await f.call('GET','/api/leave/form',{cookie:invalid})).status,401);
       assert.equal((await f.call('POST','/api/leave/submit',{cookie:invalid,body})).status,401);
     }
-    assert.equal((await f.call('GET','/api/leave/form',{cookie:expired+'; '+common.cookie})).status,200,'a valid shared session still works');
+    assert.equal((await f.call('GET','/api/leave/form',{cookie:expired+'; '+common.cookie})).status,401,'a shared cookie never restores personal access');
     const logout=await f.call('POST','/api/employee-portal/logout',{cookie});
     assert.equal((await f.call('GET','/api/leave/form',{cookie:logout.cookie})).status,401);
     const people=(await f.call('GET','/api/departments/meta',{cookie:admin})).body.people;
