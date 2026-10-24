@@ -17,7 +17,7 @@ export async function approvedLeave(pool, weekStart) {
     WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`, [weekStart,addDays(weekStart,6)]);
   return result.rows;
 }
-export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaffAccess,employeeIdentity}) {
+export async function installLeave(app, pool, {requireManager,sameOrigin,employeeIdentity}) {
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
     id BIGSERIAL PRIMARY KEY, submission_key UUID NOT NULL UNIQUE,
     employee_id BIGINT REFERENCES schedule_employees(id), employee_name TEXT NOT NULL,
@@ -43,13 +43,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   app.use('/api/leave',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   await installLeaveArchive(app,pool,{requireManager,sameOrigin});
   const departments=await installDepartments(app,pool,{requireManager,sameOrigin});
-  const {requireStaff:requireStoreStaff,hasStaffAccess:hasStoreStaffAccess}=await installLeaveAccess(app,pool,{requireManager,sameOrigin});
-  async function requireLeaveStaff(req,res,next){
-    try{
-      if(await employeeIdentity?.(req)||await hasStoreStaffAccess(req))return next();
-      res.status(401).json({error:'Entrez votre code employé (6 derniers chiffres) pour remplir votre demande.'});
-    }catch{res.status(500).json({error:'Impossible de vérifier l’accès.'});}
-  }
+  const {requireStaff:requireStoreStaff}=await installLeaveAccess(app,pool,{sameOrigin,employeeIdentity});
+  const requireLeaveStaff=requireStoreStaff;
   await installLeaveAcknowledgements(app,pool,{sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
@@ -59,9 +54,9 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,hasStaf
   async function staff(request,response,next) {
     try {
       if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({error:'Lien invalide.'});
-      const link = await pool.query('SELECT access_code_hash FROM schedule_public_links WHERE token=$1',[request.params.token]);
-      if (!link.rowCount || !hasStaffAccess(request,request.params.token,link.rows[0].access_code_hash)) return response.status(401).json({error:'Ouvrez votre lien d’horaire et entrez le code commun pour accéder au formulaire.'});
-      next();
+      const link = await pool.query('SELECT 1 FROM schedule_public_links WHERE token=$1',[request.params.token]);
+      if (!link.rowCount)return response.status(404).json({error:'Lien invalide.'});
+      return requireStoreStaff(request,response,next);
     } catch {response.status(500).json({error:'Impossible de vérifier l’accès.'});}
   }
   const noStore=(_req,res,next)=>{res.set('Cache-Control','no-store');next();};

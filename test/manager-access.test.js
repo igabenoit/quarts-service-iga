@@ -15,6 +15,7 @@ test('individual accounts: administration, department boundaries, revocation and
   const readSession=req=>{try{const session=JSON.parse(req.headers['x-test-session']||'null');return session?.role==='manager'||session?.accountId?session:null;}catch{return null;}};
   const origin=(req,res,next)=>req.headers.origin&&req.headers.origin!=='https://same.example'?res.status(403).json({error:'origin'}):next();
   const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true,credentialSecret:'test-only-secret-for-recoverable-passwords'});
+  await access.installEmployeeLinks();await access.installEmployeeLinks();
   const guard=async(req,res,next)=>{try{await access.authorize(req);next();}catch(e){res.status(e.status||500).json({error:e.message});}};
   for(const [key,handlers] of f.routes){const space=key.indexOf(' '),method=key.slice(0,space),path=key.slice(space+1);if(path.startsWith('/api/departments')||path.startsWith('/api/leave/'))app[method](path,guard,handlers.at(-1));}
   for(const path of ['/api/employees','/api/undo','/api/leave/access-settings','/api/unknown-admin-tool','/api/sales-forecasts/:weekStart'])app.get(path,guard,(_q,res)=>res.json({ok:true}));
@@ -25,7 +26,8 @@ test('individual accounts: administration, department boundaries, revocation and
   try{
     assert.equal((await call('/api/manager-accounts',{session:null})).status,401);
     const departments=(await call('/api/manager-accounts')).body.departments,fruit=Number(departments.find(d=>d.name.includes('Fruits')).id),meat=Number(departments.find(d=>d.name.includes('Viande')).id),service=Number(departments.find(d=>d.name==='Service').id);
-    const body={name:'Gérant test',login:'gerant.test',password:'Example-password-123',active:true,departments:[fruit]};
+    const personId=Number((await f.pool.query("INSERT INTO schedule_store_people(name) VALUES('Gérant test') RETURNING id")).rows[0].id);
+    const body={name:'Gérant test',login:'gerant.test',password:'Example-password-123',active:true,departments:[fruit],personId};
     assert.equal((await call('/api/manager-accounts',{method:'POST',body,origin:'https://wrong.example'})).status,403);
     const created=await call('/api/manager-accounts',{method:'POST',body});assert.equal(created.status,200);let account=created.body.accounts[0];
     assert.equal('password_hash' in account,false);
@@ -109,5 +111,15 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/employees',{session:serviceSession})).status,401);
     assert.equal((await call('/api/manager-login',{method:'POST',session:null,body:{login:body.login,password:body.password}})).status,401);
     assert.equal((await call('/api/manager-accounts')).status,200,'owner retains access');
+    // An old account must never be linked to an employee merely because names match.
+    const legacy=(await f.pool.query('INSERT INTO schedule_manager_accounts(name,login,password_hash,departments) VALUES($1,$2,$3,$4) RETURNING id',
+      [body.name,'legacy.manager',await passwordHash(body.password),JSON.stringify([fruit])])).rows[0];
+    const legacyLogin=()=>call('/api/manager-login',{method:'POST',session:null,body:{login:'legacy.manager',password:body.password}});
+    assert.equal((await legacyLogin()).status,401);
+    const unlinked=(await call('/api/manager-accounts')).body.accounts.find(a=>Number(a.id)===Number(legacy.id));
+    assert.equal(unlinked.personId,null);assert.equal(unlinked.accessAllowed,false);
+    const linked=await call('/api/manager-accounts/'+legacy.id,{method:'PUT',body:{...body,login:'legacy.manager',password:'',version:unlinked.version}});
+    assert.equal(linked.status,200);assert.equal((await legacyLogin()).status,200);
+    assert.equal((await call('/api/departments/meta',{session:{accountId:Number(legacy.id),accountVersion:2}})).status,401,'old manager cookies need a new login');
   }finally{await new Promise(resolve=>server.close(resolve));await f.db.close();}
 });

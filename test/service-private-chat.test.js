@@ -12,7 +12,7 @@ test('private conversations, leave questions and notifications stay between thei
   process.env.SESSION_SECRET='private-test-secret';
   const f=await departmentFixture();let server,push;
   try{
-    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB)');
+    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB,person_id BIGINT)');
     const identities=[];
     for(let n=0;n<3;n++){
       const e=(await f.pool.query("INSERT INTO schedule_employees(name,area,role) VALUES($1,'front','cashier') RETURNING id",['Person '+n])).rows[0];

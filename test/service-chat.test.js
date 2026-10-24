@@ -91,6 +91,9 @@ test('Service chat enforces membership, persists messages, protects photos, pins
     await f.pool.query('UPDATE schedule_employees SET active=FALSE WHERE id=$1',[employee]);
     assert.equal((await call()).status,401);
     await f.pool.query('UPDATE schedule_employees SET active=TRUE WHERE id=$1',[employee]);
+    assert.equal((await call()).status,401,'reactivation does not restore the old session');
+    await f.service.employeePortal.login({body:{code:'001234'},ip:'reactivated'},
+      {status(){return this;},set(){return this;},json(){},setHeader(k,v){cookies['001234']=v.split(';')[0];}});
     // Seed a longer history to exercise both pagination directions and monotonic read state.
     for(let n=0;n<55;n++)await f.pool.query("INSERT INTO schedule_service_messages(author_key,author_name,request_id,body) VALUES('manager:7','Manager',$1,$2)",[requestId(),`Message ${n}`]);
     const latest=(await call('/messages')).body;assert.equal(latest.messages.length,50);assert.equal(latest.more,true);

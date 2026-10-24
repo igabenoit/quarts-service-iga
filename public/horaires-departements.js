@@ -1,6 +1,8 @@
 import {escapeHTML as e,addDays,monday,today,hoursLabel} from './departments-core.js';
 import {availableWeeks,selectedWeek,weekInfo,weekRange,fullDate,personalDays} from './portal-weeks.js';
 import {scrollToToday} from './portal-current-day.js';
+import {watchAccess} from './access-session.js';
+const accessGuard=watchAccess('employee');
 const $=s=>document.querySelector(s);
 let requestedWeek=new URLSearchParams(location.search).get('week');
 let listing=null,week=null,listSequence=0,scheduleSequence=0,loading=false;
@@ -39,6 +41,7 @@ async function load({reset=false}={}){
   $('#personalSchedule').innerHTML='';$('#weekControls').inert=true;$('#weekBanner').hidden=true;status('Actualisation des horaires…');
   try{
     const next=await api('/api/leave/department-schedules');if(sequence!==listSequence)return;
+    accessGuard.activate();
     next.today=next.today||today();const showToday=reset||!listing||listing.today!==next.today;
     week=selectedWeek(week,next,listing?.today,reset);if(requestedWeek&&availableWeeks(next).includes(requestedWeek)){week=requestedWeek;}requestedWeek=null;listing=next;
     $('#accessForm').hidden=true;$('#staffContent').hidden=false;$('#weekBanner').hidden=false;
