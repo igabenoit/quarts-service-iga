@@ -26,7 +26,7 @@ test('règles : champs obligatoires, journées fixes, deux soirs entiers et jeud
  const short=body();short.availability[1]=[[1020,1275]];assert.throws(()=>normalizeAvailability(short,{today:'2030-01-01'}),/deux soirs/);
  const noFriday=body();noFriday.availability[0]=[[1020,1290]];noFriday.availability[3]=[];assert.throws(()=>normalizeAvailability(noFriday,{today:'2030-01-01'}),/jeudi ou le vendredi/);
  const earlier=body();earlier.availability[1]=[[450,1290]];assert.doesNotThrow(()=>normalizeAvailability(earlier,{today:'2030-01-01'}));
- assert.throws(()=>normalizeAvailability(body({targetMinutes:1200}),{today:'2030-01-01',maxMinutes:1020}),/17 h/);
+ assert.equal(normalizeAvailability(body({targetMinutes:2400}),{today:'2030-01-01'}).targetMinutes,2400);
 });
 
 test('dates : 28 jours calendaires, changement d’année et d’heure, disponibilité exacte par jour',()=>{
@@ -41,12 +41,9 @@ test('dates : 28 jours calendaires, changement d’année et d’heure, disponib
  const next={availability_history:[{source:'request',effectiveDate:'2026-10-18'}]};assert.equal(minimumEffectiveDate(next,'2026-10-19'),'2026-11-15');
 });
 
-test('heures souhaitées : 10 à 40 inclusivement, avec les limites plus basses de la fiche',()=>{
- for(const targetMinutes of [15,585,2415,3000])assert.throws(()=>normalizeAvailability(body({targetMinutes}),{today:'2030-01-01',maxMinutes:3000}),/entre 10 et 40 h/);
- for(const targetMinutes of [600,615,2385,2400])assert.equal(normalizeAvailability(body({targetMinutes}),{today:'2030-01-01',maxMinutes:3000}).targetMinutes,targetMinutes);
- assert.throws(()=>normalizeAvailability(body({targetMinutes:1035}),{today:'2030-01-01',maxMinutes:1020}),/entre 10 et 17 h/);
- assert.equal(normalizeAvailability(body({targetMinutes:600}),{today:'2030-01-01',maxMinutes:1020}).targetMinutes,600);
- assert.throws(()=>normalizeAvailability(body({targetMinutes:600}),{today:'2030-01-01',maxMinutes:480}),/Contactez la gestion/);
+test('heures souhaitées : 10 à 40 inclusivement, indépendamment du plafond de planification',()=>{
+ for(const targetMinutes of [15,585,2415,3000])assert.throws(()=>normalizeAvailability(body({targetMinutes}),{today:'2030-01-01'}),/entre 10 et 40 h/);
+ for(const targetMinutes of [600,615,1035,2385,2400])assert.equal(normalizeAvailability(body({targetMinutes}),{today:'2030-01-01'}).targetMinutes,targetMinutes);
 });
 
 test('chaque plage permet un quart de trois heures, y compris une journée facultative',()=>{
@@ -112,13 +109,17 @@ test('PostgreSQL : demandes, approbation future, délai, conflits conservés, an
    assert.equal(calls.length,0);assert.equal((await pool.query("SELECT status FROM schedule_availability_mail WHERE kind='approved'")).rows[0].status,'cancelled');
    assert.equal((await call('patch','/requests/:id',{params:{id},body:{status:'approved',version:3}})).code,200);
   });
-  await t.test('27 jours refusés, 28 jours acceptés; validation réappliquée à l’approbation',async()=>{
+  await t.test('28 jours requis et souhait de 40 h accepté malgré une fiche limitée à 15 h',async()=>{
    const blocked=await call('post','/submit',{body:body({effectiveDate:addDays(effective,27)})});assert.equal(blocked.code,400);assert.match(blocked.body.error,/4 semaines/);
-   const second=await call('post','/submit',{body:body({effectiveDate:addDays(effective,28),targetMinutes:1200})});assert.equal(second.code,201);
-   await pool.query('UPDATE schedule_employees SET max_minutes=1020 WHERE id=1');
-   const rejected=await call('patch','/requests/:id',{params:{id:second.body.id},body:{status:'approved',version:1}});assert.equal(rejected.code,409);assert.equal((await employee()).availability_history.length,2);
-   await pool.query('UPDATE schedule_employees SET max_minutes=2400 WHERE id=1');
+   await pool.query('UPDATE schedule_employees SET max_minutes=900,is_minor=TRUE WHERE id=1');
+   const form=await call('get','/form');assert.equal(form.body.employees.find(e=>e.id===1).maxHours,40);
+   const second=await call('post','/submit',{body:body({effectiveDate:addDays(effective,28),targetMinutes:2400})});assert.equal(second.code,201,JSON.stringify(second.body));
    assert.equal((await call('patch','/requests/:id',{params:{id:second.body.id},body:{status:'approved',version:1}})).code,200);
+   assert.equal(profileAt(await employee(),addDays(effective,28)).targetMinutes,2400);assert.equal((await employee()).max_minutes,900);assert.equal((await employee()).is_minor,true);
+   const limited={id:1,role:'cashier',roles:['cashier'],active:true,isMinor:true,maxMinutes:900,seniority:'2020-01-01',...employeeAvailability(await employee(),{weekStart:addDays(effective,28)})};
+   const saturday={id:998,role:'cashier',dayIndex:5,startMinute:450,endMinute:1290,paidMinutes:840},sunday={id:999,role:'cashier',dayIndex:6,startMinute:450,endMinute:630,paidMinutes:180};
+   assert.match(assignmentConflict(limited,sunday,[saturday,sunday],[{employeeId:1,shiftId:998}]),/Maximum \/ semaine/);
+   await pool.query('UPDATE schedule_employees SET max_minutes=2400,is_minor=FALSE WHERE id=1');
    assert.equal((await call('patch','/requests/:id',{params:{id},body:{status:'cancelled',version:4,note:'Annulation ancienne'}})).code,409);
    assert.equal((await call('patch','/requests/:id',{params:{id:second.body.id},body:{status:'cancelled',version:2,note:'Correction'}})).code,200);
    assert.equal((await employee()).availability_history.length,2);
