@@ -12,7 +12,7 @@ import {serviceRevision,assertServiceRevision,commitServiceTransaction} from './
 import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
-import {employeeAvailability,localDate} from "./availability-rules.js";
+import {employeeAvailability,localDate,profileAt} from "./availability-rules.js";
 import {availabilityRevision,recordManualAvailability,saveAvailabilityHistory} from "./availability.js";
 import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
@@ -276,7 +276,7 @@ function mapShift(row) {
   };
 }
 
-function normalizeEmployee(body) {
+function normalizeEmployee(body,{requestedTarget=null}={}) {
   const name = String(body.name || "").trim().slice(0, 100);
   const role = String(body.role || "");
   if (!name || !["cashier", "supervisor", "packer", "orders", "manager"].includes(role)) throw new Error("Nom ou fonction invalide.");
@@ -298,9 +298,9 @@ function normalizeEmployee(body) {
   }
   const targetMinutes = parseMinutes(body.targetMinutes ?? 0, "Heures souhaitées", 0, 3000);
   const maxMinutes = parseMinutes(body.maxMinutes ?? 2400, "Maximum", 0, 3600);
-  if (targetMinutes > maxMinutes) throw new Error("La cible dépasse le maximum.");
+  if (targetMinutes > maxMinutes && targetMinutes !== requestedTarget) throw new Error("La cible dépasse le maximum.");
   const isMinor = body.isMinor === true;
-  if (isMinor && targetMinutes > 1020) throw new Error("Un employé de 17 ans ou moins ne peut pas demander plus de 17 h par semaine.");
+  if (isMinor && targetMinutes > 1020 && targetMinutes !== requestedTarget) throw new Error("Un employé de 17 ans ou moins ne peut pas demander plus de 17 h par semaine.");
   const seniority = validDate(body.seniority) ? body.seniority : "9999-12-31";
   return { name, role, roles, area: role === "packer" ? "packer" : "front", seniority,
     targetMinutes, maxMinutes, availability, notes: String(body.notes || "").slice(0, 300),
@@ -399,15 +399,16 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
 app.put("/api/employees/:id", requireManager, sameOrigin, async (request, response) => {
   const client = await pool.connect();
   try {
-    const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
     await beginUndo(client,"Modifier un employé",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
     if(before.rows[0].departed_at){await client.query('ROLLBACK');return response.status(409).json({error:'Cet employé a été retiré pour un départ définitif. Sa fiche ne peut plus être modifiée.'});}
+    const currentProfile=profileAt(before.rows[0],localDate());
+    const e=normalizeEmployee(request.body||{},{requestedTarget:currentProfile.source==='request'?currentProfile.targetMinutes:null});
     const availabilityHistory=await recordManualAvailability(client,before.rows[0],e,request.body||{});
-    if(availabilityHistory.some(v=>v.effectiveDate>=localDate()&&v.targetMinutes>Math.min(e.maxMinutes,e.isMinor?1020:3000)))throw new Error("Une disponibilité approuvée demande plus d’heures que ce nouveau maximum. Révisez d’abord la demande.");
+    if(availabilityHistory.some(v=>v.source!=='request'&&v.effectiveDate>=localDate()&&v.targetMinutes>Math.min(e.maxMinutes,e.isMinor?1020:3000)))throw new Error("Une disponibilité approuvée demande plus d’heures que ce nouveau maximum. Révisez d’abord la demande.");
     await client.query(`UPDATE schedule_employees SET name=$1,area=$2,role=$3,roles=$4,seniority=$5,target_minutes=$6,max_minutes=$7,
       availability=$8,notes=$9,active=$10,is_minor=$11,allow_extra_hours=$12 WHERE id=$13 RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.params.id]);
