@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID,createHash} from 'node:crypto';
+import {departmentFixture} from './department-fixture.js';
+import {installSST} from '../sst.js';
+import {validateSSTIntake,importSSTIntake} from '../sst-intake.js';
+const bytes=Buffer.from('%PDF-1.4\noriginal test only\n%%EOF');
+function payload(){return {format:'iga-sst-intake-v1',id:randomUUID(),label:'Import isolé de test',records:[{key:'reference',files:['one'],kind:'document',title:'Modèle vierge',status:'open',departmentKey:'charcuterie',relatedKey:'visit',details:'Aucune activité attestée.'},{key:'visit',files:[],kind:'inspection',title:'Visite CNESST test',status:'open',eventDate:'2026-11-10'},{key:'bilan',files:[],kind:'document',title:'Bilan',status:'open'}],documents:[{key:'one',name:'original.pdf',dataBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}]}}
+test('import SST : validation complète avant toute écriture',()=>{
+ for(const change of [p=>p.documents[0].sha256='0'.repeat(64),p=>p.documents[0].name='../privé.pdf',p=>p.records[0].employeeKey='service:1',p=>p.records[0].kind='training',p=>p.records[0].files=['one','one'],p=>p.records[1].relatedKey='reference',p=>p.documents[0].key='orphan']){const v=payload();change(v);assert.throws(()=>validateSSTIntake(v))}
+});
+test('import SST : originaux, liens, audit, atomicité et réexécution sans toucher aux saisies',async()=>{
+ const f=await departmentFixture();try{
+  await installSST(f.app,f.pool,{identity:()=>null});const p=payload(),first=await importSSTIntake(f.pool,p);assert.equal(first.document_count,1);assert.equal(first.record_count,3);
+  const record=(await f.pool.query("SELECT * FROM sst_records WHERE title='Modèle vierge'")).rows[0];assert.ok(record.related_id);assert.equal(record.employee_key,null);assert.equal(record.event_date,null);
+  const file=(await f.pool.query('SELECT * FROM sst_documents')).rows[0];assert.deepEqual(Buffer.from(file.data),bytes);assert.equal(file.record_id,record.id);
+  assert.equal(Number((await f.pool.query('SELECT count(*) n FROM sst_events')).rows[0].n),4);
+  await f.pool.query("UPDATE sst_records SET title='Version corrigée par l’administration',version=2,archived_at=clock_timestamp() WHERE id=$1",[record.id]);
+  assert.equal((await importSSTIntake(f.pool,p)).alreadyImported,true);const kept=(await f.pool.query('SELECT * FROM sst_records WHERE id=$1',[record.id])).rows[0];assert.equal(kept.version,2);assert.ok(kept.archived_at);assert.match(kept.title,/corrigée/);
+  const tampered=structuredClone(p);tampered.records[0].title='Écrasement';await assert.rejects(()=>importSSTIntake(f.pool,tampered));
+  const bad=payload();bad.records.push({key:'bad',files:[],kind:'document',title:'Doit annuler le lot',status:'open',departmentKey:'unknown'});await assert.rejects(()=>importSSTIntake(f.pool,bad));assert.equal(Number((await f.pool.query('SELECT count(*) n FROM sst_records')).rows[0].n),3);assert.equal(Number((await f.pool.query('SELECT count(*) n FROM sst_imports')).rows[0].n),1);
+  const second=payload();second.documents[0].dataBase64=Buffer.from('%PDF-1.4 autre').toString('base64');second.documents[0].sha256=createHash('sha256').update(Buffer.from('%PDF-1.4 autre')).digest('hex');const two=await importSSTIntake(f.pool,second);assert.equal(two.record_count,2);assert.equal(Number((await f.pool.query("SELECT count(*) n FROM sst_records WHERE kind='inspection'")).rows[0].n),1);
+ }finally{await f.db.close()}
+});
+
+test('import SST : transmission privée avec contrôle de session et origine',async()=>{
+ const {liveAppFixture}=await import('./live-app-fixture.mjs');const f=await liveAppFixture();try{
+  const p=payload(),body=Buffer.from(JSON.stringify(p));const send=async(cookie,origin=f.base,raw=body)=>{const r=await fetch(f.base+'/api/sst/import',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-SST-Request':'1',Origin:origin,...(cookie?{Cookie:cookie}:{})},body:raw});return {status:r.status,body:await r.json()}};
+  assert.equal((await send()).status,401);const admin=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;assert.equal((await send(admin,'https://other.example')).status,403);assert.equal((await send(admin,f.base,Buffer.from('{invalid'))).status,400);
+  const first=await send(admin);assert.equal(first.status,201,JSON.stringify(first.body));assert.equal(first.body.documents,1);const repeat=await send(admin);assert.equal(repeat.status,200);assert.equal(repeat.body.alreadyImported,true);
+  const saved=(await f.call('GET','/api/sst/export',{cookie:admin})).body;assert.equal(saved.documents[0].dataBase64,bytes.toString('base64'));assert.equal(saved.imports.length,1);
+ }finally{await f.close()}
+});

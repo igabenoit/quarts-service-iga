@@ -36,6 +36,7 @@ test('SST : administration, répertoire partagé en lecture seule, preuves, hist
    const login=await f.call('POST','/api/manager-login',{body:{login:manager.login,password:manager.password}});assert.equal(login.status,200,JSON.stringify(login.body));
    for(const path of ['access','state','history','export','documents/00000000-0000-4000-8000-000000000000'])assert.equal((await f.call('GET','/api/sst/'+path,{cookie:login.cookie})).status,403);
    assert.equal((await f.call('POST','/api/sst/records',{cookie:login.cookie,headers,body:{}})).status,403);
+   assert.equal((await f.call('POST','/api/sst/import',{cookie:login.cookie,headers,body:{}})).status,403);
    assert.equal((await f.call('GET','/api/departments/meta',{cookie:login.cookie})).status,200);
   });
   const person=directory.employees.find(p=>p.name==='Employé SST Service');
