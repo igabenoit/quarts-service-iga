@@ -146,29 +146,37 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   app.patch('/api/leave/requests/:id',requireManager,sameOrigin,async(req,res)=>{
     const client=await pool.connect();
     try {
-      const b=req.body||{},note=typeof b.note==='string'?b.note.trim():'';
+      const b=req.body||{};let note=typeof b.note==='string'?b.note.trim():'';
       if(!['approved','refused','cancelled','conditional'].includes(b.status)||!Number.isSafeInteger(b.version)||note.length>1000) return res.status(400).json({error:'Décision invalide.'});
       if(b.status!=='approved'&&!note)return res.status(400).json({error:b.status==='conditional'?'Précisez les conditions à transmettre à l’employé.':'Précisez la raison de votre décision.'});
       await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
       await beginUndo(client,b.status==='approved'?'Approuver un congé':b.status==='conditional'?'Accorder un congé sous conditions':b.status==='cancelled'?'Annuler un congé':'Refuser un congé',null,req);
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Demande introuvable.'});}
+      if(!ownsDepartment(req,row.department_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Ce département ne fait pas partie de vos accès.'});}
       if(row.archived_at){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande est archivée.'});}
       if(row.version!==b.version){await client.query('ROLLBACK');return res.status(409).json({error:'Cette demande a changé. Actualisez le suivi.'});}
-      if(!((['pending','conditional'].includes(row.status)&&['approved','refused','cancelled','conditional'].includes(b.status))||(row.status==='late'&&['approved','refused','conditional'].includes(b.status))||(row.status==='approved'&&b.status==='cancelled'))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
+      if(!((['pending','conditional'].includes(row.status)&&['approved','refused','cancelled','conditional'].includes(b.status))||(row.status==='late'&&['approved','refused','conditional'].includes(b.status))||(row.status==='approved'&&['approved','cancelled'].includes(b.status)))){await client.query('ROLLBACK');return res.status(400).json({error:'Cette demande ne permet plus cette décision. Actualisez le suivi pour consulter son statut.'});}
       if(row.status==='conditional'&&b.status==='approved'&&b.conditionsConfirmed!==true){await client.query('ROLLBACK');return res.status(400).json({error:'Confirmez que les conditions sont remplies ou levées avant de confirmer le congé.'});}
+      const correction=row.status==='approved'&&b.status==='approved';
+      const previousPeriods=row.effective_periods??row.periods;
+      if(correction&&(!note||b.periods===undefined)){await client.query('ROLLBACK');return res.status(400).json({error:'Modifiez les journées ou les heures et indiquez la raison de la correction.'});}
+      let periodsChanged=false;
       if(b.periods!==undefined){
         if(!['approved','conditional'].includes(b.status)){await client.query('ROLLBACK');return res.status(400).json({error:'Modifiez les dates lors de l’approbation ou de l’accord sous conditions.'});}
         let periods;
         try{periods=normalizeLeave({email:row.email,reason:row.reason,periods:b.periods},new Date()).periods;}
         catch(error){await client.query('ROLLBACK');return res.status(400).json({error:error.message});}
-        if(JSON.stringify(periods)!==JSON.stringify(row.periods)){
+        if(JSON.stringify(periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))!==JSON.stringify(row.periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))){
+          periodsChanged=true;
           const describe=items=>items.map(p=>`${p.date} — ${p.allDay?'journée complète':`${String(Math.floor(p.startMinute/60)).padStart(2,'0')}:${String(p.startMinute%60).padStart(2,'0')} à ${String(Math.floor(p.endMinute/60)).padStart(2,'0')}:${String(p.endMinute%60).padStart(2,'0')}`}`).join('; ');
           await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,row.status,`Périodes modifiées par la gestion. Avant : ${describe(row.periods)}. Après : ${describe(periods)}.`]);
           row.periods=periods;row.first_date=periods[0].date;row.last_date=periods.at(-1).date;
           await client.query('UPDATE schedule_leave_requests SET periods=$1::jsonb,first_date=$2,last_date=$3,effective_periods=NULL WHERE id=$4',[JSON.stringify(periods),row.first_date,row.last_date,row.id]);
         }
       }
+      if(correction&&!periodsChanged){await client.query('ROLLBACK');return res.status(400).json({error:'Aucune journée ni heure modifiée. Pour retirer le congé, utilisez « Annuler la demande ».'});}
+      if(correction)note='Correction du congé approuvé : '+note;
       if(b.status==='approved'&&!row.is_test){
         const dept=(await client.query('SELECT code FROM schedule_leave_departments WHERE id=$1',[row.department_id])).rows[0];
         if(!row.employee_id&&dept?.code==='service'){
@@ -177,7 +185,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
           row.employee_id=linked.id;
           await client.query('UPDATE schedule_leave_requests SET employee_id=$1 WHERE id=$2',[linked.id,row.id]);
         }
-        const other=(await client.query(`SELECT COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests WHERE employee_id=$1 AND status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$3 AND last_date>=$2`,[row.employee_id,row.first_date,row.last_date])).rows;
+        const other=(await client.query(`SELECT COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests WHERE employee_id=$1 AND status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$3 AND last_date>=$2 AND id<>$4`,[row.employee_id,row.first_date,row.last_date,row.id])).rows;
         const effective=uncoveredLeavePeriods(row.periods,other.flatMap(o=>o.periods));
         if(!effective.length){await client.query('ROLLBACK');return res.status(409).json({error:'Toutes les périodes de cette demande sont déjà approuvées. Aucun changement à l’horaire.'});}
         await client.query('UPDATE schedule_leave_requests SET effective_periods=$1::jsonb WHERE id=$2',[JSON.stringify(effective),row.id]);
@@ -188,13 +196,13 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       await client.query(`UPDATE schedule_leave_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3`,[b.status,note,row.id]);
       await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,b.status,note]);
       if(row.status==='conditional'&&b.status==='approved')await client.query('INSERT INTO schedule_leave_events (request_id,status,note) VALUES ($1,$2,$3)',[row.id,'approved','Validation finale : la gestion confirme que les conditions sont remplies ou levées.']);
-      const changes=['approved','cancelled'].includes(b.status)&&!row.is_test?await applyApprovedLeave(client,{requestId:row.id}):{released:[],adjusted:[]};
+      const changes=['approved','cancelled'].includes(b.status)&&!row.is_test?await applyApprovedLeave(client,{requestId:row.id,previousPeriods:correction?previousPeriods:[]}):{released:[],adjusted:[]};
       if(b.status==='approved')await approvalMail.queue(client,row.id);
       if(['refused','conditional'].includes(b.status))await employeeNotices.queue(client,row.id,b.status);
       await client.query('COMMIT');
       approvalMail.run().catch(()=>{});
       employeeNotices.run().catch(()=>{});
-      res.json({ok:true,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
+      res.json({ok:true,corrected:correction,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
   });
   app.post('/api/leave/requests/:id/late-notice',requireManager,sameOrigin,async(req,res)=>{

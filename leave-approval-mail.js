@@ -26,17 +26,19 @@ export function approvalPayload(job,{testRecipient='',from='Quarts Service <onbo
   const approved=job.effective_periods??job.periods;
   const periods=approved.map(p=>`${date(p.date)} : ${p.allDay?'journée complète':time(p.startMinute)+' à '+time(p.endMinute)}`).join('\n');
   const partial=job.effective_periods&&JSON.stringify(job.effective_periods)!==JSON.stringify(job.periods);
-  const subject=`${job.is_test?'[TEST] ':''}Congé confirmé — demande n° ${job.request_id}`;
+  const correction=job.decision_note?.startsWith('Correction du congé approuvé :');
+  const correctionText=correction?'Correction : ce courriel remplace la confirmation précédente de cette demande. Seules les périodes indiquées ci-dessous sont confirmées.':'';
+  const subject=`${job.is_test?'[TEST] ':''}${correction?'Congé corrigé':'Congé confirmé'} — demande n° ${job.request_id}`;
   const heading=partial?'Périodes ajoutées par cette approbation':'Dates et heures confirmées';
   const html=leaveMailFrame({identity:job,requestId:job.request_id,subject,
     preheader:'Votre congé est confirmé. Retrouvez les dates et heures approuvées dans ce courriel.',
-    eyebrow:'APPROBATION DÉFINITIVE',title:'Congé confirmé',summary:'Les périodes ci-dessous sont approuvées.',
-    content:`<tr><td style="padding:26px 26px 20px"><p style="margin:0 0 12px;font-size:17px;line-height:1.6;overflow-wrap:anywhere">Bonjour ${escape(job.employee_name)},</p><p style="margin:0;font-size:16px;line-height:1.65">Votre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.</p></td></tr>
+    eyebrow:'APPROBATION DÉFINITIVE',title:correction?'Congé corrigé':'Congé confirmé',summary:correctionText||'Les périodes ci-dessous sont approuvées.',
+    content:`${correction?'<tr><td style="padding:20px 26px 0"><strong>'+escape(correctionText)+'</strong></td></tr>':''}<tr><td style="padding:26px 26px 20px"><p style="margin:0 0 12px;font-size:17px;line-height:1.6;overflow-wrap:anywhere">Bonjour ${escape(job.employee_name)},</p><p style="margin:0;font-size:16px;line-height:1.65">Votre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.</p></td></tr>
 <tr><td style="padding:0 26px 26px">${leavePeriodPanel(job,approved,heading)}${partial?'<p style="margin:15px 0 0;font-size:14px;line-height:1.6;color:#4b5965">Les périodes déjà approuvées restent rattachées à votre demande précédente.</p>':''}</td></tr>
 <tr><td style="padding:0 26px 24px"><p style="margin:0;font-size:15px;line-height:1.6">Pour toute question, communiquez avec votre responsable.</p></td></tr>`});
   return {from,to:[to],...(!job.is_test&&normalizeEmail(job.recipient)?{reply_to:normalizeEmail(job.recipient)}:{}),
     subject,html,
-    text:`${job.is_test?'ESSAI — aucun congé réel ni changement d’horaire.\n\n':''}CONGÉ CONFIRMÉ\nAPPROBATION DÉFINITIVE\n\nBonjour ${job.employee_name},\n\nVotre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.\n\n${heading.toLocaleUpperCase('fr-CA')}\n${periods}\n${partial?'\nLes périodes déjà approuvées restent rattachées à votre demande précédente.\n':''}\nDépartement : ${job.department_name}\nRéférence : ${job.request_id}\n\nPour toute question, communiquez avec votre responsable.${acknowledgementText(job)}\n\nIGA extra Famille Benoit`};
+    text:`${job.is_test?'ESSAI — aucun congé réel ni changement d’horaire.\n\n':''}${correction?'CONGÉ CORRIGÉ':'CONGÉ CONFIRMÉ'}\n${correctionText}\nAPPROBATION DÉFINITIVE\n\nBonjour ${job.employee_name},\n\nVotre demande de congé a été approuvée définitivement. Vous pouvez vous absenter pour les périodes confirmées ci-dessous.\n\n${heading.toLocaleUpperCase('fr-CA')}\n${periods}\n${partial?'\nLes périodes déjà approuvées restent rattachées à votre demande précédente.\n':''}\nDépartement : ${job.department_name}\nRéférence : ${job.request_id}\n\nPour toute question, communiquez avec votre responsable.${acknowledgementText(job)}\n\nIGA extra Famille Benoit`};
 }
 
 // Approvals are queued only at decision time. Historical approvals are never backfilled.
