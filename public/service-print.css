@@ -118,3 +118,5 @@
 .service-sheet .simple-shift .printed-shift-range{display:flex;flex-direction:column;gap:0;font-size:8.5pt;line-height:1.15;order:0}
 .service-sheet .simple-shift .printed-shift-range> :nth-child(2){display:none}
 .service-sheet .simple-shift .assignment-label,.service-sheet .simple-shift .service-role,.service-sheet .simple-shift .shift-absence{order:1}
+
+.service-needs-sheet .needs-table{font-size:8pt}.service-needs-sheet .needs-role{width:32%}.service-needs-sheet .needs-table td,.service-needs-sheet .needs-table th{padding:5pt 4pt}.service-needs-sheet .needs-row th{text-align:left;font-weight:600}.service-needs-sheet .needs-table small{display:block;font-size:6.5pt;font-weight:400;margin-top:2pt}.service-needs-sheet .needs-subtotal{background:#f2f5fa;font-weight:700}.service-needs-sheet .needs-subtotal th{text-align:right}.service-needs-sheet .needs-footer{margin-top:12pt;font-size:8pt}.service-needs-sheet .needs-footer p{font-size:7pt;line-height:1.4}.service-needs-sheet .needs-row td:not(:first-child){font-variant-numeric:tabular-nums}
