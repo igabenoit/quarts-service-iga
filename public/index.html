@@ -122,8 +122,8 @@
     <section id="printSheet" aria-hidden="true"></section>
     <section id="planoPrintSheet" aria-hidden="true"></section>
     <dialog id="printPreview" aria-label="Aperçu de l’horaire avant impression">
-      <div class="preview-toolbar"><strong id="servicePreviewTitle">Horaire Service · Bleu</strong><label>Document <select id="servicePrintKind"><option value="filled">Horaire rempli</option><option value="needs">Besoins du service — fonctions et heures</option><option value="blank">Master vide — employés et disponibilités</option></select></label><div><button id="previewPdf" type="button">Préparer le PDF</button><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
-      <div class="service-pdf-tools"><p id="servicePdfStatus" role="status"></p><div id="servicePdfResult" hidden><a id="servicePdfDownload" download>Télécharger le PDF</a><a id="servicePdfOpen" target="_blank" rel="noopener">Ouvrir pour imprimer</a></div></div>
+      <div class="preview-toolbar"><strong id="servicePreviewTitle">Horaire Service · Bleu</strong><label>Document <select id="servicePrintKind"><option value="filled">Horaire rempli</option><option value="needs">Besoins du service — fonctions et heures</option><option value="blank">Master vide — employés et disponibilités</option></select></label><div><button id="previewExpand" type="button" class="secondary">Agrandir</button><button id="previewPdf" type="button">Préparer le PDF</button><button id="previewPrint" type="button">Imprimer</button><button id="previewClose" type="button" class="secondary">Fermer</button></div></div>
+      <div class="service-pdf-tools"><p>Tu peux continuer à travailler : cet aperçu suit les modifications enregistrées.</p><p id="servicePdfStatus" role="status"></p><div id="servicePdfResult" hidden><a id="servicePdfDownload" download>Télécharger le PDF</a><a id="servicePdfOpen" target="_blank" rel="noopener">Ouvrir pour imprimer</a></div></div>
       <div id="previewPages" class="preview-pages"></div>
     </dialog>
     <dialog id="planoPreview" aria-label="Aperçu du planogramme des pauses">

@@ -108,7 +108,7 @@ function servicePrintHTML(data,{blank=false}={}){
     return `<article class="service-sheet${page.units>14?' compact-service':''}" data-page="${index+1}" data-row-unit="${page.rowUnit}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>Service</h1><p>${blank?'MASTER VIDE':'HORAIRE HEBDOMADAIRE'} · ${e(page.title)}</p><strong>Du ${formatWeek(data.weekStart)}</strong><small>Feuille ${index+1} / ${pages.length}</small></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${dayNames.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(data.weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>heures</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-totals"><strong>Cette feuille : ${blank?'________':hours(subtotal)} h</strong><span>${blank?'':'dont '+hours(vacant)+' h à couvrir'}</span></div></div><div class="service-week-total"><strong>Service · semaine complète : ${blank?'________':hours(total)} h</strong><span>${blank?'À remplir à la main':'dont '+hours(unfilledMinutes)+' h à couvrir · Total identique sur chaque feuille'}</span></div><div class="sheet-notes"><strong>Notes / précisions</strong><p></p></div></article>`;
   }).join('');
 }
-function renderPrint(){$('#printSheet').innerHTML=servicePrintHTML(state);}
+function renderPrint(){if($('#printPreview').open)refreshServicePreview();else $('#printSheet').innerHTML=servicePrintHTML(state);}
 
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
 async function loadWeek(start){
@@ -262,12 +262,31 @@ $("#role").onchange=e=>{$("#departmentWrap").hidden=e.target.value!=="support";}
 $("#shiftForm").onsubmit=async event=>{event.preventDefault();try{const id=Number($("#shiftId").value)||null;const days=[...document.querySelectorAll("#dayChoices input:checked")].map(x=>Number(x.value));const body={absence:readServiceAbsence(),role:$("#role").value,startMinute:minutes($("#startTime").value),endMinute:minutes($("#endTime").value),breakMinutes:Number($("#breakMinutes").value),sourceDepartment:$("#sourceDepartment").value,notes:$("#shiftNotes").value};if(id){body.dayIndex=days[0];const result=await api(`/api/shifts/${id}`,{method:"PUT",body:JSON.stringify(body)});state.shifts=state.shifts.map(s=>s.id===id?result.shift:s);}else{const result=await api(`/api/weeks/${state.weekStart}/shifts`,{method:"POST",body:JSON.stringify({...body,days})});state.shifts.push(...result.shifts);}resetForm(days[0]||0);render();toast(id?"Quart modifié":"Quart ajouté");}catch(error){showError(error);}};
 $("#cancelEdit").onclick=()=>resetForm();$("#deleteShift").onclick=async()=>{const id=Number($("#shiftId").value);if(!id||!confirm("Supprimer ce quart?"))return;try{await api(`/api/shifts/${id}`,{method:"DELETE"});state.shifts=state.shifts.filter(s=>s.id!==id);resetForm();render();toast("Quart supprimé");}catch(error){showError(error);}};
 for(const id of ["frontBudget","packerBudget","weekNotes"])$("#"+id).oninput=queueSave;
-let servicePdfUrl=null,servicePdfBusy=false,servicePreviewKind='filled';
-function showServicePreview(kind=servicePreviewKind){
-  servicePreviewKind=['blank','needs'].includes(kind)?kind:'filled';$('#servicePreviewTitle').textContent=servicePreviewKind==='needs'?'Besoins du Service':'Horaire Service · Bleu';$('#servicePrintKind').value=servicePreviewKind;
-  $('#printSheet').innerHTML=servicePreviewKind==='needs'?serviceNeedsHTML(state):servicePrintHTML(state,{blank:servicePreviewKind==='blank'});$('#previewPages').innerHTML=$('#printSheet').innerHTML;$('#servicePdfStatus').textContent='Format légal · 8½ × 14 po · Portrait';$('#servicePdfResult').hidden=true;
-  if(!$('#printPreview').open)$('#printPreview').showModal();
+let servicePdfUrl=null,servicePdfBusy=false,servicePreviewKind='filled',servicePreviewPending=false;
+function fitServicePreview(){
+  const pane=$('#printPreview');if(!pane.open)return;
+  const scale=Math.min(1,Math.max(.25,(pane.clientWidth-28)/816));
+  $('#previewPages').style.setProperty('--service-preview-scale',String(scale));
 }
+function refreshServicePreview(){
+  if(servicePdfBusy){servicePreviewPending=true;return;}
+  const pages=$('#previewPages'),scroll=pages.scrollTop;
+  $('#printSheet').innerHTML=servicePreviewKind==='needs'?serviceNeedsHTML(state):servicePrintHTML(state,{blank:servicePreviewKind==='blank'});
+  pages.innerHTML=$('#printSheet').innerHTML;pages.scrollTop=scroll;
+  $('#servicePdfStatus').textContent='Aperçu à jour · '+formatWeek(state.weekStart)+' · Format légal';$('#servicePdfResult').hidden=true;
+  fitServicePreview();
+}
+function showServicePreview(kind=servicePreviewKind){
+  if(servicePdfBusy)return;
+  servicePreviewKind=['blank','needs'].includes(kind)?kind:'filled';$('#servicePreviewTitle').textContent=servicePreviewKind==='needs'?'Besoins du Service':'Horaire Service · Bleu';$('#servicePrintKind').value=servicePreviewKind;
+  document.body.classList.add('service-preview-open');
+  if(!$('#printPreview').open)$('#printPreview').show();
+  refreshServicePreview();
+}
+$('#printPreview').addEventListener('close',()=>{document.body.classList.remove('service-preview-open','service-preview-expanded');$('#previewExpand').textContent='Agrandir';});
+$('#previewExpand').onclick=()=>{const expanded=document.body.classList.toggle('service-preview-expanded');$('#previewExpand').textContent=expanded?'Revenir à côté':'Agrandir';fitServicePreview();};
+window.addEventListener('resize',fitServicePreview);
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(fitServicePreview).observe($('#printPreview'));
 async function checkedServiceSheets(){
   await document.fonts.ready;const sheets=[...document.querySelectorAll('#previewPages .service-sheet')];
   await Promise.all(sheets.flatMap(sheet=>[...sheet.querySelectorAll('img')]).map(img=>img.decode()));
@@ -275,7 +294,7 @@ async function checkedServiceSheets(){
 }
 async function printService(kind=servicePreviewKind){
   document.body.classList.remove('printing-planogram');showServicePreview(kind);
-  try{const {prepareSchedulePages}=await import('./schedule-layout.js');const prepared=prepareSchedulePages(await checkedServiceSheets());try{$('#printSheet').innerHTML=prepared.pages.map(page=>page.outerHTML).join('');}finally{prepared.cleanup();}$('#printPreview').close();window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
+  try{const {prepareSchedulePages}=await import('./schedule-layout.js');const prepared=prepareSchedulePages(await checkedServiceSheets());try{$('#printSheet').innerHTML=prepared.pages.map(page=>page.outerHTML).join('');}finally{prepared.cleanup();}window.print();}catch(error){$('#servicePdfStatus').textContent=error.message;}
 }
 $('#printBtn').onclick=()=>printService('filled');
 $('#needsPrintBtn').onclick=protectAction(()=>showServicePreview('needs'));
@@ -287,14 +306,15 @@ $('#previewPrint').onclick=()=>printService();
 $('#printPreview').addEventListener('cancel',event=>{if(servicePdfBusy)event.preventDefault();});
 $('#previewPdf').onclick=async()=>{
   if(servicePdfBusy)return;
-  const weekStart=state.weekStart,buttons=[$('#previewPdf'),$('#previewPrint'),$('#previewClose'),$('#servicePrintKind')];servicePdfBusy=true;buttons.forEach(button=>button.disabled=true);$('#servicePdfResult').hidden=true;$('#servicePdfStatus').textContent='Préparation du PDF…';
+  const weekStart=state.weekStart,buttons=[$('#previewPdf'),$('#previewPrint'),$('#previewClose'),$('#servicePrintKind'),$('#previewExpand')];servicePdfBusy=true;servicePreviewPending=false;buttons.forEach(button=>button.disabled=true);$('#servicePdfResult').hidden=true;$('#servicePdfStatus').textContent='Préparation du PDF…';
   try{
     const sheets=await checkedServiceSheets(),{schedulePagesPDF}=await import('./department-pdf.js');
     const blob=await schedulePagesPDF(sheets,{previewSelector:'#previewPages .service-sheet'});
+    if(servicePreviewPending)return;
     if(servicePdfUrl)URL.revokeObjectURL(servicePdfUrl);servicePdfUrl=URL.createObjectURL(blob);
     $('#servicePdfDownload').href=servicePdfUrl;$('#servicePdfDownload').download=(servicePreviewKind==='needs'?'Besoins-Service-':servicePreviewKind==='blank'?'Master-vide-Service-':'Horaire-Service-')+weekStart+'.pdf';$('#servicePdfOpen').href=servicePdfUrl;
     $('#servicePdfResult').hidden=false;$('#servicePdfStatus').textContent='PDF prêt : '+blob.pageCount+' feuilles légales, sans adresse Web ni date d’impression.';
-  }catch(error){$('#servicePdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}finally{servicePdfBusy=false;buttons.forEach(button=>button.disabled=false);}
+  }catch(error){$('#servicePdfStatus').textContent='Le PDF n’a pas été créé. '+error.message;}finally{servicePdfBusy=false;buttons.forEach(button=>button.disabled=false);if(servicePreviewPending){servicePreviewPending=false;refreshServicePreview();$('#servicePdfStatus').textContent='L’horaire a changé. Aperçu actualisé : préparez un nouveau PDF.';}}
 };
 const presenceButton=document.createElement('button');presenceButton.id='presenceBtn';presenceButton.className='secondary';presenceButton.textContent='Présences gérants et assistants';$('#planoBtn').after(presenceButton);
 const {installDailyPrinting}=await import('./daily-printing.js');installDailyPrinting({state,api});

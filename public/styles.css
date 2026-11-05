@@ -166,3 +166,25 @@
 .plano-role{display:block;font-size:.8em;font-weight:400}
 
 .absence-fields{grid-column:1/-1;border:1px solid #b7cbc3;border-radius:10px;padding:12px}.absence-fields label{display:block;margin:8px 0}.shift-absence{display:block;font-weight:600;color:#784317;white-space:normal}
+
+@media screen{
+ body.service-preview-open{--service-preview-width:clamp(440px,48vw,880px)}
+ body.service-preview-open #appView{padding-right:var(--service-preview-width)}
+ body.service-preview-open .summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ body.service-preview-open #shiftForm{grid-template-columns:repeat(2,minmax(0,1fr))}
+ body.service-preview-open #printPreview[open]{position:fixed;inset:0 0 0 auto;margin:0;width:var(--service-preview-width);height:100dvh;max-width:none;max-height:none;display:flex;flex-direction:column;border-left:1px solid #bac3ce;border-radius:0;box-shadow:-5px 0 20px #0002;z-index:40;overflow:hidden}
+ #printPreview .preview-toolbar{flex-wrap:wrap;flex-shrink:0;padding:10px;gap:8px}
+ #printPreview .preview-toolbar>div{flex-wrap:wrap;gap:6px}
+ #printPreview .preview-toolbar button{padding:8px 10px;font-size:12px}
+ #printPreview .service-pdf-tools{padding:8px 12px;flex-shrink:0}
+ #printPreview #previewPages{display:block;min-height:0;flex:1;overflow:auto;padding:12px}
+ #previewPages>.service-sheet{zoom:var(--service-preview-scale,1);margin:0 auto 16px}
+ body.service-preview-expanded #printPreview[open]{inset:3dvh 2vw;width:96vw;height:94dvh;border-radius:12px;border:1px solid #bac3ce}
+ @media(max-width:900px){
+  body.service-preview-open #appView{padding-right:0;padding-bottom:48dvh}
+  body.service-preview-open #printPreview[open]{inset:auto 0 0;width:100%;height:46dvh;border-left:0;border-top:2px solid #bac3ce}
+  #printPreview .preview-toolbar strong{font-size:13px}
+  #printPreview .preview-toolbar label{font-size:11px}
+  body.service-preview-expanded #printPreview[open]{inset:2dvh 2vw;width:96vw;height:96dvh}
+ }
+}
