@@ -1,3 +1,4 @@
+import {installSST} from './sst.js';
 import {installScheduleNotifications} from './service-schedule-notifications.js';
 import {errorCode,installHealth,logEvent,requestDiagnostics,startupPhase} from './runtime-diagnostics.js';
 import {installSalesForecasts} from './sales-forecasts.js';
@@ -597,6 +598,8 @@ startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 const employeePortal=departmentService.employeePortal;
 await managerAccess.installEmployeeLinks();
+startupPhase('schema_sst');
+await installSST(app,pool,{identity:req=>managerAccess.identity(req)});
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
   try{
