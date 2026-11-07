@@ -4,13 +4,13 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import net from 'node:net';
-export async function liveAppFixture({employeeVault=false,employeeSchemaFailure=false}={}){
+export async function liveAppFixture({employeeVault=false,employeeSchemaFailure=false,passkeyMode="off"}={}){
   const directory=await mkdtemp(join(tmpdir(),'quart-platform-audit-'));
   const socket=net.createServer();socket.listen(0,'127.0.0.1');await new Promise(r=>socket.once('listening',r));
   const port=socket.address().port;await new Promise(r=>socket.close(r));
-  const base=`http://127.0.0.1:${port}`;let child,logs='';
+  const base=`http://${passkeyMode!=="off"?"localhost":"127.0.0.1"}:${port}`;let child,logs='';
   async function start(){
-    logs='';child=spawn(process.execPath,['test/startup-fixture.mjs'],{cwd:fileURLToPath(new URL('../',import.meta.url)),env:{PATH:process.env.PATH,...(process.env.SystemRoot?{SystemRoot:process.env.SystemRoot}:{}),NODE_ENV:'test',PORT:String(port),DATABASE_URL:'postgres://unused.test/test',SESSION_SECRET:'isolated-platform-audit-secret',MANAGER_CODE:'audit-admin-test',TEST_STARTUP_DB:join(directory,'db'),TEST_EMPLOYEE_SCHEMA_FAILURE:employeeSchemaFailure?'yes':'',EMPLOYEE_FILES_DATABASE_URL:employeeVault?'postgres://employee-files.test/test':'',RESEND_API_KEY:'',OPENAI_API_KEY:''},stdio:['ignore','pipe','pipe']});
+    logs='';child=spawn(process.execPath,['test/startup-fixture.mjs'],{cwd:fileURLToPath(new URL('../',import.meta.url)),env:{PATH:process.env.PATH,...(process.env.SystemRoot?{SystemRoot:process.env.SystemRoot}:{}),NODE_ENV:'test',PORT:String(port),DATABASE_URL:'postgres://unused.test/test',SESSION_SECRET:'isolated-platform-audit-secret',MANAGER_CODE:'audit-admin-test',TEST_STARTUP_DB:join(directory,'db'),TEST_EMPLOYEE_SCHEMA_FAILURE:employeeSchemaFailure?'yes':'',EMPLOYEE_PASSKEY_MODE:passkeyMode,EMPLOYEE_PASSKEY_ORIGIN:base,EMPLOYEE_PASSKEY_ADMIN_IDS:'1',EMPLOYEE_FILES_DATABASE_URL:employeeVault?'postgres://employee-files.test/test':'',RESEND_API_KEY:'',OPENAI_API_KEY:''},stdio:['ignore','pipe','pipe','ipc']});
     child.stdout.on('data',d=>logs+=d);child.stderr.on('data',d=>logs+=d);
     await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{clean();reject(Error('Startup timeout: '+logs));},30000);
@@ -27,5 +27,7 @@ export async function liveAppFixture({employeeVault=false,employeeSchemaFailure=
     return {status:r.status,body:data,cookie:r.headers.get('set-cookie')?.split(';')[0],headers:r.headers};
   }
   try{await start();}catch(error){await stop();await rm(directory,{recursive:true,force:true});throw error;}
-  return {base,call,stop,start,logs:()=>logs,async close(){await stop();await rm(directory,{recursive:true,force:true});}};
+  let requestId=0;
+  async function query(sql,args){const id=++requestId;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.off('message',reply);reject(Error('Test SQL timeout'));},10000);const reply=m=>{if(m.id!==id)return;clearTimeout(timer);child.off('message',reply);m.error?reject(Error(m.error)):resolve(m.result);};child.on('message',reply);child.send({id,sql,args});});}
+  return {base,call,query,stop,start,logs:()=>logs,async close(){await stop();await rm(directory,{recursive:true,force:true});}};
 }

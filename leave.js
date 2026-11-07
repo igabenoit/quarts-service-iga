@@ -1,3 +1,4 @@
+import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 import {beginUndo} from "./undo.js";
 import {installLeaveArchive} from './leave-archive.js';
@@ -61,6 +62,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   }
   const noStore=(_req,res,next)=>{res.set('Cache-Control','no-store');next();};
   app.use('/api/leave', noStore);
+  const ownRequest=employeeRequestSecurity(pool);
+  await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
   const formInfo = (test,store=false) => async (_req,res)=>{
     try {
       const clock = (await pool.query('SELECT clock_timestamp() AS now')).rows[0].now;
@@ -68,9 +71,9 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       res.set('Cache-Control','no-store').json({departments:(await departments.list()).filter(d=>d.active).map(d=>({id:d.id,name:d.name,isService:d.code==='service'})),nameEntry:store?'manual':'list',employees:people,earliest:earliestLeaveDate(clock),isTest:test,timeZone:'America/Toronto'});
     } catch {res.status(500).json({error:'Impossible de charger le formulaire.'});}
   };
-  app.get('/api/public-schedules/:token/leave-form',staff,formInfo(false));
+  app.get('/api/public-schedules/:token/leave-form',staff,ownRequest,formInfo(false));
   app.get('/api/leave/test-form',requireManager,formInfo(true));
-  app.get('/api/leave/form',requireLeaveStaff,formInfo(false,true));
+  app.get('/api/leave/form',requireLeaveStaff,ownRequest,formInfo(false,true));
   const submit = (isTest,store=false) => async (req,res)=>{
     const client = await pool.connect();
     try {
@@ -79,7 +82,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       const now=(await client.query('SELECT clock_timestamp() AS now')).rows[0].now;
       let leave;
       try {leave=normalizeLeave(b,now);} catch(error) {return res.status(400).json({error:error.message});}
-      const employeeId=(isTest||store)?null:Number(b.employeeId);
+      const employeeId=isTest?null:req.requestPerson.serviceEmployeeId;
       if (!isTest && !store && (!Number.isSafeInteger(employeeId)||employeeId<=0)) return res.status(400).json({error:'Sélectionnez votre nom.'});
       const name=typeof b.employeeName==='string'?b.employeeName.trim():'';
       if(store&&(name.length<2||name.length>100))return res.status(400).json({error:'Indiquez votre prénom et votre nom (2 à 100 caractères).'});
@@ -95,11 +98,11 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
         if(recent.rows[0].count>=10){await client.query('ROLLBACK');return res.status(429).json({error:'Plusieurs demandes ont déjà été reçues pour ce courriel. Réessayez plus tard ou contactez la gérante.'});}
       }
       const saved=await client.query(`INSERT INTO schedule_leave_requests
-        (submission_key,employee_id,employee_name,email,reason,periods,first_date,last_date,status,is_test,submitted_at,department_id,department_name)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (submission_key) DO NOTHING RETURNING *`,
-        [b.submissionKey,employeeId,employee.rows[0].name,leave.email,leave.reason,JSON.stringify(leave.periods),leave.periods[0].date,leave.periods.at(-1).date,leave.late?'late':'pending',isTest,now,department.id,department.name]);
+        (submission_key,employee_id,employee_name,email,reason,periods,first_date,last_date,status,is_test,submitted_at,department_id,department_name,person_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (submission_key) DO NOTHING RETURNING *`,
+        [b.submissionKey,employeeId,employee.rows[0].name,leave.email,leave.reason,JSON.stringify(leave.periods),leave.periods[0].date,leave.periods.at(-1).date,leave.late?'late':'pending',isTest,now,department.id,department.name,isTest?null:req.requestPerson.personId]);
       const row=saved.rows[0]||(await client.query('SELECT * FROM schedule_leave_requests WHERE submission_key=$1',[b.submissionKey])).rows[0];
-      if (String(row.department_id)!==String(department.id)||row.employee_name!==employee.rows[0].name||(!store&&String(row.employee_id)!==String(employeeId))||row.is_test!==isTest||row.email!==leave.email||row.reason!==leave.reason||JSON.stringify(row.periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))!==JSON.stringify(leave.periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))) {
+      if ((!isTest&&String(row.person_id)!==String(req.requestPerson.personId))||String(row.department_id)!==String(department.id)||row.employee_name!==employee.rows[0].name||(!store&&String(row.employee_id)!==String(employeeId))||row.is_test!==isTest||row.email!==leave.email||row.reason!==leave.reason||JSON.stringify(row.periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))!==JSON.stringify(leave.periods.map(p=>[p.date,p.startMinute,p.endMinute,p.allDay]))) {
         await client.query('ROLLBACK'); return res.status(409).json({error:'Cette tentative a déjà été enregistrée avec un autre contenu. Actualisez le formulaire.'});
       }
       if(saved.rowCount) await client.query('INSERT INTO schedule_leave_events (request_id,status) VALUES ($1,$2)',[row.id,row.status]);
@@ -115,8 +118,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       res.status(500).json({error:'L’envoi n’a pas pu être confirmé. Réessayez sans fermer le formulaire.'});
     } finally {client.release();}
   };
-  app.post('/api/public-schedules/:token/leave-requests',sameOrigin,staff,submit(false));
-  app.post('/api/leave/submit',requireLeaveStaff,sameOrigin,submit(false,true));
+  app.post('/api/public-schedules/:token/leave-requests',sameOrigin,staff,ownRequest,submit(false));
+  app.post('/api/leave/submit',requireLeaveStaff,sameOrigin,ownRequest,submit(false,true));
   app.post('/api/leave/test-requests',requireManager,sameOrigin,submit(true));
   app.get('/api/leave/requests',requireManager,async(req,res)=>{
     try {

@@ -31,15 +31,15 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/manager-accounts',{method:'POST',body,origin:'https://wrong.example'})).status,403);
     const created=await call('/api/manager-accounts',{method:'POST',body});assert.equal(created.status,200);let account=created.body.accounts[0];
     assert.equal('password_hash' in account,false);
-    assert.equal('password_encrypted' in account,false);assert.equal(account.passwordAvailable,true);
+    assert.equal('password_encrypted' in account,false);assert.equal(account.passwordAvailable,false);
     const reveal='/api/manager-accounts/'+account.id+'/password';
     assert.equal((await call(reveal,{method:'POST',session:null})).status,401);
     assert.equal((await call(reveal,{method:'POST',origin:'https://wrong.example'})).status,403);
-    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password);
+    assert.equal((await call(reveal,{method:'POST'})).status,410);
     const stored=(await f.pool.query('SELECT password_encrypted FROM schedule_manager_accounts WHERE id=$1',[account.id])).rows[0].password_encrypted;
-    assert.ok(stored.startsWith('v1.'));assert.ok(!stored.includes(body.password));
+    assert.equal(stored,null);
     await f.pool.query('UPDATE schedule_manager_accounts SET password_encrypted=NULL WHERE id=$1',[account.id]);
-    assert.equal((await call(reveal,{method:'POST'})).status,409);
+    assert.equal((await call(reveal,{method:'POST'})).status,410);
     assert.equal((await call('/api/manager-accounts',{method:'POST',body})).status,409);
     const login=await call('/api/manager-login',{method:'POST',session:null,body:{login:'GERANT.TEST',password:body.password}});assert.equal(login.status,200);assert.match(login.cookie,/HttpOnly; SameSite=Strict/);assert.match(login.cookie,/Secure/);
     assert.equal(login.body.path,'/departements');
@@ -48,7 +48,7 @@ test('individual accounts: administration, department boundaries, revocation and
     assert.equal((await call('/api/sales-forecasts/2026-10-19',{session:{role:'employee'}})).status,401);
     assert.equal((await call('/api/sales-forecasts/2026-10-19',{session})).status,200);
     assert.equal((await call('/api/sales-forecasts/2026-10-19',{session,method:'POST'})).status,403);
-    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password,'successful legacy login enables recovery');
+    assert.equal((await call(reveal,{method:'POST'})).status,410,'login never stores a recoverable password');
     assert.equal((await call(reveal,{method:'POST',session})).status,403);
     assert.equal((await call('/api/manager-accounts',{session})).status,403);
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',session,body:{...body,version:1,departments:[meat]}})).status,403);
@@ -106,7 +106,7 @@ test('individual accounts: administration, department boundaries, revocation and
     const serviceSession=JSON.parse(decodeURIComponent(serviceLogin.cookie.split(';')[0].split('=').slice(1).join('=')));
     assert.equal((await call('/api/employees',{session:serviceSession})).status,200);
     account=saved.body.accounts[0];
-    assert.equal((await call(reveal,{method:'POST'})).body.password,body.password,'blank password preserves recoverability');
+    assert.equal((await call(reveal,{method:'POST'})).status,410,'blank password never enables plaintext recovery');
     assert.equal((await call('/api/manager-accounts/'+account.id,{method:'PUT',body:{...body,password:'',version:account.version,active:false}})).status,200);
     assert.equal((await call('/api/employees',{session:serviceSession})).status,401);
     assert.equal((await call('/api/manager-login',{method:'POST',session:null,body:{login:body.login,password:body.password}})).status,401);

@@ -55,7 +55,7 @@ test('PostgreSQL : avis automatiques atomiques, refus annulable, reprises figée
     const dept=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0].id;
     const now=(await pool.query('SELECT clock_timestamp() AS now')).rows[0].now;
     const body=(date,overrides={})=>({submissionKey:randomUUID(),departmentId:Number(dept),employeeName:'Camille Exemple',email:'employee@example.com',reason:'motif confidentiel',periods:[{startDate:date,endDate:date,allDay:true}],...overrides});
-    const call=async(method,url,req={})=>{process.env.RESEND_API_KEY='';const res=response();await routes.get(method+' '+url).at(-1)({body:{},params:{},query:{},headers:{},...req},res);return res;};
+    const call=async(method,url,req={})=>{process.env.RESEND_API_KEY='';const res=response();await routes.get(method+' '+url).at(-1)({body:{},params:{},query:{},headers:{},requestPerson:{personId:1},...req},res);return res;};
     const notices=async()=>(await pool.query('SELECT * FROM schedule_leave_employee_notices ORDER BY id')).rows;
     const due=()=>pool.query("UPDATE schedule_leave_employee_notices SET available_at=clock_timestamp()-interval '1 minute',last_attempt_at=CASE WHEN last_attempt_at IS NULL THEN NULL ELSE clock_timestamp()-interval '3 minutes' END WHERE status IN ('pending','error','sending')");
     const sends=[];let fail=false;

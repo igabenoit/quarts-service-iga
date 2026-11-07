@@ -16,7 +16,8 @@ test('clothing: validate variants, merge duplicate lines, use server prices and 
 test('clothing HTTP: access, campaign locks, durable orders, duplicate retries, supplier export and cancellation',async()=>{
   const f=await departmentFixture(),app=express();app.use(express.json());let calls=0,failMail=true;
   const guard=(req,res,next)=>{if(req.headers['x-test-role']!=='admin')return res.status(403).json({error:'admin'});req.manager={kind:'admin'};next();};
-  const staff=(req,res,next)=>req.headers['x-test-role']==='staff'?next():res.status(401).json({error:'staff'});
+  const staff=(req,res,next)=>{if(req.headers['x-test-role']!=='staff')return res.status(401).json({error:'staff'});req.employee={id:1};next();};
+  await f.pool.query("INSERT INTO schedule_store_people(id,name) VALUES(1,'Employé Test'); INSERT INTO schedule_store_memberships(person_id,department_id) SELECT 1,id FROM schedule_leave_departments WHERE active");
   const origin=(req,res,next)=>req.headers.origin==='https://evil.example'?res.status(403).json({error:'origin'}):next();
   const old=process.env.RESEND_API_KEY;process.env.RESEND_API_KEY='test-only';
   await installClothing(app,f.pool,{requireStaff:staff,requireManager:guard,sameOrigin:origin,fetchImpl:async(_url,options)=>{calls++;assert.match(options.headers['Idempotency-Key'],/^clothing-/);return {ok:!failMail,json:async()=>failMail?{}:{id:'simulated-only'}};}});
@@ -33,7 +34,7 @@ test('clothing HTTP: access, campaign locks, durable orders, duplicate retries, 
     const orderPath='/api/leave/clothing/orders';assert.equal((await call(orderPath,{role:'staff',method:'POST',body:{...body,items:[{...body.items[0],size:'bad'}]}})).code,400);
     const first=await call(orderPath,{role:'staff',method:'POST',body});assert.equal(first.code,200);assert.equal(first.body.total,8000);assert.equal(first.body.mailStatus,'error');
     failMail=false;assert.equal((await call(orderPath,{role:'staff',method:'POST',body})).body.mailStatus,'sent');assert.equal((await call(orderPath,{role:'staff',method:'POST',body})).code,200);assert.equal(calls,2);
-    assert.equal((await call(orderPath,{role:'staff',method:'POST',body:{...body,name:'Different'}})).code,409);
+    assert.equal((await call(orderPath,{role:'staff',method:'POST',body:{...body,name:'Different'}})).code,403);
     let detail=(await call(route+'/orders')).body;assert.equal(detail.orders.length,1);assert.equal(detail.supplier[0].quantity,2);
     assert.equal((await call(route+'/orders',{role:'staff'})).code,403);assert.equal((await call(route+'/supplier.xlsx',{role:'staff'})).code,403);
     const xlsx=(await call(route+'/supplier.xlsx')).body;assert.equal(xlsx.subarray(0,2).toString(),'PK');assert.doesNotMatch(xlsx.toString(),/Employé Test|test@example/);

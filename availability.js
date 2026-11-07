@@ -1,3 +1,4 @@
+import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 import {createHash} from 'node:crypto';
 import {beginUndo} from './undo.js';
@@ -54,6 +55,8 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
     END IF; END $$;`);
   const mail=await installAvailabilityMail(pool);
   const base='/api/leave/availability';
+  const ownRequest=employeeRequestSecurity(pool);
+  await pool.query('ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
   const info=test=>async(_req,res)=>{try{
     const today=localDate((await pool.query('SELECT clock_timestamp() AS now')).rows[0].now);
     const staff=test?[{id:0,name:'Employé test',max_minutes:MAX_TARGET}]: (await pool.query('SELECT * FROM schedule_employees WHERE active=TRUE AND departed_at IS NULL ORDER BY name')).rows;
@@ -61,7 +64,7 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
     const departments=(await pool.query('SELECT id,name,code FROM schedule_leave_departments WHERE active=TRUE ORDER BY name,id')).rows.map(d=>({id:Number(d.id),name:d.name,isService:d.code==='service'}));
     res.json({today,isTest:test,ruleVersion:RULE_VERSION,departments,employees:staff.map(e=>({id:Number(e.id),name:e.name,maxHours:MAX_TARGET/60,minEffectiveDate:minimumEffectiveDate(e,today),pending:pending.some(p=>String(p.employee_id)===String(e.id))}))});
   }catch{res.status(500).json({error:'Impossible de charger le formulaire de disponibilités.'});}};
-  app.get(base+'/form',requireStaff,info(false));app.get(base+'/test-form',requireManager,info(true));
+  app.get(base+'/form',requireStaff,ownRequest,info(false));app.get(base+'/test-form',requireManager,info(true));
   const submit=test=>async(req,res)=>{
     const client=await pool.connect();
     try{
@@ -80,7 +83,7 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
       const data=normalizeAvailability(b,{today:duplicate?localDate(duplicate.submitted_at):today});
       if(data.employeeName!==e.name)throw new Error('Le nom ne correspond plus à la fiche choisie. Actualisez la liste.');
       if(duplicate){
-        if(String(duplicate.department_id)!==String(department.id)||duplicate.is_test!==test||String(duplicate.employee_id)!==String(e.id)||duplicate.employee_name!==data.employeeName||duplicate.email!==data.email||String(duplicate.effective_date instanceof Date?duplicate.effective_date.toISOString().slice(0,10):duplicate.effective_date)!==data.effectiveDate||duplicate.target_minutes!==data.targetMinutes||!same(duplicate.availability,data.availability)||duplicate.comments!==data.comments)throw new Error('Cette référence a déjà servi à une autre demande. Actualisez le formulaire.');
+        if((!test&&String(duplicate.person_id)!==String(req.requestPerson.personId))||String(duplicate.department_id)!==String(department.id)||duplicate.is_test!==test||String(duplicate.employee_id)!==String(e.id)||duplicate.employee_name!==data.employeeName||duplicate.email!==data.email||String(duplicate.effective_date instanceof Date?duplicate.effective_date.toISOString().slice(0,10):duplicate.effective_date)!==data.effectiveDate||duplicate.target_minutes!==data.targetMinutes||!same(duplicate.availability,data.availability)||duplicate.comments!==data.comments)throw new Error('Cette référence a déjà servi à une autre demande. Actualisez le formulaire.');
         await client.query('COMMIT');return res.json({id:duplicate.id,isTest:test,status:duplicate.status,message:'Cette demande a déjà été reçue. Aucun doublon créé.'});
       }
       if(!test&&service){
@@ -93,13 +96,13 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
         if(previous.some(r=>r.status==='pending'))throw new Error('Une demande de disponibilité est déjà en attente pour ce nom et ce département. Contactez votre responsable pour la corriger.');
         if(data.effectiveDate<minimum)throw new Error('La dernière disponibilité doit être maintenue pendant 4 semaines. Première date possible : '+minimum+'.');
       }
-      const r=(await client.query(`INSERT INTO schedule_availability_requests(submission_key,employee_id,employee_name,email,effective_date,target_minutes,availability,acknowledged,rule_version,comments,is_test,department_id,department_name,employee_name_key)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE,$8,$9,$10,$11,$12,$13) RETURNING id`,[b.submissionKey,e.id,e.name,data.email,data.effectiveDate,data.targetMinutes,JSON.stringify(data.availability),RULE_VERSION,data.comments,test,department.id,department.name,employeeNameKey])).rows[0];
+      const r=(await client.query(`INSERT INTO schedule_availability_requests(submission_key,employee_id,employee_name,email,effective_date,target_minutes,availability,acknowledged,rule_version,comments,is_test,department_id,department_name,employee_name_key,person_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,[b.submissionKey,e.id,e.name,data.email,data.effectiveDate,data.targetMinutes,JSON.stringify(data.availability),RULE_VERSION,data.comments,test,department.id,department.name,employeeNameKey,test?null:req.requestPerson.personId])).rows[0];
       await client.query("INSERT INTO schedule_availability_events(request_id,status) VALUES($1,'pending')",[r.id]);await mail.queue(client,r.id,'submitted');
       await client.query('COMMIT');mail.run().catch(()=>{});res.status(201).json({id:r.id,isTest:test,status:'pending',message:service?'Demande reçue. Vos disponibilités seront modifiées après approbation, à la date effective indiquée.':'Demande reçue pour le département '+department.name+'. Elle sera transmise par courriel au responsable selon les réglages des congés, pour approbation.'});
     }catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(400).json({error:error.code?'Impossible d’enregistrer la demande. Actualisez le formulaire et réessayez.':error.message});}finally{client.release();}
   };
-  app.post(base+'/submit',requireStaff,sameOrigin,submit(false));app.post(base+'/test-submit',requireManager,sameOrigin,submit(true));
+  app.post(base+'/submit',requireStaff,sameOrigin,ownRequest,submit(false));app.post(base+'/test-submit',requireManager,sameOrigin,submit(true));
   app.get(base+'/requests',requireManager,async(req,res)=>{try{
     const today=localDate((await pool.query('SELECT clock_timestamp() AS now')).rows[0].now);
     const rows=(await pool.query(`SELECT r.*,r.effective_date::text AS effective_date,

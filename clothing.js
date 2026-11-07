@@ -1,3 +1,4 @@
+import {employeeRequestSecurity} from './employee-request-security.js';
 import crypto from 'node:crypto';
 import {mailResult,logEvent,errorCode} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
@@ -14,6 +15,8 @@ export async function installClothing(app,pool,{requireStaff,requireManager,same
   INSERT INTO schedule_clothing_campaigns(title) SELECT 'Chandails 2026 — noir et vert forêt' WHERE NOT EXISTS(SELECT 1 FROM schedule_clothing_campaigns);`);
   async function transaction(fn){const c=await pool.connect();try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(734882)');const out=await fn(c);await c.query('COMMIT');return out;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
   await pool.query(`ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ; ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ;`);
+  const ownRequest=employeeRequestSecurity(pool);
+  await pool.query('ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES schedule_store_people(id)');
   const campaign=async(id,db=pool)=>(await db.query('SELECT * FROM schedule_clothing_campaigns WHERE id=$1',[id])).rows[0];
   const orders=async id=>(await pool.query('SELECT id,campaign_id,employee_name,department_name,items,total_cents,cancelled,version,mail_status,created_at,paid_at,collected_at FROM schedule_clothing_orders WHERE campaign_id=$1 ORDER BY created_at,id',[id])).rows;
   async function deliver(id){
@@ -27,22 +30,22 @@ export async function installClothing(app,pool,{requireStaff,requireManager,same
       await pool.query("UPDATE schedule_clothing_orders SET mail_status='sent',provider_id=$2 WHERE id=$1",[id,result.id]);return 'sent';
     }catch(error){logEvent('mail_attempt_failed',{component:'clothing',jobId:String(id),code:errorCode(error)},'error');await pool.query("UPDATE schedule_clothing_orders SET mail_status='error' WHERE id=$1",[id]);return 'error';}
   }
-  app.get('/api/leave/clothing',requireStaff,endpoint(async(_req,res)=>{
+  app.get('/api/leave/clothing',requireStaff,ownRequest,endpoint(async(_req,res)=>{
     const c=(await pool.query('SELECT id,title,deadline,opened,version FROM schedule_clothing_campaigns ORDER BY opened DESC,id DESC LIMIT 1')).rows[0];
     res.json({campaign:{...c,accepting:open(c)},models:MODELS,colors:COLORS,sizes:SIZES,price:PRICE,departments:(await pool.query('SELECT id,name FROM schedule_leave_departments WHERE active=TRUE ORDER BY name')).rows});
   }));
-  app.post('/api/leave/clothing/orders',requireStaff,sameOrigin,endpoint(async(req,res)=>{
+  app.post('/api/leave/clothing/orders',requireStaff,sameOrigin,ownRequest,endpoint(async(req,res)=>{
     const b=req.body||{},name=typeof b.name==='string'?b.name.trim():'';
     if(!uuid(b.requestId)||name.length<2||name.length>100||!Number.isSafeInteger(b.departmentId)||!Number.isSafeInteger(b.campaignId))fail('Indiquez votre nom complet et votre département.');
     let items;try{items=normalizeItems(b.items);}catch(e){fail(e.message);}
     const digest=crypto.createHash('sha256').update(JSON.stringify([b.campaignId,name,b.departmentId,items])).digest('hex');
     const order=await transaction(async db=>{
       const existing=(await db.query('SELECT * FROM schedule_clothing_orders WHERE id=$1',[b.requestId])).rows[0];
-      if(existing){if(existing.digest!==digest)fail('Cette référence est déjà utilisée. Retrouvez la confirmation avant de recommencer.',409);return existing;}
+      if(existing){if(String(existing.person_id)!==String(req.requestPerson.personId)||existing.digest!==digest)fail('Cette référence est déjà utilisée. Retrouvez la confirmation avant de recommencer.',409);return existing;}
       const c=await campaign(b.campaignId,db);if(!open(c))fail('Les commandes sont fermées pour cette campagne.',409);
       if(c.version!==b.campaignVersion)fail('La campagne a changé. Actualisez la page avant de confirmer.',409);
       const d=(await db.query('SELECT name FROM schedule_leave_departments WHERE id=$1 AND active=TRUE',[b.departmentId])).rows[0];if(!d)fail('Département invalide.');
-      return (await db.query('INSERT INTO schedule_clothing_orders(id,campaign_id,employee_name,department_name,items,total_cents,digest,recipients,campaign_title) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',[b.requestId,c.id,name,d.name,JSON.stringify(items),orderTotal(items),digest,JSON.stringify(c.recipients),c.title])).rows[0];
+      return (await db.query('INSERT INTO schedule_clothing_orders(id,campaign_id,employee_name,department_name,items,total_cents,digest,recipients,campaign_title,person_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',[b.requestId,c.id,name,d.name,JSON.stringify(items),orderTotal(items),digest,JSON.stringify(c.recipients),c.title,req.requestPerson.personId])).rows[0];
     });
     const mail=order.mail_status==='sent'?'sent':await deliver(order.id);
     res.json({ok:true,id:order.id,total:order.total_cents,items:order.items,cancelled:order.cancelled,mailStatus:mail});

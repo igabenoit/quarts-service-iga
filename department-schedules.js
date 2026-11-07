@@ -38,6 +38,14 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS schedule_department_photo_week ON schedule_department_photos(department_id,week_start);`);
+  await pool.query(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='leave_person_identity_fk') THEN
+      ALTER TABLE schedule_leave_requests ADD CONSTRAINT leave_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='availability_person_identity_fk') THEN
+      ALTER TABLE schedule_availability_requests ADD CONSTRAINT availability_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
+    END IF;
+  END $$;`);
   await installServicePublications(pool);
   const employeePortal=await installEmployeePortal(app,pool,{sameOrigin,requireManager});
   const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
@@ -49,6 +57,12 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
   await installCuisineMigration(pool);
   await installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl});
+  app.use('/api/departments',(req,res,next)=>{
+    const send=res.json.bind(res);
+    const redact=value=>Array.isArray(value)?value.map(redact):value&&typeof value==='object'&&!(value instanceof Date)?Object.fromEntries(Object.entries(value).filter(([key])=>!['employeeCode','employee_code'].includes(key)).map(([key,v])=>[key,redact(v)])):value;
+    res.json=value=>send(req.manager?.kind==='account'?redact(value):value);
+    next();
+  });
   app.use('/api/departments',(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
   const listDepartments=async client=>(await client.query('SELECT id,name,schedule_key AS key,active FROM schedule_leave_departments WHERE schedule_key IS NOT NULL ORDER BY name')).rows.map(d=>({...d,id:Number(d.id)}));
   const department=async(id,client=pool)=>{const d=(await listDepartments(client)).find(d=>d.id===integer(id));if(!d||d.key==='service')fail('Utilisez l’horaire Service pour ce département.');return d;};
@@ -147,6 +161,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     res.json(await transaction(async client=>{
       const person=(await directory(client)).find(p=>p.id===integer(req.body.personId));
       if(!person?.active)fail('Employé introuvable ou inactif. Actualisez la liste.');
+      if(isScoped(req)&&(!person.departments.length||person.departments.some(d=>!ownsDepartment(req,d))))fail('La direction doit autoriser cette affectation hors de votre périmètre.',403);
       if(person.version!==req.body.version)fail('Cette fiche a changé. Actualisez la liste avant de réessayer.',409);
       const added=await client.query('INSERT INTO schedule_store_memberships(person_id,department_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING person_id',[person.id,id]);
       if(added.rowCount)await client.query('UPDATE schedule_store_people SET version=version+1,updated_at=clock_timestamp() WHERE id=$1',[person.id]);
@@ -178,6 +193,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     res.json(await transaction(async client=>{
       const people=await directory(client),person=people.find(p=>p.id===id),target=people.find(p=>p.id===targetId);
       if(!person)fail('Fiche introuvable.',404);
+      if(isScoped(req)&&(!person.departments.length||person.departments.some(d=>!ownsDepartment(req,d))))fail('La direction doit autoriser cette affectation hors de votre périmètre.',403);
       if(person.version!==req.body.version)fail('Cette fiche a changé. Rechargez le répertoire.',409);
       if(person.serviceEmployeeId||person.employeeCode)fail('Rattachez la fiche du département à celle qui possède déjà le code.');
       if(targetId!==null){
@@ -191,6 +207,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }));
   app.put('/api/departments/people/:id',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,integer(req.params.id),req))));
   async function savePerson(body,id,req){return transaction(async client=>{
+    if(isScoped(req)&&Object.hasOwn(body,'employeeCode')&&body.employeeCode)fail('La direction gère les matricules et les accès personnels.',403);
+    if(isScoped(req))delete body.employeeCode;
     const list=await directory(client),previous=id?list.find(p=>p.id===id):null;
     if(id&&!previous)fail('Employé introuvable.',404);
     if(isScoped(req)){

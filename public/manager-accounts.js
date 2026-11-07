@@ -4,12 +4,8 @@ function feedback(text){const status=$('#accountFormStatus');status.textContent=
 const node=(tag,text)=>{const el=document.createElement(tag);el.textContent=text;return el;};
 async function api(path,options={}){const response=await fetch(path,{cache:'no-store',...options,headers:{'Content-Type':'application/json'}});const body=await response.json();if(!response.ok)throw Error(body.error);return body;}
 const concealPasswords=new Set();
-function passwordControl(account){
-  const box=node('div',''),value=node('code',''),toggle=node('button','Afficher le mot de passe');box.className='manager-password';toggle.type='button';toggle.className='quiet';toggle.setAttribute('aria-expanded','false');
-  let timer,sequence=0;const hide=()=>{sequence++;clearTimeout(timer);value.textContent='';toggle.textContent='Afficher le mot de passe';toggle.setAttribute('aria-expanded','false');toggle.disabled=false;};concealPasswords.add(hide);
-  toggle.onclick=async()=>{if(value.textContent){hide();return;}const request=++sequence;toggle.disabled=true;try{const result=await api('/api/manager-accounts/'+account.id+'/password',{method:'POST'});if(request!==sequence)return;value.textContent=result.password;toggle.textContent='Masquer le mot de passe';toggle.setAttribute('aria-expanded','true');timer=setTimeout(hide,60000);}catch(error){if(request===sequence){value.textContent=error.message;timer=setTimeout(hide,60000);}}finally{if(request===sequence)toggle.disabled=false;}};
-  box.append(toggle,value);if(!account.passwordAvailable)box.append(node('small','Ancien mot de passe : affichable après la prochaine connexion du gérant ou après sa redéfinition.'));return box;
-}
+function passwordControl(){return node('small','Mot de passe non récupérable. Utilisez Modifier les accès pour le réinitialiser.');}
+
 document.addEventListener('visibilitychange',()=>{if(document.hidden)for(const hide of concealPasswords)hide();});
 function edit(account){
   editing=account;$('#accountForm').reset();$('#accountTitle').textContent=account?'Modifier '+account.name:'Ajouter un gérant';$('#managerName').value=account?.name||'';$('#managerLogin').value=account?.login||'';$('#managerActive').checked=account?.active??true;

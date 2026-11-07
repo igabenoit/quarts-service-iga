@@ -224,7 +224,22 @@ function secureEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 async function requireManager(request, response, next) {
-  try { await managerAccess.authorize(request); next(); }
+  try {
+    await managerAccess.authorize(request);
+    if(request.manager?.kind==='account') {
+      if(request.body&&/^\/api\/employees(?:\/|$)/.test(request.path)) {
+        if(request.body.employeeCode)return response.status(403).json({error:'La direction gère les matricules et les accès personnels.'});
+        delete request.body.employeeCode;
+      }
+      if(!response.employeeSecretsRedacted){
+        response.employeeSecretsRedacted=true;
+        const send=response.json.bind(response);
+        const redact=value=>Array.isArray(value)?value.map(redact):value&&typeof value==='object'&&!(value instanceof Date)?Object.fromEntries(Object.entries(value).filter(([key])=>!['employeeCode','employee_code'].includes(key)).map(([key,v])=>[key,redact(v)])):value;
+        response.json=value=>send(redact(value));
+      }
+    }
+    next();
+  }
   catch(error) { response.status(error.status||500).json({error:error.status?error.message:'Impossible de vérifier l’accès.'}); }
 }
 startupPhase('schema_manager_access');
@@ -907,3 +922,5 @@ const shutdown=()=>{
 };
 process.once('SIGTERM',shutdown);
 process.once('SIGINT',shutdown);
+
+

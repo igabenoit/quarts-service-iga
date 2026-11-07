@@ -56,7 +56,8 @@ test('complete startup, signed sessions for every department, publication and pe
       if(department.id===bakery.id)bakeryCookie=cookie;
     }
     assert.equal((await call('/api/departments/meta')).status,401);
-    const person=await call('/api/departments/people',bakeryCookie,{name:'Employé fictif audit',group:'regular',active:true,departments:[Number(bakery.id)],availability:{},email:'',employeeCode:'009876'});
+    assert.equal((await call('/api/departments/people',bakeryCookie,{name:'Interdit',employeeCode:'009876',departments:[Number(bakery.id)],availability:{},active:true,group:'regular'})).status,403);
+    const person=await call('/api/departments/people',admin,{name:'Employé fictif audit',group:'regular',active:true,departments:[Number(bakery.id)],availability:{},email:'',employeeCode:'009876'});
     assert.equal(person.status,200,JSON.stringify(person.body));
     const employee=(await call('/api/employee-portal/access','',{code:'009876'})).cookie;assert.ok(employee);
     assert.equal((await call('/api/manager-accounts',employee)).status,401);

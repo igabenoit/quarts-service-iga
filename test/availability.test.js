@@ -81,7 +81,7 @@ test('PostgreSQL : demandes, approbation future, délai, conflits conservés, an
   await pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1)',[effective]);
   await pool.query("INSERT INTO schedule_shifts(id,week_start,area,role,day_index,start_minute,end_minute) VALUES(1,$1,'front','cashier',1,480,960),(2,$1,'front','cashier',3,480,960)",[effective]);
   await pool.query('INSERT INTO schedule_assignments(shift_id,employee_id) VALUES(1,1),(2,2)');
-  const base='/api/leave/availability',call=async(method,path,req={})=>{const res=response();await routes.get(method+' '+base+path).at(-1)({headers:{},query:{},...req},res);return res;};
+  const base='/api/leave/availability',call=async(method,path,req={})=>{const res=response();await routes.get(method+' '+base+path).at(-1)({headers:{},query:{},requestPerson:{personId:req.body?.departmentId===2?2:1},...req},res);return res;};
   const employee=async()=>(await pool.query('SELECT * FROM schedule_employees WHERE id=1')).rows[0];
   const request=body({effectiveDate:effective});let id;
   await t.test('autorisation, validation serveur et envoi idempotent sans modification de fiche',async()=>{

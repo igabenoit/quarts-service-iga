@@ -13,7 +13,10 @@ window.addEventListener('beforeunload',e=>{if(dialogDirty){e.preventDefault();e.
 function action(fn){return async e=>{e?.preventDefault();try{await fn(e);}catch(err){if($('#editor').open)$('#dialogError').textContent=err.message;else notice(err.message);}};}
 function printed(title,html){$('#printReport').innerHTML=`<h1>${esc(title)}</h1><p>IGA Extra Famille Benoit · ${esc(fmt(new Date()))}</p>${html}`;window.print();}
 function downloadable(name,text,type='text/csv;charset=utf-8'){const u=URL.createObjectURL(new Blob([text],{type})),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
-function csv(rows){return '\uFEFF'+rows.map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');}
+function csv(rows){
+  const cell=value=>{let text=String(value??'');if(/^[\s\u0000-\u001f]*[=+@-]/u.test(text)||/^[\t\r\n]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"';};
+  return '\uFEFF'+rows.map(row=>row.map(cell).join(';')).join('\r\n');
+}
 function selected(name,form=document){return [...form.querySelectorAll(`[name="${name}"]:checked`)].map(e=>e.value);}
 function deps(name='deps',values=[]){return state.departments.filter(d=>d.active).map(d=>`<label class="check"><input type="checkbox" name="${name}" value="${d.id}" ${values.includes(d.id)?'checked':''}>${esc(d.name)}</label>`).join('');}
 async function load(){notice('');try{state=await api('state');view=state.view;$('#storageStatus').hidden=state.storage?.ready!==false;$('#storageStatus').textContent=state.storage?.message||'';$('#login').hidden=true;$('#app').hidden=false;$('#identity').textContent=state.identity.name;$('#view').innerHTML=state.views.map(v=>`<option value="${v}" ${v===view?'selected':''}>${views[v]}</option>`).join('');renderNav();await render();if(!state.policyAcknowledged)await acknowledgePolicy();}catch(e){$('#app').hidden=true;$('#login').hidden=false;notice(e.message);if(location.hash==='#politique')await policy();}}

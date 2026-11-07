@@ -33,10 +33,6 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     END $$;
     CREATE INDEX IF NOT EXISTS schedule_manager_person ON schedule_manager_accounts(person_id);`);
   }
-  // Authentication still uses scrypt. Only the administrator can request this encrypted copy.
-  const credentialKey=()=>{if(!credentialSecret)fail('La clé de protection des accès est indisponible.',503);return crypto.createHmac('sha256',credentialSecret).update('manager-password-v1').digest();};
-  const seal=(password,hash)=>{const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',credentialKey(),iv);cipher.setAAD(Buffer.from(hash));const encrypted=Buffer.concat([cipher.update(password,'utf8'),cipher.final()]);return ['v1',iv.toString('base64url'),cipher.getAuthTag().toString('base64url'),encrypted.toString('base64url')].join('.');};
-  const unseal=(value,hash)=>{try{const [version,iv,tag,encrypted]=value.split('.');if(version!=='v1')throw Error();const decipher=crypto.createDecipheriv('aes-256-gcm',credentialKey(),Buffer.from(iv,'base64url'));decipher.setAAD(Buffer.from(hash));decipher.setAuthTag(Buffer.from(tag,'base64url'));return Buffer.concat([decipher.update(Buffer.from(encrypted,'base64url')),decipher.final()]).toString('utf8');}catch{fail('Ce mot de passe ne peut plus être affiché. Redéfinissez-le depuis Modifier les accès.',409);}};
   const dummy=await passwordHash(crypto.randomBytes(32).toString('hex'));
   async function identity(req){
     let session;try{session=readSession(req);}catch{return null;}
@@ -52,7 +48,7 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
   const requireAdmin=async(req,res,next)=>{await admin(req,res);if(!res.headersSent)next();};
   const list=async()=>({
     accounts:(await pool.query(`SELECT a.id,a.name,a.login,a.departments,a.active,a.version,a.person_id AS "personId",
-      a.password_encrypted IS NOT NULL AS "passwordAvailable",a.active AND ${activeManagerSQL()} AS "accessAllowed"
+      FALSE AS "passwordAvailable",a.active AND ${activeManagerSQL()} AS "accessAllowed"
       FROM schedule_manager_accounts a ORDER BY a.name,a.id`)).rows,
     people:(await pool.query(`SELECT p.id,COALESCE(e.name,p.name) AS name,${activePersonSQL()} AS active
       FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
@@ -62,10 +58,7 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
   app.get('/api/manager-accounts',requireAdmin,endpoint(async(_req,res)=>res.set('Cache-Control','no-store').json(await list())));
   app.post('/api/manager-accounts/:id/password',requireAdmin,sameOrigin,endpoint(async(req,res)=>{
     res.set('Cache-Control','no-store');
-    const row=(await pool.query('SELECT password_hash,password_encrypted FROM schedule_manager_accounts WHERE id=$1',[req.params.id])).rows[0];
-    if(!row)fail('Compte introuvable.',404);
-    if(!row.password_encrypted)fail('Ancien mot de passe non récupérable. Il deviendra affichable après la prochaine connexion du gérant ou après sa redéfinition.',409);
-    res.json({password:unseal(row.password_encrypted,row.password_hash)});
+    res.status(410).json({error:'Les mots de passe ne sont pas récupérables. Utilisez Modifier les accès pour en définir un nouveau.'});
   }));
   const save=endpoint(async(req,res)=>{
     const b=req.body||{},name=typeof b.name==='string'?b.name.trim():'',login=typeof b.login==='string'?b.login.trim().toLowerCase():'';
@@ -84,11 +77,11 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
       if(!person||b.active&&!person.active)fail('Choisissez une fiche employé principale active.');
     }
     const hash=b.password?await passwordHash(b.password):null;
-    const encrypted=hash?seal(b.password,hash):null;
+    const encrypted=null; // No reversible copy is retained for new/updated accounts.
     try{
       if(req.params.id){
         if(!Number.isInteger(b.version))fail('Actualisez la liste des comptes.',409);
-        const saved=await pool.query(`UPDATE schedule_manager_accounts SET name=$1,login=$2,departments=$3,active=$4,password_hash=COALESCE($5,password_hash),password_encrypted=COALESCE($8,password_encrypted),person_id=$9,version=version+1,updated_at=clock_timestamp() WHERE id=$6 AND version=$7 RETURNING id`,[name,login,JSON.stringify(ids),b.active,hash,req.params.id,b.version,encrypted,personId]);
+        const saved=await pool.query(`UPDATE schedule_manager_accounts SET name=$1,login=$2,departments=$3,active=$4,password_hash=COALESCE($5,password_hash),password_encrypted=$8,person_id=$9,version=version+1,updated_at=clock_timestamp() WHERE id=$6 AND version=$7 RETURNING id`,[name,login,JSON.stringify(ids),b.active,hash,req.params.id,b.version,encrypted,personId]);
         if(!saved.rowCount)fail('Ce compte a changé. Actualisez la liste.',409);
       }else{
         if(!hash)fail('Choisissez un mot de passe pour ce compte.');
@@ -110,7 +103,6 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
       FROM schedule_manager_accounts a LEFT JOIN schedule_store_people p ON p.id=a.person_id WHERE a.login=$1`,[login.slice(0,100)])).rows[0];
     const correct=await passwordMatches(req.body?.password,row?.password_hash||dummy);
     if(!correct||!row?.access_allowed)fail('Identifiant ou mot de passe incorrect, ou accès désactivé. Communiquez avec l’administration.',401);
-    if(!row.password_encrypted&&credentialSecret)await pool.query('UPDATE schedule_manager_accounts SET password_encrypted=$1 WHERE id=$2 AND password_hash=$3 AND password_encrypted IS NULL',[seal(req.body.password,row.password_hash),row.id,row.password_hash]);
     keys.forEach(k=>attempts.delete(k));
     res.setHeader('Set-Cookie',`schedule_session=${encodeURIComponent(issueSession({accountId:Number(row.id),accountVersion:row.version,personVersion:row.access_version}))}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${production?'; Secure':''}`);
     const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];

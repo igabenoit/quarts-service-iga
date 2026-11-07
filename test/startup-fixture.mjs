@@ -4,8 +4,9 @@ import {EventEmitter} from 'node:events';
 import pg from 'pg';
 import {PGlite} from '@electric-sql/pglite';
 if(!process.env.TEST_STARTUP_DB||process.env.NODE_ENV!=='test')throw Error('Isolated test environment required');
+let primary;
 class TestPool extends EventEmitter{
-  constructor(options={}){super();const vault=options.connectionString==='postgres://employee-files.test/test';this.db=new PGlite(process.env.TEST_STARTUP_DB+(vault?'-employee-vault':''));this.ready=vault?this.db.exec('SET search_path=employee_files_private'):Promise.resolve();this.waiting=Promise.resolve();this.failSchema=vault&&process.env.TEST_EMPLOYEE_SCHEMA_FAILURE==='yes';}
+  constructor(options={}){super();const vault=options.connectionString==='postgres://employee-files.test/test';if(!vault)primary=this;this.db=new PGlite(process.env.TEST_STARTUP_DB+(vault?'-employee-vault':''));this.ready=vault?this.db.exec('SET search_path=employee_files_private'):Promise.resolve();this.waiting=Promise.resolve();this.failSchema=vault&&process.env.TEST_EMPLOYEE_SCHEMA_FAILURE==='yes';}
   async connect(){
     const previous=this.waiting;let unlock;
     this.waiting=new Promise(resolve=>unlock=resolve);await previous;
@@ -23,3 +24,5 @@ class TestPool extends EventEmitter{
 }
 pg.Pool=TestPool;
 await import('../start.js');
+
+process.on("message",async m=>{try{const result=await primary.query(m.sql,m.args);process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});
