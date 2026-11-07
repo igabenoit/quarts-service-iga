@@ -7,6 +7,7 @@ export async function employeeFilesStorage(env=process.env){
  const isolated=env.NODE_ENV==='test'&&!!env.TEST_STARTUP_DB&&url==='postgres://employee-files.test/test';
  if(!url)return {pool:null,status:{ready:false,region:null,message:'Le coffre documentaire canadien n’est pas encore connecté. Les nouvelles saisies et les dépôts sont désactivés; le personnel existant reste consultable.'}};
  let u;try{u=new URL(url);}catch{throw Error('EMPLOYEE_FILES_DATABASE_URL invalide');}
+ if(env.EMPLOYEE_FILES_DATABASE_PASSWORD)u.password=encodeURIComponent(env.EMPLOYEE_FILES_DATABASE_PASSWORD);
  if(!isolated){
   if(!['postgres:','postgresql:'].includes(u.protocol)||url===env.DATABASE_URL||u.hostname.includes('render.com')||u.hostname.startsWith('dpg-'))throw Error('Le coffre employé doit utiliser une base distincte de Render.');
   if(env.EMPLOYEE_FILES_REGION!=='ca-central-1'||env.EMPLOYEE_FILES_HOSTING_REVIEWED!=='yes')throw Error('Confirmez la région Canada Central et la revue d’hébergement avant activation.');

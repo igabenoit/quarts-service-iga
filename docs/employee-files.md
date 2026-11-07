@@ -25,6 +25,7 @@ Sans configuration valide, le nouveau portail consulte le personnel mais refuse 
 Configurer uniquement côté serveur, jamais dans le navigateur ou le dépôt :
 
 - `EMPLOYEE_FILES_DATABASE_URL` : URL PostgreSQL du coffre séparé.
+- `EMPLOYEE_FILES_DATABASE_PASSWORD` : mot de passe séparé facultatif, saisi directement dans les secrets du serveur; il est encodé pour la connexion sans apparaître dans l’URL de configuration.
 - `EMPLOYEE_FILES_REGION=ca-central-1` : après vérification réelle du projet Canada Central.
 - `EMPLOYEE_FILES_HOSTING_REVIEWED=yes` : seulement après revue et autorisation du responsable portant sur l’hébergement et les flux hors Québec; ce drapeau n’est pas une attestation juridique.
 - `EMPLOYEE_FILES_CA_PEM` : certificat d’autorité si requis par le fournisseur. La vérification TLS reste obligatoire.
