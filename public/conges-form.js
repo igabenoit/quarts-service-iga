@@ -50,7 +50,7 @@ form.onsubmit=async event=>{
   try {
     datesBetween($('#firstDate').value,$('#lastDate').value);
     const periods=dayPeriods(selectedDays());
-    const response=await fetch(`${base}/${test?'test-requests':store?'submit':'leave-requests'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionKey,employeeId:$('#employee').value,employeeName:$('#employeeName').value,departmentId:$('#department').value,email:$('#email').value,reason:$('#reason').value,periods})});
+    const response=await fetch(`${base}/${test?'test-requests':store?'submit':'leave-requests'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionKey,...(!$('#employee').disabled&&$('#employee').value?{employeeId:$('#employee').value}:{}),employeeName:$('#employeeName').value,departmentId:$('#department').value,email:$('#email').value,reason:$('#reason').value,periods})});
     const data=await response.json();
     if(response.status===409){submissionKey=crypto.randomUUID();sessionStorage.setItem(keyName,submissionKey);throw new Error('Une demande a déjà été enregistrée avec cette référence. Vérifiez avec votre gérante avant de renvoyer une nouvelle demande.');}
     if(!response.ok&&!(response.status===422&&data.id))throw new Error(data.error||'Envoi impossible.');
@@ -75,8 +75,16 @@ async function load(){
     $('#department').replaceChildren(new Option('Choisissez votre département',''));
     for(const d of data.departments||[])$('#department').append(new Option(d.name,d.id));
     const manual=data.nameEntry==='manual';$('#employeeNameLabel').hidden=!manual;$('#employeeName').disabled=!manual;$('#employeeName').required=manual;$('#employeeSelectLabel').hidden=manual;$('#employee').disabled=manual;$('#employee').required=!manual;
+    // The name is a display of the authenticated identity, not a free-text selector.
+    // Server-side ownership checks still reject a different person or department.
+    if(!test){
+      if(typeof data.employeeName!=='string'||!data.employeeName.trim())throw new Error('Votre fiche personnelle n’a pas pu être chargée. Reconnectez-vous avant de réessayer.');
+      $('#employeeName').value=data.employeeName;$('#employeeName').readOnly=true;
+    }
     if(!store){const service=data.departments?.find(d=>d.isService);if(service)$('#department').value=service.id;$('#department').disabled=!test;}
     for(const e of data.employees){const option=document.createElement('option');option.value=e.id??'test';option.textContent=e.name;$('#employee').append(option);}
+    if(!test&&data.employees.length===1)$('#employee').value=String(data.employees[0].id);
+    if(!test&&data.departments?.length===1)$('#department').value=String(data.departments[0].id);
     $('#testBanner').hidden=!data.isTest;if(data.isTest)$('#employee').value='test';
     form.hidden=false;
   }catch(error){message(error.message);$('#deadline').textContent='Veuillez vous connecter pour remplir le formulaire.';}
