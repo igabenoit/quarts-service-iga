@@ -1,3 +1,4 @@
+import {installInspectionGrid} from './inspection-grid.js';
 import {installSSTIntake} from './sst-intake.js';
 import {installSST} from './sst.js';
 import {installScheduleNotifications} from './service-schedule-notifications.js';
@@ -602,6 +603,7 @@ await managerAccess.installEmployeeLinks();
 startupPhase('schema_sst');
 const sstService=await installSST(app,pool,{identity:req=>managerAccess.identity(req)});
 installSSTIntake(app,pool,sstService);
+await installInspectionGrid(app,pool,sstService);
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
   try{
@@ -895,3 +897,5 @@ const shutdown=()=>{
 };
 process.once('SIGTERM',shutdown);
 process.once('SIGINT',shutdown);
+
+
