@@ -1,3 +1,5 @@
+import {installEmployeeFiles} from './employee-files.js';
+import {employeeFilesStorage} from './employee-files-storage.js';
 import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
 import {installInspectionGrid} from './inspection-grid.js';
@@ -608,6 +610,10 @@ installSSTIntake(app,pool,sstService);
 await installInspectionGrid(app,pool,sstService);
 await installEquipmentTraining(app,pool,sstService);
 await installPreventionProgram(app,pool,sstService);
+let employeeVault;
+try{employeeVault=await employeeFilesStorage();}catch{logEvent('employee_vault_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien est indisponible ou sa configuration est incomplète. Aucune nouvelle saisie n’est permise.'}};}
+try{await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,vaultPool:employeeVault.pool,storageStatus:employeeVault.status});}
+catch{await employeeVault.pool?.end();logEvent('employee_vault_schema_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien n’a pas pu être initialisé. Les dossiers sont en consultation seulement; le portail SST reste disponible.'}};await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,storageStatus:employeeVault.status});}
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
   try{
@@ -896,11 +902,8 @@ const server=app.listen(port,()=>startupPhase('ready'));
 const shutdown=()=>{
   startupPhase('shutdown');
   chatPush?.stop();
-  server.close(async()=>{await pool.end();process.exit(0);});
+  server.close(async()=>{await employeeVault.pool?.end();await pool.end();process.exit(0);});
   setTimeout(()=>process.exit(1),25000).unref();
 };
 process.once('SIGTERM',shutdown);
 process.once('SIGINT',shutdown);
-
-
-
