@@ -1,3 +1,4 @@
+import {mountEditor} from '/prevention-editor.js';
 let libraryPromise;
 const script=src=>new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(Error('Lecteur indisponible. Actualisez la page.'));document.head.append(s);});
 const libraries=()=>libraryPromise??=(async()=>{await script('/vendor/jszip.js');await script('/vendor/docx-preview.js');})();
@@ -14,7 +15,7 @@ export async function displayDocument(host,doc){
    const loaded=new Promise(resolve=>frame.onload=resolve);frame.srcdoc=`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; font-src blob: data:; style-src 'unsafe-inline';"><style>body{margin:0;background:#e7e9e7}.docx-wrapper{padding:20px!important}section.docx{margin-bottom:20px!important}*{box-sizing:border-box}</style></head><body></body></html>`;host.append(frame);await loaded;
    if(!host.isConnected)return;const body=frame.contentDocument.body;
    await window.docx.renderAsync(sanitized,body,frame.contentDocument.head,{className:'docx',inWrapper:true,breakPages:true,ignoreLastRenderedPageBreak:false,renderAltChunks:false,useBase64URL:true});
-   const fit=()=>{const page=body.querySelector('section.docx');if(page)body.style.zoom=Math.min(1,(frame.clientWidth-12)/(page.offsetWidth+40));};fit();const resize=new ResizeObserver(()=>{if(host.isConnected)fit();else resize.disconnect();});resize.observe(host);
+   await mountEditor(host,doc,body);return;
   }else if(doc.mime==='application/pdf'||/\.pdf$/i.test(doc.name)){
    const lib=await import('/vendor/pdfjs/pdf.min.mjs');lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';const task=lib.getDocument({data,isEvalSupported:false});const pdf=await task.promise;if(!host.isConnected){await task.destroy();return;}
    host.replaceChildren();const bar=document.createElement('div'),prev=document.createElement('button'),next=document.createElement('button'),label=document.createElement('span'),canvas=document.createElement('canvas');bar.className='row-actions';prev.className=next.className='quiet';prev.textContent='← Page précédente';next.textContent='Page suivante →';bar.append(prev,label,next);canvas.style.cssText='display:block;max-width:100%;height:auto;margin:16px auto;background:white';host.append(bar,canvas);let page=1,busy=false;

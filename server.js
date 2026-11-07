@@ -1,3 +1,4 @@
+import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
 import {installInspectionGrid} from './inspection-grid.js';
 import {installSSTIntake} from './sst-intake.js';
@@ -606,6 +607,7 @@ const sstService=await installSST(app,pool,{identity:req=>managerAccess.identity
 installSSTIntake(app,pool,sstService);
 await installInspectionGrid(app,pool,sstService);
 await installEquipmentTraining(app,pool,sstService);
+await installPreventionProgram(app,pool,sstService);
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
   try{
