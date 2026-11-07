@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "docx-preview": "0.3.7",
     "express": "^5.1.0",
     "html2canvas": "1.4.1",
     "jspdf": "4.2.1",
@@ -23,3 +24,4 @@
     "@electric-sql/pglite": "0.5.8"
   }
 }
+

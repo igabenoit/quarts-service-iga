@@ -1,3 +1,4 @@
+import {installEquipmentTraining} from './equipment-training.js';
 import {installInspectionGrid} from './inspection-grid.js';
 import {installSSTIntake} from './sst-intake.js';
 import {installSST} from './sst.js';
@@ -604,6 +605,7 @@ startupPhase('schema_sst');
 const sstService=await installSST(app,pool,{identity:req=>managerAccess.identity(req)});
 installSSTIntake(app,pool,sstService);
 await installInspectionGrid(app,pool,sstService);
+await installEquipmentTraining(app,pool,sstService);
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
   try{
@@ -897,5 +899,6 @@ const shutdown=()=>{
 };
 process.once('SIGTERM',shutdown);
 process.once('SIGINT',shutdown);
+
 
 
