@@ -74,6 +74,9 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   const final=(await call('GET',`equipment-training/report?employeeKey=${person.key}&cutoff=${cutoff}`)).body;assert.equal(final.open.length,0);assert.ok(final.entries.some(e=>e.id===obs.body.entry.id));assert.ok(final.entries.some(e=>e.supersedes===obs.body.entry.id));
   await t.test('formulaire signé : brouillon, signatures, correction et pratique séparée',async()=>{
    const form={...emptyTrainingForm(),date:now,trainer:'Formateur fictif',content:'Explications réellement données en test',reference:'Méthode fictive décrite',employeeDate:now,trainerDate:now,signatures:{employee:[[[100,100],[200,200]]],trainer:[[[300,300],[400,400]]]}};
+   const signedDraft=await entry('training_form',{...form,status:'draft'});assert.equal(signedDraft.status,201);
+   const finalized=await entry('training_form',{...signedDraft.body.entry.data,status:'completed'},{supersedes:signedDraft.body.entry.id,correctionReason:'Finalisation du brouillon'});assert.equal(finalized.status,201,JSON.stringify(finalized.body));
+   const persisted=(await call('GET','equipment-training')).body.entries.find(e=>e.id===finalized.body.entry.id);assert.equal(persisted.data.status,'completed');assert.deepEqual(persisted.data.signatures,form.signatures);
    const signed=await entry('training_form',{...form,status:'completed'});assert.equal(signed.status,201,JSON.stringify(signed.body));
    assert.equal(registerRows((await call('GET','equipment-training')).body.entries).find(r=>r.employeeKey===person.key&&r.task==='Utilisation').result,'À vérifier','Les signatures seules ne valident pas la pratique');
    assert.equal((await entry('training_form',{...form,status:'completed',signatures:{employee:[],trainer:[]}})).status,400);
