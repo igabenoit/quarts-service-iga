@@ -77,6 +77,9 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
    const signedDraft=await entry('training_form',{...form,status:'draft'});assert.equal(signedDraft.status,201);
    const finalized=await entry('training_form',{...signedDraft.body.entry.data,status:'completed'},{supersedes:signedDraft.body.entry.id,correctionReason:'Finalisation du brouillon'});assert.equal(finalized.status,201,JSON.stringify(finalized.body));
    const persisted=(await call('GET','equipment-training')).body.entries.find(e=>e.id===finalized.body.entry.id);assert.equal(persisted.data.status,'completed');assert.deepEqual(persisted.data.signatures,form.signatures);
+   const dateDraft=await entry('training_form',{...form,status:'draft',date:cutoff,employeeDate:cutoff,trainerDate:cutoff});assert.equal(dateDraft.status,201);
+   const dateFinal=await entry('training_form',{...dateDraft.body.entry.data,status:'completed',employeeDate:now,trainerDate:now},{supersedes:dateDraft.body.entry.id,correctionReason:'Finalisation du brouillon'});assert.equal(dateFinal.status,201,JSON.stringify(dateFinal.body));assert.deepEqual(dateFinal.body.entry.data.signatures,form.signatures);
+   assert.equal((await entry('training_form',{...dateFinal.body.entry.data,employeeDate:cutoff},{supersedes:dateFinal.body.entry.id,correctionReason:'Changer une date déjà signée'})).status,400,'Une fiche finalisée conserve la protection du contenu signé');
    const signed=await entry('training_form',{...form,status:'completed'});assert.equal(signed.status,201,JSON.stringify(signed.body));
    assert.equal(registerRows((await call('GET','equipment-training')).body.entries).find(r=>r.employeeKey===person.key&&r.task==='Utilisation').result,'À vérifier','Les signatures seules ne valident pas la pratique');
    assert.equal((await entry('training_form',{...form,status:'completed',signatures:{employee:[],trainer:[]}})).status,400);

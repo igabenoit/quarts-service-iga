@@ -41,6 +41,12 @@ function render(){
   const value=el.type==='checkbox'?el.checked:el.value;
   const old=el.hasAttribute('data-tf-person')?model.employeeKey:el.hasAttribute('data-tf-point')?model.points[Number(el.dataset.tfPoint)].result:key.startsWith('pointnote:')?model.points[Number(key.split(':')[1])].note:model[key];
   if(old===value)return;
+  // Dates are completed along with signatures while the form is still a draft.
+  // Native date pickers can emit an empty intermediate value: never erase ink here.
+  if(el.type==='date'&&prior?.data.status!=='completed'){
+   model[key]=value;model.status='draft';dirty=true;
+   message('Date modifiée — vos signatures sont conservées.');return;
+  }
   const had=Object.values(model.signatures).some(x=>x.length);
   if(had&&!confirm('Modifier le contenu signé exige de refaire les signatures. Continuer ?')){if(el.type==='checkbox')el.checked=old;else el.value=old;return;}
   model.signatures={employee:[],trainer:[]};model.status='draft';dirty=true;

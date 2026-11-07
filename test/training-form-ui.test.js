@@ -37,3 +37,17 @@ test('finalisation, erreurs et réouverture : signatures conservées et aucun br
  assert.doesNotMatch(f.dialog.innerHTML,/Brouillon|brouillon/);assert.match(f.dialog.innerHTML,/Signature manuscrite/);assert.match(f.dialog.innerHTML,/Corriger cette fiche/);
  f.run('openTrainingForm({...options,prior})');assert.doesNotMatch(f.dialog.innerHTML,/Brouillon|brouillon/);
 });
+
+test('choisir et compléter les dates après les deux signatures ne perd aucun tracé',async()=>{
+ const f=fixture();f.stroke('employee');f.stroke('trainer');const before=f.run('JSON.stringify(model.signatures)');
+ f.sandbox.confirm=()=>{throw Error('Un choix de date du brouillon ne doit pas demander de refaire les signatures');};
+ for(const key of ['date','observationDate','dueDate','employeeDate','trainerDate'])for(const value of ['', '2026-11-06','2026-11-07']){
+  f.dialog.oninput({target:{dataset:{tf:key},type:'date',value,hasAttribute:()=>false}});
+  assert.equal(f.run('JSON.stringify(model.signatures)'),before);
+  assert.equal(f.run('model.'+key),value);
+ }
+ f.run("Object.assign(model,{trainer:'Formateur test',content:'Contenu test',reference:'Source test'})");
+ await f.run("save('draft')");
+ f.dialog.oninput({target:{dataset:{tf:'date'},type:'date',value:'2026-11-06',hasAttribute:()=>false}});
+ await f.run("save('completed')");assert.equal(f.run('model.status'),'completed');assert.equal(f.run('JSON.stringify(model.signatures)'),before);
+});
