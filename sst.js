@@ -14,7 +14,8 @@ export function normalizeSST(body){
  if(fields.meetingType&&!['Comité SST','Réunion SST','Réunion SIMDUT'].includes(fields.meetingType))fail('Choisissez Comité SST, Réunion SST ou Réunion SIMDUT.');
  const eventDate=day(body.eventDate),dueDate=day(body.dueDate);
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
- if(body.status==='done'&&['training','action','meeting','inspection','incident'].includes(body.kind)&&(!eventDate||eventDate>today))fail('Pour un dossier réalisé ou fermé, indiquez une date réelle qui n’est pas dans le futur.');
+ if(body.status==='done'&&['training','action','meeting','inspection'].includes(body.kind)&&(!eventDate||eventDate>today))fail('Pour un dossier réalisé ou fermé, indiquez une date réelle qui n’est pas dans le futur.');
+ if(body.kind==='incident'&&body.status==='done'&&eventDate>today)fail('La date d’un événement consolidé ne peut pas être dans le futur.');
  if(body.employeeKey!==null&&body.employeeKey!==undefined&&!/^(service|store):[1-9]\d*$/.test(body.employeeKey))fail('Employé invalide.');
  if(body.departmentId!==null&&body.departmentId!==undefined&&(!Number.isSafeInteger(body.departmentId)||body.departmentId<1))fail('Département invalide.');
  if(body.relatedId!==null&&body.relatedId!==undefined&&!uuid(body.relatedId))fail('Dossier lié invalide.');
@@ -49,6 +50,8 @@ export async function installSST(app,pool,{identity}){
   related_id UUID REFERENCES sst_records(id),owner TEXT NOT NULL DEFAULT '',event_date DATE,due_date DATE,
   details TEXT NOT NULL DEFAULT '',fields JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
+ ALTER TABLE sst_records ADD COLUMN IF NOT EXISTS event_group_id UUID REFERENCES sst_records(id);
+ CREATE INDEX IF NOT EXISTS sst_records_event_group ON sst_records(event_group_id);
  CREATE TABLE IF NOT EXISTS sst_documents(
   id UUID PRIMARY KEY,record_id UUID REFERENCES sst_records(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,
   sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
@@ -64,6 +67,33 @@ export async function installSST(app,pool,{identity}){
  const audit=(db,req,action,before,after,recordId=null,documentId=null)=>db.query('INSERT INTO sst_events(record_id,document_id,actor,action,before_value,after_value) VALUES($1,$2,$3,$4,$5,$6)',[recordId,documentId,req.sstActor,action,before?JSON.stringify(before):null,after?JSON.stringify(after):null]);
  app.get('/api/sst/access',admin,(_req,res)=>res.json({active:true}));
  app.get('/api/sst/state',admin,route(async(_req,res)=>{const [directory,records,docs,imports]=await Promise.all([sstDirectory(pool),pool.query('SELECT * FROM sst_records ORDER BY updated_at DESC'),pool.query('SELECT id,record_id,name,mime,size,sha256,version,created_at,archived_at FROM sst_documents ORDER BY created_at DESC'),pool.query('SELECT id,label,record_count,document_count,report_id,imported_at FROM sst_imports ORDER BY imported_at DESC')]);const shared=await sharedFiles();res.json({...directory,records:[...records.rows,...shared.records],documents:[...docs.rows,...shared.documents],imports:imports.rows,sharedFilesWarning:shared.warning||null})}));
+ const incidentBatch=async(db,items)=>{
+  if(!Array.isArray(items)||!items.length||items.length>500||items.some(x=>!uuid(x?.id)||!Number.isSafeInteger(x.version)||x.version<1)||new Set(items.map(x=>x.id)).size!==items.length)fail('Sélection de dossiers invalide.');
+  const rows=[];for(const item of items){const row=await record(db,item.id);if(row.kind!=='incident'||row.archived_at)fail('Sélectionnez uniquement des fiches actives d’incidents et enquêtes.');if(row.version!==item.version)fail('Une fiche a changé. Actualisez avant de recommencer.',409);rows.push(row);}return rows;
+ };
+ app.post('/api/sst/incidents/followup',admin,origin,route(async(req,res)=>{
+  const {status,owner,records}=req.body||{};
+  if(status===undefined&&owner===undefined)fail('Choisissez un état ou un responsable.');
+  if(status!==undefined&&!['draft','progress','done'].includes(status))fail('État invalide.');
+  if(owner!==undefined&&(typeof owner!=='string'||owner.trim().length>120))fail('Responsable invalide.');
+  const count=await tx(async db=>{const rows=await incidentBatch(db,records);for(const before of rows){
+   const nextStatus=status??before.status,nextOwner=owner===undefined?before.owner:owner.trim();
+   if(nextStatus===before.status&&nextOwner===before.owner)continue;
+   // Administrative classification never alters the factual report, dates or signatures.
+   await db.query('UPDATE sst_records SET status=$2,owner=$3,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[before.id,nextStatus,nextOwner]);
+   await audit(db,req,'incident.followup.updated',before,await record(db,before.id),before.id);
+  }return rows.length;});res.json({count});
+ }));
+ app.post('/api/sst/incidents/group',admin,origin,route(async(req,res)=>{
+  const {records,anchorId,operation}=req.body||{};if(!['group','ungroup'].includes(operation))fail('Opération invalide.');
+  const count=await tx(async db=>{const rows=await incidentBatch(db,records),ids=rows.map(r=>r.id);
+   if(operation==='group'&&(rows.length<2||!ids.includes(anchorId)))fail('Sélectionnez au moins deux fiches et une fiche principale.');
+   for(const groupId of new Set(rows.map(r=>r.event_group_id).filter(Boolean))){const members=(await db.query('SELECT id FROM sst_records WHERE event_group_id=$1',[groupId])).rows;if(members.some(r=>!ids.includes(r.id)))fail('Incluez toutes les fiches du regroupement existant avant de le modifier.',409);}
+   for(const before of rows){const groupId=operation==='group'?anchorId:null;if(before.event_group_id===groupId)continue;
+    await db.query('UPDATE sst_records SET event_group_id=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[before.id,groupId]);
+    await audit(db,req,operation==='group'?'incident.grouped':'incident.ungrouped',before,await record(db,before.id),before.id);
+   }return rows.length;});res.json({count});
+ }));
  app.post('/api/sst/records',admin,origin,route(async(req,res)=>{
   const v=normalizeSST(req.body),directory=await sstDirectory(pool),person=directory.employees.find(p=>p.key===v.employeeKey);
   if(v.employeeKey&&!person)fail('Cet employé ne figure plus dans le répertoire.');if(v.departmentId&&!directory.departments.some(d=>d.id===v.departmentId))fail('Département introuvable.');
