@@ -1,5 +1,7 @@
 # Clés d’accès des employés — activation progressive
 
+Mise à jour : consulter aussi [Accès direction et Face ID](direction-security.md). En production, le code maître et ses anciens cookies ne donnent plus accès à la direction. La clé personnelle de la personne désignée suffit pour les modules autorisés et pour ajouter son iPhone.
+
 Implémentation testée le 7 novembre 2026 dans une copie isolée du portail. Les employés d’essai sont fictifs. Aucun message ni invitation réelle n’est envoyé. Ce module ne constitue pas une certification de conformité juridique et n’active pas le coffre RH canadien.
 
 ## Écrans
@@ -24,7 +26,7 @@ EMPLOYEE_PASSKEY_ADMIN_IDS=<ID interne vérifié de la fiche principale de direc
 
 Modes :
 
-- `off` (par défaut) : aucune activation ou nouvelle connexion par clé. Une personne déjà activée ne retrouve jamais l’accès par matricule seul. Les sessions par clé déjà émises restent limitées à leur durée normale.
+- `off` (par défaut hors production) : aucune activation ou nouvelle connexion par clé. Une personne déjà activée ne retrouve jamais l’accès par matricule seul. Ce mode empêche le démarrage en production, où la direction doit disposer de clés configurées.
 - `pilot` : personnes déjà activées obligatoirement par clé; matricule encore utilisable pour les autres. Ce mode conserve donc le risque existant pour les personnes non migrées.
 - `required` : matricule seul refusé pour tout le monde, y compris les anciens liens d’horaire. À activer après avoir équipé les personnes concernées.
 
@@ -41,7 +43,7 @@ node scripts/bootstrap-passkey.mjs ID_INTERNE --verified-in-person "Première ac
 ```
 
 4. Remettre directement à la personne le lien affiché par le terminal. Ne pas le coller dans un ticket, une conversation ou des journaux partagés. Il expire après 15 minutes et n’est utilisable qu’une fois. Le jeton est placé dans le fragment du lien, retiré de l’adresse dès l’ouverture, et son empreinte seule est stockée.
-5. La personne active sa clé sur son appareil personnel ou sur sa clé de sécurité individuelle, puis ouvre `/cles-employes` avec **son accès administrateur existant ET sa session par clé**. Une confirmation par clé datant de moins de cinq minutes est exigée. Le code administrateur partagé seul ne suffit pas.
+5. La personne active sa clé sur son appareil personnel ou sur sa clé de sécurité individuelle, puis ouvre `/cles-employes` avec **sa session par clé**. Son identifiant interne doit figurer dans la liste de direction autorisée. Une confirmation par clé datant de moins de cinq minutes est exigée. Le code administrateur partagé est refusé en production. Pour ajouter un iPhone, utiliser le QR « Ajouter mon iPhone »; les clés existantes sont conservées.
 6. Pour chaque employé pilote : choisir sa fiche exacte, vérifier son identité et son matricule en personne, indiquer le motif et créer le lien. Aucune invitation n’est envoyée automatiquement. Une clé ne peut pas être créée sur la seule connaissance du matricule.
 7. Vérifier un horaire et un congé avec le compte pilote. Passer à `required` seulement après un plan d’activation pour tous et un moyen de connexion pour les personnes sans téléphone.
 
@@ -76,3 +78,4 @@ node --test --test-concurrency=2 test/*.test.js
 Bibliothèques verrouillées : `@simplewebauthn/server` 14.0.3, `@simplewebauthn/browser` 14.0.0. Le bundle navigateur est servi localement, sans CDN. Documentation du fournisseur : https://simplewebauthn.dev/docs/packages/server et https://simplewebauthn.dev/docs/packages/browser.
 
 Le lot intègre également les correctifs de l’audit précédent : liaison des demandes à l’identité, restrictions de périmètre des gérants, suppression de l’affichage des mots de passe, révocation à la déconnexion et échappement CSV. Les essais historiques ont été adaptés à ces règles : une identité fictive est fournie dans les fixtures; aucune règle de production n’a été relâchée pour faire passer un test.
+
