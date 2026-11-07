@@ -11,11 +11,11 @@ export async function displayDocument(host,doc){
    // Rendering stays local to the browser. Remove external relationships and HTML chunks.
    for(const [path,file] of Object.entries(zip.files))if(path.endsWith('.rels')){const xml=new DOMParser().parseFromString(await file.async('string'),'application/xml');for(const rel of [...xml.getElementsByTagName('Relationship')])if(rel.getAttribute('TargetMode')==='External')rel.remove();zip.file(path,new XMLSerializer().serializeToString(xml));}
    const sanitized=await zip.generateAsync({type:'arraybuffer'});if(!host.isConnected)return;
-   host.replaceChildren();const frame=document.createElement('iframe');frame.title='Programme de prévention — aperçu Word';frame.setAttribute('sandbox','allow-same-origin');frame.style.cssText='width:100%;height:78dvh;min-height:480px;border:1px solid #dce3da;background:#e7e9e7;border-radius:8px';
-   const loaded=new Promise(resolve=>frame.onload=resolve);frame.srcdoc=`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; font-src blob: data:; style-src 'unsafe-inline';"><style>body{margin:0;background:#e7e9e7}.docx-wrapper{padding:20px!important}section.docx{margin-bottom:20px!important}*{box-sizing:border-box}</style></head><body></body></html>`;host.append(frame);await loaded;
+   host.replaceChildren();const frame=document.createElement('iframe');frame.title='Programme de prévention — document original remplissable';frame.setAttribute('sandbox','allow-same-origin allow-modals');frame.className='pp-original-frame';
+   const loaded=new Promise(resolve=>{frame.onload=resolve;});frame.src='/sst-document-frame';host.append(frame);await loaded;
    if(!host.isConnected)return;const body=frame.contentDocument.body;
    await window.docx.renderAsync(sanitized,body,frame.contentDocument.head,{className:'docx',inWrapper:true,breakPages:true,ignoreLastRenderedPageBreak:false,renderAltChunks:false,useBase64URL:true});
-   await mountEditor(host,doc,body);return;
+   await mountEditor(host,doc,body,frame);return;
   }else if(doc.mime==='application/pdf'||/\.pdf$/i.test(doc.name)){
    const lib=await import('/vendor/pdfjs/pdf.min.mjs');lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';const task=lib.getDocument({data,isEvalSupported:false});const pdf=await task.promise;if(!host.isConnected){await task.destroy();return;}
    host.replaceChildren();const bar=document.createElement('div'),prev=document.createElement('button'),next=document.createElement('button'),label=document.createElement('span'),canvas=document.createElement('canvas');bar.className='row-actions';prev.className=next.className='quiet';prev.textContent='← Page précédente';next.textContent='Page suivante →';bar.append(prev,label,next);canvas.style.cssText='display:block;max-width:100%;height:auto;margin:16px auto;background:white';host.append(bar,canvas);let page=1,busy=false;
