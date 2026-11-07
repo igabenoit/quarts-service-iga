@@ -22,6 +22,8 @@ Les nouvelles pièces SST du coffre sont projetées en lecture dans le SST sans 
 
 Sans configuration valide, le nouveau portail consulte le personnel mais refuse les nouvelles saisies et les dépôts. Il ne se replie jamais sur la base Render. Une erreur de schéma du coffre ne doit pas arrêter le SST.
 
+Une fois la région et les identifiants configurés, le serveur vérifie la connexion TLS et le paramètre de session avec une seule requête de diagnostic sans données personnelles. Tant que la revue n’est pas validée, il ferme immédiatement la connexion, ne crée aucune table et ne donne aucun accès en écriture. Le bandeau distingue une connexion vérifiée d’un problème d’authentification ou de certificat, sans afficher de secret.
+
 Configurer uniquement côté serveur, jamais dans le navigateur ou le dépôt :
 
 - `EMPLOYEE_FILES_DATABASE_URL` : URL PostgreSQL du coffre séparé.
