@@ -1,0 +1,24 @@
+nav.manager-nav{display:block;width:100%;min-width:0;margin:0 0 28px;padding:18px 20px;background:#fff;border:1px solid #dce5df;border-radius:14px;color:#193c33;font:14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-sizing:border-box}
+.manager-nav .manager-nav__account{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px 24px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #edf1ed}
+.manager-nav .manager-nav__account[hidden]{display:none}
+.manager-nav .manager-nav__name{font-size:15px;font-weight:700;overflow-wrap:anywhere}
+.manager-nav .manager-nav__menu{margin:0;padding:0;border:0;background:none}
+.manager-nav .manager-nav__menu>summary{display:none}
+.manager-nav .manager-nav__links{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.manager-nav a.manager-nav__link{display:flex;align-items:center;justify-content:flex-start;min-width:0;min-height:44px;box-sizing:border-box;padding:10px 14px;border:1px solid #dce5df;border-radius:8px;background:#f7f9f6;color:#294f42;font:inherit;font-weight:600;text-decoration:none;overflow-wrap:anywhere;transition:background .15s,border-color .15s}
+.manager-nav a.manager-nav__link:hover{background:#eaf1e9;border-color:#a9bfb0}
+.manager-nav a.manager-nav__link[aria-current=page]{background:#195644;border-color:#195644;color:white}
+.manager-nav button.manager-nav__logout{display:inline-flex;align-items:center;justify-content:center;min-height:44px;margin:0;padding:9px 14px;border:1px solid #dce5df;border-radius:8px;background:white;color:#52645b;font:inherit;font-weight:600;cursor:pointer}
+.manager-nav button.manager-nav__logout:hover{background:#fff1ef;border-color:#e4c0b8;color:#93392f}
+.manager-nav a:focus-visible,.manager-nav button:focus-visible,.manager-nav summary:focus-visible{outline:3px solid #c18f25;outline-offset:3px}
+@media(max-width:640px){
+ nav.manager-nav{padding:14px;margin-bottom:20px}
+ .manager-nav .manager-nav__account{gap:10px;margin-bottom:0;padding-bottom:12px}
+ .manager-nav .manager-nav__name{flex:1 1 120px}
+ .manager-nav button.manager-nav__logout{font-size:13px;padding:8px 10px}
+ .manager-nav .manager-nav__menu>summary{display:list-item;min-height:44px;box-sizing:border-box;padding:14px 0 8px;font:inherit;font-weight:700;cursor:pointer}
+ .manager-nav .manager-nav__links{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding-top:8px}
+ .manager-nav a.manager-nav__link{padding:10px;font-size:13px}
+}
+@media(max-width:340px){.manager-nav .manager-nav__links{grid-template-columns:1fr}}
+@media print{nav.manager-nav{display:none!important}}
