@@ -26,6 +26,8 @@ try{
   await director.page.goto(f.base+'/connexion-employe?retour=%2Fcles-employes#activation='+secret);
   await director.page.locator('#continue').click();await director.page.waitForURL('**/cles-employes').catch(async e=>{console.log('Activation status:',await director.page.locator('#status').innerText());throw e;});
   await director.page.locator('#invitationForm').waitFor({state:'visible'});
+  assert.match(await director.page.locator('#selfState').innerText(),/Ta clé de direction est active/);
+  assert.equal(await director.page.locator('#person option[value="1"]').count(),0);
   await director.page.locator('#person').selectOption('2');await director.page.locator('#reason').fill('Identité fictive vérifiée pour cet essai isolé');await director.page.locator('#verified').check();
   await director.page.locator('#invitationForm button').click();await director.page.locator('#result').waitFor({state:'visible'});
   const invitation=await director.page.locator('#activationLink').getAttribute('href');assert.ok(invitation.includes('#activation='));

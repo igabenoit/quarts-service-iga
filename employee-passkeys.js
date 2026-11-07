@@ -138,14 +138,14 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
       await log(c,p.id,'employee:'+p.id,'authenticated');return createSession(c,p,k.id,f.shared);
     });sessionCookie(res,s);res.json({ok:true,shared:f.shared});
   }));
-  app.get('/api/employee-passkeys/admin',requireManager,admin,endpoint(async(_req,res)=>{
+  app.get('/api/employee-passkeys/admin',requireManager,admin,endpoint(async(req,res)=>{
     const people=(await pool.query(`SELECT p.id,p.name,p.employee_code AS matricule,
       COALESCE(u.required,FALSE) AS required,
       (SELECT count(*)::int FROM schedule_passkey_credentials k WHERE k.person_id=p.id AND k.revoked_at IS NULL) AS keys,
       (SELECT expires_at FROM schedule_passkey_invitations i WHERE i.person_id=p.id AND i.used_at IS NULL AND i.expires_at>clock_timestamp() LIMIT 1) AS invitation
       FROM schedule_store_people p LEFT JOIN schedule_employees e ON e.id=p.service_employee_id LEFT JOIN schedule_passkey_users u ON u.person_id=p.id
       WHERE p.id IN (SELECT id FROM (${activePerson}) active_people) ORDER BY p.name,p.id`)).rows;
-    res.json({people});
+    res.json({people,currentPerson:{id:Number(req.passkeyAdmin.id),name:req.passkeyAdmin.name}});
   }));
   app.post('/api/employee-passkeys/admin/invitations',requireManager,checkOrigin,admin,endpoint(async(req,res)=>{
     const b=req.body, id=personId(b?.personId);

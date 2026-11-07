@@ -25,6 +25,10 @@ test('passkeys: enrollment, real signatures, ownership, recovery and session bou
     await t.test('direction cannot enroll anyone with shared admin code alone',async()=>{
       assert.equal((await call('admin/invitations',{personId:2,identityConfirmed:true,reason:'Identité vérifiée en personne',recover:false},admin)).status,403);
       director=await register(await bootstrap(1));
+      const identity=ok(await f.call('GET','/api/employee-passkeys/admin',{cookie:admin+'; '+director.cookie}));
+      assert.deepEqual(identity.body.currentPerson,{id:1,name:'Direction fictive'});
+      assert.equal((await call('admin/invitations',{personId:1,identityConfirmed:true,reason:'Essai de récupération de soi-même',recover:true},admin+'; '+director.cookie)).status,400);
+      assert.equal((await f.query('SELECT count(*)::int AS n FROM schedule_passkey_credentials WHERE person_id=1 AND revoked_at IS NULL')).rows[0].n,1);
       const r=ok(await call('admin/invitations',{personId:2,identityConfirmed:true,reason:'Identité vérifiée en personne',recover:false},admin+'; '+director.cookie));
       secret=new URLSearchParams(new URL(r.body.url).hash.slice(1)).get('activation');
       assert.equal((await f.query('SELECT count(*)::int AS n FROM schedule_passkey_audit WHERE person_id=2 AND actor=$1',['direction:1'])).rows[0].n,1);
