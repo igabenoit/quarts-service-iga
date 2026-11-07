@@ -9,7 +9,7 @@ const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab]
 export function normalizeSST(body){
  if(!SST_KINDS.includes(body?.kind)||!['draft','open','progress','done'].includes(body?.status)||typeof body.title!=='string'||!body.title.trim()||body.title.length>180)fail('Indiquez le type, le titre et le statut du dossier.');
  const fields={};for(const key of ['meetingType','trainer','participants','location','model','serial','procedure','findings','reportedFacts','analysis','verification','outcome','reference']){if(body.fields?.[key]!==undefined){if(typeof body.fields[key]!=='string'||body.fields[key].length>6000)fail('Un renseignement est trop long.');fields[key]=body.fields[key].trim();}}
- if(fields.meetingType&&!['Comité SST','Réunion SST'].includes(fields.meetingType))fail('Choisissez Comité SST ou Réunion SST.');
+ if(fields.meetingType&&!['Comité SST','Réunion SST','Réunion SIMDUT'].includes(fields.meetingType))fail('Choisissez Comité SST, Réunion SST ou Réunion SIMDUT.');
  const eventDate=day(body.eventDate),dueDate=day(body.dueDate);
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  if(body.status==='done'&&['training','action','meeting','inspection','incident'].includes(body.kind)&&(!eventDate||eventDate>today))fail('Pour un dossier réalisé ou fermé, indiquez une date réelle qui n’est pas dans le futur.');
