@@ -4,7 +4,7 @@ nav.manager-nav{display:block;width:100%;min-width:0;margin:0 0 28px;padding:18p
 .manager-nav .manager-nav__name{font-size:15px;font-weight:700;overflow-wrap:anywhere}
 .manager-nav .manager-nav__menu{margin:0;padding:0;border:0;background:none}
 .manager-nav .manager-nav__menu>summary{display:none}
-.manager-nav .manager-nav__links{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.manager-nav .manager-nav__links{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));grid-auto-rows:minmax(60px,1fr);gap:10px}
 .manager-nav a.manager-nav__link{display:flex;align-items:center;justify-content:flex-start;min-width:0;min-height:44px;box-sizing:border-box;padding:10px 14px;border:1px solid #dce5df;border-radius:8px;background:#f7f9f6;color:#294f42;font:inherit;font-weight:600;text-decoration:none;overflow-wrap:anywhere;transition:background .15s,border-color .15s}
 .manager-nav a.manager-nav__link:hover{background:#eaf1e9;border-color:#a9bfb0}
 .manager-nav a.manager-nav__link[aria-current=page]{background:#195644;border-color:#195644;color:white}

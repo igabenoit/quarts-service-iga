@@ -161,6 +161,23 @@
 .plano-preview-pages .plano-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid #cbd3d9; color: #66717b; font-size: 10px; }
 
 #undoStatus { display: block; flex-basis: 100%; font-size: .8rem; color: #5b6470; }
+
+/* Match the Service shortcuts to the shared portal navigation. */
+@media screen {
+ #appView>.app-header{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;align-items:center}
+ #appView>.app-header>.header-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:stretch;min-width:0;width:100%}
+ #appView .header-actions>a:not([hidden]),#appView .header-actions>button:not([hidden]){display:flex;align-items:center;justify-content:flex-start;min-width:0;min-height:60px;margin:0;padding:12px 14px;border:1px solid #dce5df;border-radius:8px;background:#f7f9f6;color:#294f42;font:600 14px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;text-decoration:none;overflow-wrap:anywhere;transition:background .15s,border-color .15s}
+ #appView .header-actions>a:hover,#appView .header-actions>button:enabled:hover{background:#eaf1e9;border-color:#a9bfb0}
+ #appView .header-actions>a:focus-visible,#appView .header-actions>button:focus-visible{outline:3px solid #c18f25;outline-offset:3px}
+ #appView .header-actions>button:disabled{opacity:.5;cursor:not-allowed}
+ #appView .header-actions>#logoutBtn{background:white;color:#52645b}
+ #appView .header-actions>#logoutBtn:hover{background:#fff1ef;border-color:#e4c0b8;color:#93392f}
+ #appView .header-actions>#undoStatus{grid-column:1/-1;order:1;margin:0;font:13px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#64736c}
+ #appView .header-actions>#undoStatus:empty{display:none}
+ @media(max-width:900px){#appView>.app-header{grid-template-columns:1fr;gap:20px}}
+ @media(max-width:640px){#appView>.app-header>.header-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}#appView .header-actions>a:not([hidden]),#appView .header-actions>button:not([hidden]){padding:10px;font-size:13px}}
+ @media(max-width:340px){#appView>.app-header>.header-actions{grid-template-columns:1fr}}
+}
 #permanentAvailabilityWarnings:empty{display:none}#permanentAvailabilityWarnings:not(:empty){padding:16px;margin:16px 0;background:#fff0d5;border:1px solid #d2a854;border-radius:10px}#permanentAvailabilityWarnings li{margin:6px 0}#employeeAvailabilityStatus{font-size:.9rem;line-height:1.5;color:#5b655e}
 
 .plano-role{display:block;font-size:.8em;font-weight:400}
