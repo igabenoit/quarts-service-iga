@@ -19,6 +19,10 @@ export function validateTrainingEntry(body,context){
  d.enteredBy=enteredBy;
  const document=id=>{const doc=documents.find(x=>x.id===id&&!x.archived_at);if(!doc)fail('Choisissez un original accessible dans la bibliothèque.');return doc;};
  const procedure=id=>{const p=entries.find(x=>x.id===id&&x.kind==='procedure'&&x.equipment_id===equipment.id);if(!p||tasks.some(t=>!p.data.tasks.includes(t)))fail('Choisissez une procédure approuvée couvrant les tâches de cet équipement.');if(!equipment.fields?.model||p.data.model!==equipment.fields.model)fail('Le modèle de l’équipement diffère de la procédure. Vérifiez la fiche équipement.');return p;};
+ if(kind==='preparation'){
+  if(employeeKeys.length!==1||tasks.length!==1)fail('Une fiche porte sur une personne et une tâche.');
+  Object.assign(d,{date:'',trainer:text(b.trainer||'','formateur prévu',120,false),content:text(b.content||'','préparation',6000,false),reference:text(b.reference||'','référence à obtenir ou à vérifier',1000,false)});
+ }
  if(kind==='assignment'){
   if(typeof b.active!=='boolean'||typeof b.replacement!=='boolean')fail('Précisez l’affectation et le remplacement.');
   Object.assign(d,{active:b.active,replacement:b.replacement,date:past(b.date),reason:text(b.reason||'','motif',1000,false)});
@@ -43,7 +47,10 @@ export function validateTrainingEntry(body,context){
   const p=procedure(b.procedureId);
   if(!Array.isArray(b.attendance)||b.attendance.length!==employeeKeys.length||new Set(b.attendance.map(x=>x.employeeKey)).size!==employeeKeys.length)fail('Confirmez chaque présence séparément.');
   const attendance=b.attendance.map(x=>{if(!employeeKeys.includes(x.employeeKey)||!['confirmed','unconfirmed','absent'].includes(x.status))fail('Présence invalide.');return {employeeKey:x.employeeKey,status:x.status,confirmedBy:x.status==='confirmed'?text(x.confirmedBy,'personne confirmant la présence',120):'',note:text(x.note||'','note de présence',1000,false)};});
-  Object.assign(d,{date:past(b.date),trainer:text(b.trainer,'formateur',120),content:text(b.content,'contenu enseigné',6000),procedureId:p.id,attendance});
+  const acknowledgements=Array.isArray(b.acknowledgements)?b.acknowledgements:[];
+  if(acknowledgements.length>employeeKeys.length||new Set(acknowledgements.map(x=>x.employeeKey)).size!==acknowledgements.length)fail('Confirmations invalides.');
+  const confirmations=acknowledgements.map(x=>{if(!employeeKeys.includes(x.employeeKey)||x.confirmed!==true||!attendance.some(a=>a.employeeKey===x.employeeKey&&a.status==='confirmed'))fail('La confirmation exige une présence confirmée.');const date= past(x.date);if(date<b.date)fail('La confirmation ne peut pas précéder la formation.');return {employeeKey:x.employeeKey,confirmed:true,date,collectedBy:text(x.collectedBy,'personne recueillant la confirmation',120)};});
+  Object.assign(d,{date:past(b.date),trainer:text(b.trainer,'formateur',120),content:text(b.content,'contenu enseigné',6000),procedureId:p.id,attendance,...(confirmations.length?{acknowledgements:confirmations}:{})});
  }
  if(kind==='observation'){
   if(tasks.length!==1||employeeKeys.length!==1)fail('Une observation porte sur une personne et une tâche.');
@@ -106,4 +113,3 @@ export async function installEquipmentTraining(app,pool,service){
   const db=await pool.connect();try{await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const entries=await read(db),documents=await docs(db),equipment=(await db.query("SELECT id,title,fields,department_id FROM sst_records WHERE kind='equipment'")).rows;if(equipmentId&&!equipment.some(e=>e.id===equipmentId))fail('Équipement introuvable.');const report=buildTrainingReport(entries,documents,{cutoff,equipmentId,employeeKey});await db.query('COMMIT');res.json({...report,...dir,equipment});}catch(e){await db.query('ROLLBACK');throw e}finally{db.release();}
  }));
 }
-

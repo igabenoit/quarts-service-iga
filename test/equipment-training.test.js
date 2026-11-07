@@ -45,6 +45,7 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
    for(const p of ['equipment-training','equipment-training/report?equipmentId='+equipmentId+'&cutoff=2026-11-01','documents/'+documentId,'export'])assert.equal((await f.call('GET','/api/sst/'+p,{cookie:m.cookie})).status,403);
   });
   const now=localDay(new Date()),cutoff=localDay(new Date(Date.now()-86400000));
+  const draft=await entry('preparation',{trainer:'Formateur fictif',content:'Préparer la démonstration',reference:'Manuel à confirmer'});assert.equal(draft.status,201,JSON.stringify(draft.body));assert.equal(draft.body.entry.data.date,'');
   assert.equal((await entry('assignment',{tasks:['Utilisation','Nettoyage'],active:true,replacement:false,date:now})).status,201);
   assert.equal((await entry('assignment',{employeeKeys:[replacement.key],tasks:['Nettoyage'],active:true,replacement:true,date:now})).status,201);
   assert.equal((await entry('evidence',{documentId,date:'2026-01-10',provenance:'Campus Alimentor fictif',module:'Utilisation seulement',uncertainty:''})).status,201);
@@ -52,7 +53,8 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   const confirmation=await entry('confirmation',{testimonyId:testimony.body.entry.id,declarant:'Employé fictif formation',method:'read_back',confirmed:true});assert.equal(confirmation.status,201,JSON.stringify(confirmation.body));
   s=(await call('GET','equipment-training')).body;let rows=registerRows(s.entries);assert.equal(rows.find(r=>r.employeeKey===person.key&&r.task==='Nettoyage').result,'À vérifier');assert.equal(rows.find(r=>r.employeeKey===replacement.key).documents.length,0);
   const p=await entry('procedure',{employeeKeys:[],tasks:['Utilisation','Nettoyage'],documentId,model:'Modèle fictif T1',title:'Procédure FICTIVE',version:'Test 1',approvedBy:'Approbateur fictif',date:now,approved:true,criteria:[{task:'Utilisation',text:'Critère utilisation fictif',reference:'Page test 1'},{task:'Nettoyage',text:'Critère nettoyage fictif',reference:'Page test 2'}]});assert.equal(p.status,201,JSON.stringify(p.body));const procedureId=p.body.entry.id;
-  const session=await entry('session',{employeeKeys:[person.key,replacement.key],tasks:['Utilisation'],date:now,trainer:'Formateur fictif',procedureId,content:'Contenu utilisation uniquement',attendance:[{employeeKey:person.key,status:'confirmed',confirmedBy:'Formateur fictif'},{employeeKey:replacement.key,status:'unconfirmed'}]});assert.equal(session.status,201,JSON.stringify(session.body));
+  const badConfirmation=await entry('session',{date:now,trainer:'Test',procedureId,content:'Test',attendance:[{employeeKey:person.key,status:'unconfirmed'}],acknowledgements:[{employeeKey:person.key,confirmed:true,date:now,collectedBy:'Test'}]});assert.equal(badConfirmation.status,400);
+  const session=await entry('session',{employeeKeys:[person.key,replacement.key],tasks:['Utilisation'],date:now,trainer:'Formateur fictif',procedureId,content:'Contenu utilisation uniquement',attendance:[{employeeKey:person.key,status:'confirmed',confirmedBy:'Formateur fictif'},{employeeKey:replacement.key,status:'unconfirmed'}],acknowledgements:[{employeeKey:person.key,confirmed:true,date:now,collectedBy:'Formateur fictif'}]});assert.equal(session.status,201,JSON.stringify(session.body));
   const pre=(await call('GET',`equipment-training/report?equipmentId=${equipmentId}&cutoff=${cutoff}`)).body;
   const obsData={tasks:['Nettoyage'],date:now,supervisor:'Superviseur fictif',procedureId,points:[{id:'2',result:'review',note:'Écart fictif'}],note:'Test isolé',immediate:'Mesure fictive immédiate',owner:'Responsable fictif',dueDate:now};
   assert.equal((await entry('observation',{...obsData,immediate:''})).status,400);
@@ -73,4 +75,3 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   await f.stop();await f.start();assert.equal((await call('GET','equipment-training')).body.entries.length,backup.body.equipmentTrainingEntries.length);
  }finally{await f.close();}
 });
-
