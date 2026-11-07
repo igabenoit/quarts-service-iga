@@ -1,6 +1,7 @@
 import {isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
 import {buildTrainingReport,entryLabels,localDay} from './public/equipment-training-model.js';
+import {normalizeTrainingSignatures} from './public/training-form-schema.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(v);
@@ -19,6 +20,25 @@ export function validateTrainingEntry(body,context){
  d.enteredBy=enteredBy;
  const document=id=>{const doc=documents.find(x=>x.id===id&&!x.archived_at);if(!doc)fail('Choisissez un original accessible dans la bibliothèque.');return doc;};
  const procedure=id=>{const p=entries.find(x=>x.id===id&&x.kind==='procedure'&&x.equipment_id===equipment.id);if(!p||tasks.some(t=>!p.data.tasks.includes(t)))fail('Choisissez une procédure approuvée couvrant les tâches de cet équipement.');if(!equipment.fields?.model||p.data.model!==equipment.fields.model)fail('Le modèle de l’équipement diffère de la procédure. Vérifiez la fiche équipement.');return p;};
+ if(kind==='training_form'){
+  if(tasks.length!==1||employeeKeys.length!==1)fail('Un formulaire porte sur une personne et une tâche.');
+  if(!['draft','completed'].includes(b.status))fail('État du formulaire invalide.');
+  const completed=b.status==='completed',signatures=normalizeTrainingSignatures(b.signatures);
+  for(const k of ['explained','demonstrated','practiced','questions']){if(typeof b[k]!=='boolean')fail('Cochez les activités réalisées.');d[k]=b[k];}
+  Object.assign(d,{status:b.status,date:b.date?past(b.date):'',trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:b.observationDate?past(b.observationDate):'',supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:b.employeeDate?past(b.employeeDate):'',trainerDate:b.trainerDate?past(b.trainerDate):''});
+  if(completed&&!d.date)fail('Indiquez la date réelle de formation.');
+  for(const [key,date] of [['employee',d.employeeDate],['trainer',d.trainerDate]]){
+   if(completed&&!signatures[key].length)fail('Les deux signatures sont requises pour finaliser.');
+   if(signatures[key].length&&(!date||!d.date||date<d.date))fail('Date de signature requise, au plus tôt à la date de formation.');
+  }
+  if(b.procedureId){const p=procedure(b.procedureId),criteria=p.data.criteria.filter(c=>c.task===tasks[0]);
+   if(!Array.isArray(b.points)||b.points.length!==criteria.length||new Set(b.points.map(x=>x.id)).size!==criteria.length)fail('Renseignez tous les critères de cette procédure.');
+   d.procedureId=p.id;d.points=criteria.map(c=>{const x=b.points.find(x=>x.id===c.id);if(!x||!['ok','review','unobserved'].includes(x.result))fail('Résultat pratique invalide.');return {...c,result:x.result,note:text(x.note||'','note',1500,false)};});
+   if(d.points.some(x=>x.result!=='unobserved')&&(!d.observationDate||!d.supervisor))fail('Date réelle et superviseur requis pour les points observés.');
+   if(d.points.some(x=>x.result==='review')&&(!d.immediate||!d.owner||!d.dueDate))fail('Précisez la mesure immédiate, le responsable et la date de suivi.');
+   if(completed&&d.points.some(x=>x.result!=='unobserved')&&[d.employeeDate,d.trainerDate].some(date=>date<d.observationDate))fail('Les signatures doivent suivre les observations consignées.');
+  }else if(b.points?.length)fail('Les critères pratiques exigent une procédure approuvée pour ce modèle.');
+ }
  if(kind==='preparation'){
   if(employeeKeys.length!==1||tasks.length!==1)fail('Une fiche porte sur une personne et une tâche.');
   Object.assign(d,{date:'',trainer:text(b.trainer||'','formateur prévu',120,false),content:text(b.content||'','préparation',6000,false),reference:text(b.reference||'','référence à obtenir ou à vérifier',1000,false)});
@@ -67,7 +87,7 @@ export function validateTrainingEntry(body,context){
   Object.assign(d,{testimonyId:target.id,declarant:target.data.declarant,method:b.method,confirmed:true,statementHash:createHash('sha256').update(target.data.statement).digest('hex'),date:localDay(new Date())});
  }
  if(kind==='followup'){
-  const target=entries.find(e=>e.id===b.observationId&&e.kind==='observation');if(!target||target.equipment_id!==equipment.id||JSON.stringify(tasks)!==JSON.stringify(target.data.tasks)||JSON.stringify(employeeKeys)!==JSON.stringify(target.data.employeeKeys)||!target.data.points.some(x=>x.result==='review'))fail('Observation avec écart introuvable.');
+  const target=entries.find(e=>e.id===b.observationId&&(e.kind==='observation'||e.kind==='training_form'&&e.data.status==='completed'));if(!target||target.equipment_id!==equipment.id||JSON.stringify(tasks)!==JSON.stringify(target.data.tasks)||JSON.stringify(employeeKeys)!==JSON.stringify(target.data.employeeKeys)||!target.data.points.some(x=>x.result==='review'))fail('Observation avec écart introuvable.');
   Object.assign(d,{observationId:target.id,date:past(b.date),action:text(b.action,'mesure réalisée',3000),verification:text(b.verification,'vérification du suivi',3000),owner:text(b.owner,'responsable',120)});
  }
  return {kind,data:d};
@@ -98,7 +118,7 @@ export async function installEquipmentTraining(app,pool,service){
    const v=validateTrainingEntry(b,{equipment,employees:dir.employees,entries,documents:await docs(db)});
    const duplicate=entries.find(e=>e.id===b.id);
    if(duplicate){if(duplicate.kind!==v.kind||duplicate.equipment_id!==b.equipmentId||!isDeepStrictEqual(duplicate.data,v.data)||duplicate.supersedes!==(b.supersedes||null)||duplicate.correction_reason!==(b.correctionReason||'').trim())fail('Identifiant déjà utilisé pour une autre saisie.',409);await db.query('COMMIT');return res.json({entry:duplicate,replayed:true});}
-   let reason='';if(b.supersedes){const prior=entries.find(e=>e.id===b.supersedes);if(!prior||prior.kind!==v.kind||prior.equipment_id!==b.equipmentId)fail('Original introuvable.');if(entries.some(e=>e.supersedes===prior.id))fail('Cette entrée a déjà été corrigée. Rechargez le registre.',409);if(['procedure','confirmation','assignment'].includes(v.kind))fail('Ajoutez une nouvelle version ou une nouvelle affectation.');if(JSON.stringify(prior.data.tasks)!==JSON.stringify(v.data.tasks)||JSON.stringify(prior.data.employeeKeys)!==JSON.stringify(v.data.employeeKeys))fail('Une correction conserve les personnes et tâches originales.');reason=text(b.correctionReason,'motif de correction',2000);}
+   let reason='';if(b.supersedes){const prior=entries.find(e=>e.id===b.supersedes);if(!prior||prior.kind!==v.kind||prior.equipment_id!==b.equipmentId)fail('Original introuvable.');if(entries.some(e=>e.supersedes===prior.id))fail('Cette entrée a déjà été corrigée. Rechargez le registre.',409);if(['procedure','confirmation','assignment'].includes(v.kind))fail('Ajoutez une nouvelle version ou une nouvelle affectation.');if(JSON.stringify(prior.data.tasks)!==JSON.stringify(v.data.tasks)||JSON.stringify(prior.data.employeeKeys)!==JSON.stringify(v.data.employeeKeys))fail('Une correction conserve les personnes et tâches originales.');if(v.kind==='training_form'){const clean=x=>Object.fromEntries(Object.entries(x).filter(([k])=>!['signatures','status','enteredBy'].includes(k)));if(!isDeepStrictEqual(clean(prior.data),clean(v.data)))for(const key of ['employee','trainer'])if(v.data.signatures[key].length&&isDeepStrictEqual(v.data.signatures[key],prior.data.signatures[key]))fail('Le contenu a changé : recueillez de nouvelles signatures.');}reason=text(b.correctionReason,'motif de correction',2000);}
    const actor=req.sstIdentity||{kind:'admin',name:req.sstActor};
    const entry=(await db.query('INSERT INTO sst_training_entries(id,equipment_id,kind,data,actor,supersedes,correction_reason) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[b.id,b.equipmentId,v.kind,JSON.stringify(v.data),JSON.stringify(actor),b.supersedes||null,reason])).rows[0];
    await db.query('INSERT INTO sst_events(record_id,actor,action,before_value,after_value) VALUES($1,$2,$3,$4,$5)',[b.equipmentId,req.sstActor,b.supersedes?'equipment_training.corrected':'equipment_training.'+v.kind,b.supersedes?JSON.stringify(entries.find(e=>e.id===b.supersedes)):null,JSON.stringify(entry)]);

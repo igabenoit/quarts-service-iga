@@ -1,3 +1,4 @@
+import {emptyTrainingForm} from '../public/training-form-schema.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
@@ -71,6 +72,21 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   assert.equal((await entry('observation',obsData,{supersedes:obs.body.entry.id,correctionReason:'Tentative concurrente'})).status,409);
   const follow=await entry('followup',{tasks:['Nettoyage'],observationId:corrected.body.entry.id,date:now,action:'Mesure fictive réalisée',verification:'Vérification fictive',owner:'Responsable fictif'});assert.equal(follow.status,201,JSON.stringify(follow.body));
   const final=(await call('GET',`equipment-training/report?employeeKey=${person.key}&cutoff=${cutoff}`)).body;assert.equal(final.open.length,0);assert.ok(final.entries.some(e=>e.id===obs.body.entry.id));assert.ok(final.entries.some(e=>e.supersedes===obs.body.entry.id));
+  await t.test('formulaire signé : brouillon, signatures, correction et pratique séparée',async()=>{
+   const form={...emptyTrainingForm(),date:now,trainer:'Formateur fictif',content:'Explications réellement données en test',reference:'Méthode fictive décrite',employeeDate:now,trainerDate:now,signatures:{employee:[[[100,100],[200,200]]],trainer:[[[300,300],[400,400]]]}};
+   const signed=await entry('training_form',{...form,status:'completed'});assert.equal(signed.status,201,JSON.stringify(signed.body));
+   assert.equal(registerRows((await call('GET','equipment-training')).body.entries).find(r=>r.employeeKey===person.key&&r.task==='Utilisation').result,'À vérifier','Les signatures seules ne valident pas la pratique');
+   assert.equal((await entry('training_form',{...form,status:'completed',signatures:{employee:[],trainer:[]}})).status,400);
+   assert.equal((await entry('training_form',{...form,signatures:{employee:[[[NaN,0]]],trainer:[]}})).status,400);
+   assert.equal((await entry('training_form',{...form,status:'completed',content:'Texte modifié'},{supersedes:signed.body.entry.id,correctionReason:'Modification test'})).status,400,'Pas de report des signatures sur un contenu changé');
+   const correction=await entry('training_form',{...form,status:'draft',content:'Texte modifié',signatures:{employee:[],trainer:[]}},{supersedes:signed.body.entry.id,correctionReason:'Modification test'});assert.equal(correction.status,201);
+   const withPractice={...form,status:'completed',procedureId,points:[{id:'1',result:'ok',note:'Observation fictive'}],observationDate:now,supervisor:'Superviseur fictif'};
+   const practical=await entry('training_form',withPractice);assert.equal(practical.status,201,JSON.stringify(practical.body));
+   const current=(await call('GET',`equipment-training/report?employeeKey=${person.key}&cutoff=${cutoff}`)).body;
+   assert.equal(current.current.find(r=>r.task==='Utilisation').result,'Points observés satisfaisants');assert.deepEqual(current.beforeState,final.beforeState);
+   assert.equal((await entry('training_form',{...withPractice,procedureId:'',points:[{id:'1',result:'ok'}]})).status,400);
+   assert.equal((await entry('training_form',{...withPractice,points:[{id:'1',result:'review'}]})).status,400,'Suivi obligatoire pour un écart');
+  });
   const backup=await call('GET','export');assert.equal(backup.status,200,JSON.stringify(backup.body));assert.equal(backup.body.equipmentTrainingEntries.length,(await call('GET','equipment-training')).body.entries.length);assert.equal(backup.body.documents.find(d=>d.id===documentId).sha256,createHash('sha256').update(binary).digest('hex'));
   await f.stop();await f.start();assert.equal((await call('GET','equipment-training')).body.entries.length,backup.body.equipmentTrainingEntries.length);
  }finally{await f.close();}
