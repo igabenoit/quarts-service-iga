@@ -1,3 +1,4 @@
+import './direction-entry.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labels={general:'Général',sst:'SST',rh:'RH',payroll:'Paie',medical:'Médical'},statuses={missing:'À remplir',draft:'Brouillon',review:'À examiner',signed:'Confirmé par l’employé',filed:'Classé après vérification',superseded:'Version antérieure'},views={employe:'Employé',gerant:'Gérant',direction:'Direction / RH',sst:'Responsable SST'};
 let state,view=new URLSearchParams(location.search).get('vue')||'gestion',search='',department='',currentPerson='',preview=null,dialogDirty=false;

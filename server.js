@@ -243,7 +243,13 @@ async function requireManager(request, response, next) {
   catch(error) { response.status(error.status||500).json({error:error.status?error.message:'Impossible de vérifier l’accès.'}); }
 }
 startupPhase('schema_manager_access');
-const managerAccess=await installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production});
+// Production direction access always requires a named, verified passkey session.
+// A stale shared-code cookie must never confer authority, including in SST and RH.
+const directionPasskeysRequired=production||process.env.DIRECTION_PASSKEY_REQUIRED==='yes';
+if(directionPasskeysRequired&&(!['pilot','required'].includes(process.env.EMPLOYEE_PASSKEY_MODE)||!process.env.EMPLOYEE_PASSKEY_ADMIN_IDS))throw Error('Direction passkey configuration is required');
+const managerAccess=await installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,
+  allowLegacyAdmin:!directionPasskeysRequired,
+  directionIdentity:req=>employeePortal.directionIdentity(req)});
 function sameOrigin(request, response, next) {
   const origin = request.get("origin");
   if (origin && new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Requête refusée." });
@@ -650,6 +656,7 @@ app.get("/conges-test", (_req,res)=>res.sendFile("conges.html",{root:"public"}))
 
 installHealth(app,pool);
 app.post("/api/login", sameOrigin, (request, response) => {
+  if(directionPasskeysRequired)return response.status(401).json({error:'L’accès direction exige votre clé personnelle. Le code maître ne donne plus accès au portail.',passkeyRequired:true,path:'/connexion-employe?retour=%2F'});
   const ip = request.ip || "unknown";
   const now = Date.now();
   const entry = attempts.get(ip) || { count: 0, since: now };
@@ -663,9 +670,12 @@ app.post("/api/login", sameOrigin, (request, response) => {
   response.setHeader("Set-Cookie", `schedule_session=${encodeURIComponent(issueSession())}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${production ? "; Secure" : ""}`);
   response.json({ role: "manager" });
 });
-app.post("/api/logout", sameOrigin, (_request, response) => {
-  response.setHeader("Set-Cookie", `schedule_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${production ? "; Secure" : ""}`);
-  response.json({ ok: true });
+app.post("/api/logout", sameOrigin, async (request, response) => {
+  try {
+    await employeePortal.logout(request,response);
+    response.append("Set-Cookie", `schedule_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${production ? "; Secure" : ""}`);
+    response.json({ ok: true });
+  } catch { response.status(503).json({error:'Déconnexion non confirmée. Réessayez.'}); }
 });
 app.get("/api/session", async (request, response) => {
   try { const user=await managerAccess.identity(request);const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];if(user)user.serviceAccess=user.kind==='admin'||user.departments.includes(Number(service?.id));response.set('Cache-Control','no-store').json({role:user?'manager':null,user}); }

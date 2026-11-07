@@ -14,7 +14,7 @@ test('individual accounts: administration, department boundaries, revocation and
   // Test-only sessions replace signature verification, which remains in server.js.
   const readSession=req=>{try{const session=JSON.parse(req.headers['x-test-session']||'null');return session?.role==='manager'||session?.accountId?session:null;}catch{return null;}};
   const origin=(req,res,next)=>req.headers.origin&&req.headers.origin!=='https://same.example'?res.status(403).json({error:'origin'}):next();
-  const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true,credentialSecret:'test-only-secret-for-recoverable-passwords'});
+  const access=await installManagerAccess(app,f.pool,{readSession,issueSession:JSON.stringify,sameOrigin:origin,production:true,allowLegacyAdmin:true,credentialSecret:'test-only-secret-for-recoverable-passwords'});
   await access.installEmployeeLinks();await access.installEmployeeLinks();
   const guard=async(req,res,next)=>{try{await access.authorize(req);next();}catch(e){res.status(e.status||500).json({error:e.message});}};
   for(const [key,handlers] of f.routes){const space=key.indexOf(' '),method=key.slice(0,space),path=key.slice(space+1);if(path.startsWith('/api/departments')||path.startsWith('/api/leave/'))app[method](path,guard,handlers.at(-1));}

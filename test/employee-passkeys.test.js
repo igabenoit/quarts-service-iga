@@ -127,6 +127,6 @@ test('required mode rejects every matricule-only login, including public schedul
     for(const path of ['/api/employee-portal/access','/api/public-schedules/fictitious/access']){
       const r=await f.call('POST',path,{body:{code:'001234'}});assert.equal(r.status,401);assert.equal(r.body.passkeyRequired,true);
     }
-    assert.deepEqual((await f.call('GET','/api/employee-passkeys/config')).body,{enabled:true,required:true});
+    assert.deepEqual((await f.call('GET','/api/employee-passkeys/config')).body,{enabled:true,required:true,directionRequired:false});
   }finally{await f.close();}
 });

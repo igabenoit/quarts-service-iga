@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import QRCode from 'qrcode';
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import {token,digest,fail,activePerson,transaction,installPasskeySchema,invite,log,requireMatricule} from './passkey-store.js';
 
@@ -53,7 +54,9 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     if(!inv)fail('Lien expiré ou déjà utilisé. Demandez un nouveau lien à la direction.');
     const p=(await c.query(activePerson+' AND p.id=$1'+(lock?' FOR UPDATE OF p':''),[inv.person_id])).rows[0];
     const fresh=(await c.query('SELECT * FROM schedule_passkey_invitations WHERE hash=$1 AND used_at IS NULL AND expires_at>clock_timestamp()',[hash])).rows[0];
-    if(!p||!fresh||p.access_version!==inv.access_version)fail('Lien expiré ou accès retiré.');await requireMatricule(c,p);return p;
+    if(!p||!fresh||p.access_version!==inv.access_version)fail('Lien expiré ou accès retiré.');
+    if(fresh.add_device&&!(await c.query('SELECT id FROM schedule_passkey_credentials WHERE id=$1 AND person_id=$2 AND revoked_at IS NULL',[fresh.authorized_credential_id,p.id])).rows.length)fail('La clé ayant autorisé cet appareil n’est plus active.');
+    await requireMatricule(c,p);return {...p,addingDevice:fresh.add_device};
   }
   async function createSession(c,p,key,shared){
     const secret=token(),seconds=shared?1800:43200;
@@ -64,14 +67,24 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
   function sessionCookie(res,s){setCookie(res,'employee_portal','pk_'+s.secret,s.seconds);}
   async function sessionIdentity(req){
     const value=cookie(req,'employee_portal');if(!value.startsWith('pk_')||!validToken(value.slice(3)))return null;
-    const row=(await pool.query(`SELECT s.person_id,s.created_at,s.shared FROM schedule_passkey_sessions s,
+    const row=(await pool.query(`SELECT s.person_id,s.created_at,s.shared,s.credential_id FROM schedule_passkey_sessions s,
       schedule_store_people p,schedule_passkey_credentials k
       WHERE s.hash=$1 AND p.id=s.person_id AND k.id=s.credential_id AND k.revoked_at IS NULL
       AND p.access_version=s.access_version AND s.expires_at>clock_timestamp()
       AND s.last_seen_at>clock_timestamp()-(CASE WHEN s.shared THEN interval '5 minutes' ELSE interval '2 hours' END)`,[digest(value.slice(3))])).rows[0];
     if(!row)return null;
     const p=(await pool.query(activePerson+' AND p.id=$1',[row.person_id])).rows[0];
-    return p?{...p,authentication:'passkey',authenticatedAt:row.created_at,sharedDevice:row.shared}:null;
+    return p?{...p,authentication:'passkey',authenticatedAt:row.created_at,sharedDevice:row.shared,credentialId:row.credential_id}:null;
+  }
+  async function directionIdentity(req){
+    if(!enabled)return null;
+    const p=await sessionIdentity(req);
+    return p&&admins.includes(Number(p.id))?{kind:'admin',id:Number(p.id),personId:Number(p.id),name:p.name,authentication:'passkey'}:null;
+  }
+  async function logout(req,res){
+    const secret=cookie(req,'employee_portal');
+    if(secret.startsWith('pk_')&&validToken(secret.slice(3)))await pool.query('DELETE FROM schedule_passkey_sessions WHERE hash=$1',[digest(secret.slice(3))]);
+    setCookie(res,'employee_portal','',0);
   }
   async function blocksLegacy(id){
     if(mode==='required')return true;
@@ -87,7 +100,7 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
       req.passkeyAdmin=p;res.set('Cache-Control','no-store');next();
     }catch(e){res.status(e.status||503).json({error:e.status?e.message:'Accès indisponible.'});}
   };
-  app.get('/api/employee-passkeys/config',(_req,res)=>res.set('Cache-Control','no-store').json({enabled,required:mode==='required'}));
+  app.get('/api/employee-passkeys/config',(_req,res)=>res.set('Cache-Control','no-store').json({enabled,required:mode==='required',directionRequired:process.env.NODE_ENV==='production'||process.env.DIRECTION_PASSKEY_REQUIRED==='yes'}));
   app.get('/api/employee-passkeys/session',endpoint(async(req,res)=>{const p=await sessionIdentity(req);res.json({authenticated:Boolean(p),shared:p?.sharedDevice||false});}));
   app.post('/api/employee-passkeys/activity',checkOrigin,endpoint(async(req,res)=>{
     const p=await sessionIdentity(req);if(!p)fail('Session expirée.',401);
@@ -113,9 +126,11 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
       await c.query('INSERT INTO schedule_passkey_credentials(id,person_id,public_key,counter,transports,device_type,backed_up) VALUES($1,$2,$3,$4,$5,$6,$7)',[k.id,p.id,Buffer.from(k.publicKey),k.counter,JSON.stringify((k.transports||[]).filter(t=>['internal','usb','nfc','ble','hybrid','smart-card'].includes(t))),info.credentialDeviceType,info.credentialBackedUp]);
       await c.query('UPDATE schedule_passkey_invitations SET used_at=clock_timestamp() WHERE hash=$1',[f.invitation_hash]);
       await c.query('UPDATE schedule_passkey_users SET required=TRUE WHERE person_id=$1',[p.id]);
-      await c.query('UPDATE schedule_store_people SET access_version=access_version+1 WHERE id=$1',[p.id]);p.access_version++;
-      await c.query('DELETE FROM schedule_passkey_sessions WHERE person_id=$1',[p.id]);
-      await log(c,p.id,'employee:'+p.id,'key_registered');return createSession(c,p,k.id,false);
+      if(!p.addingDevice){
+        await c.query('UPDATE schedule_store_people SET access_version=access_version+1 WHERE id=$1',[p.id]);p.access_version++;
+        await c.query('DELETE FROM schedule_passkey_sessions WHERE person_id=$1',[p.id]);
+      }
+      await log(c,p.id,'employee:'+p.id,p.addingDevice?'additional_device_registered':'key_registered');return createSession(c,p,k.id,false);
     });sessionCookie(res,s);res.json({ok:true});
   }));
   app.post('/api/employee-passkeys/authenticate/options',checkOrigin,endpoint(async(req,res)=>{
@@ -154,5 +169,14 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     const secret=await transaction(pool,c=>invite(c,{personId:id,actor:'direction:'+req.passkeyAdmin.id,reason:b.reason.trim(),recover:b.recover}));
     res.json({url:origin+'/connexion-employe#activation='+secret,expiresInMinutes:15});
   }));
-  return {sessionIdentity,blocksLegacy};
+  app.post('/api/employee-passkeys/admin/my-device',requireManager,checkOrigin,admin,endpoint(async(req,res)=>{
+    await rate(req);
+    // Derive the target and authorizing credential from the verified session, never the body.
+    const p=req.passkeyAdmin;
+    const secret=await transaction(pool,c=>invite(c,{personId:Number(p.id),actor:'direction:'+p.id,reason:'Ajout de mon appareil personnel après confirmation de ma clé existante',addDevice:true,authorizedCredentialId:p.credentialId}));
+    const url=origin+'/connexion-employe?retour=%2Fhoraires-departements%3Fvue%3Dmagasin#activation='+secret;
+    // Encode locally; the bearer link is never sent to an external QR provider.
+    res.json({url,qr:await QRCode.toDataURL(url,{width:320,margin:4,errorCorrectionLevel:'M'}),expiresInMinutes:15});
+  }));
+  return {sessionIdentity,blocksLegacy,directionIdentity,logout};
 }

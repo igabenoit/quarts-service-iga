@@ -1,4 +1,5 @@
 import {watchAccess} from './access-session.js';
+import './direction-entry.js';
 const guard=watchAccess('manager');
 const response=await fetch('/api/session',{cache:'no-store'});
 if(response.ok){

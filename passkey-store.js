@@ -23,6 +23,8 @@ export async function installPasskeySchema(pool){
   CREATE TABLE IF NOT EXISTS schedule_passkey_flows(
     hash TEXT PRIMARY KEY,kind TEXT NOT NULL,challenge TEXT NOT NULL,invitation_hash TEXT,
     shared BOOLEAN NOT NULL,expires_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()+interval '5 minutes');
+  ALTER TABLE schedule_passkey_invitations ADD COLUMN IF NOT EXISTS add_device BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE schedule_passkey_invitations ADD COLUMN IF NOT EXISTS authorized_credential_id TEXT;
   CREATE TABLE IF NOT EXISTS schedule_passkey_sessions(
     hash TEXT PRIMARY KEY,person_id BIGINT NOT NULL REFERENCES schedule_store_people(id),
     credential_id TEXT NOT NULL REFERENCES schedule_passkey_credentials(id),access_version INTEGER NOT NULL,
@@ -45,12 +47,13 @@ export async function requireMatricule(c,person){
   if(other)fail('Matricule ambigu : la direction doit corriger les fiches avant toute activation.',409);
 }
 // Caller must authenticate/authorize the approver and verify the person's identity.
-export async function invite(c,{personId,actor,reason,recover=false}){
+export async function invite(c,{personId,actor,reason,recover=false,addDevice=false,authorizedCredentialId=null}){
   const person=(await c.query(activePerson+' AND p.id=$1 FOR UPDATE OF p',[personId])).rows[0];
   if(!person)fail('Fiche principale active introuvable.',404);
   await requireMatricule(c,person);
   const keys=(await c.query('SELECT id FROM schedule_passkey_credentials WHERE person_id=$1 AND revoked_at IS NULL',[personId])).rows;
-  if(keys.length&&!recover)fail('Une clé existe déjà. Utilisez la récupération après vérification de l’identité.',409);
+  if(addDevice&&(recover||!keys.some(k=>k.id===authorizedCredentialId)))fail('Confirmez une clé existante avant d’ajouter un appareil.',403);
+  if(keys.length&&!recover&&!addDevice)fail('Une clé existe déjà. Utilisez la récupération après vérification de l’identité.',409);
   await c.query('DELETE FROM schedule_passkey_invitations WHERE person_id=$1',[personId]);
   if(recover){
     await c.query('UPDATE schedule_passkey_credentials SET revoked_at=clock_timestamp() WHERE person_id=$1 AND revoked_at IS NULL',[personId]);
@@ -62,7 +65,7 @@ export async function invite(c,{personId,actor,reason,recover=false}){
   // Recovery never re-enables matricule-only access, even before replacement enrollment.
   if(recover)await c.query('UPDATE schedule_passkey_users SET required=TRUE WHERE person_id=$1',[personId]);
   const secret=token();
-  await c.query("INSERT INTO schedule_passkey_invitations(hash,person_id,access_version,expires_at) VALUES($1,$2,$3,clock_timestamp()+interval '15 minutes')",[digest(secret),personId,person.access_version]);
-  await log(c,personId,actor,recover?'recovery_authorized':'enrollment_authorized',reason);
+  await c.query("INSERT INTO schedule_passkey_invitations(hash,person_id,access_version,expires_at,add_device,authorized_credential_id) VALUES($1,$2,$3,clock_timestamp()+interval '15 minutes',$4,$5)",[digest(secret),personId,person.access_version,addDevice,authorizedCredentialId]);
+  await log(c,personId,actor,addDevice?'additional_device_authorized':recover?'recovery_authorized':'enrollment_authorized',reason);
   return secret;
 }

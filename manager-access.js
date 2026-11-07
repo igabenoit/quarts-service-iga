@@ -18,7 +18,7 @@ export async function passwordMatches(password,encoded){
 }
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'Impossible de gérer les accès. Réessayez.'});}};
 
-export async function installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,credentialSecret=process.env.SESSION_SECRET}){
+export async function installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,credentialSecret=process.env.SESSION_SECRET,directionIdentity=async()=>null,allowLegacyAdmin=!production}){
   await pool.query(`CREATE TABLE IF NOT EXISTS schedule_manager_accounts(
     id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,login TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,
     departments JSONB NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,version INTEGER NOT NULL DEFAULT 1,
@@ -35,9 +35,11 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
   }
   const dummy=await passwordHash(crypto.randomBytes(32).toString('hex'));
   async function identity(req){
+    const direction=await directionIdentity(req);
+    if(direction)return direction;
     let session;try{session=readSession(req);}catch{return null;}
     if(!session)return null;
-    if(!session.accountId)return {kind:'admin',name:'Administration'};
+    if(!session.accountId)return allowLegacyAdmin?{kind:'admin',name:'Administration'}:null;
     const row=(await pool.query(`SELECT a.id,a.name,a.departments,a.version,a.person_id,p.access_version
       FROM schedule_manager_accounts a JOIN schedule_store_people p ON p.id=a.person_id
       WHERE a.id=$1 AND a.active AND ${activeManagerSQL()}`,[session.accountId])).rows[0];
