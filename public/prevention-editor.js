@@ -7,6 +7,10 @@ export async function mountEditor(host,doc,body,frame){
  const response=await fetch('/api/sst/prevention/'+doc.id,{cache:'no-store'});if(!response.ok)throw Error('Reconnectez-vous pour compléter le programme.');const saved=await response.json();if(!host.isConnected)return;let version=saved.version;
  const style=frame.contentDocument.createElement('style');style.textContent=`body{margin:0;background:#e5e7e5}.docx-wrapper{padding:20px!important}section.docx{margin-bottom:20px!important}[contenteditable=plaintext-only]{outline:1px dashed #9faeaa;cursor:text;min-width:30px}[contenteditable=plaintext-only]:focus{outline:2px solid #21745a}[contenteditable=plaintext-only]:empty{display:inline-block;min-width:70px;min-height:1em}td p[contenteditable=plaintext-only]:empty{display:block;min-width:0} @media print{body{background:white;zoom:1!important}.docx-wrapper{padding:0!important;background:white!important}section.docx{box-shadow:none!important;margin:0!important;break-after:page}section.docx:last-child{break-after:auto}[contenteditable]{outline:none!important}@page{margin:0}}`;frame.contentDocument.head.append(style);
  // Keep the original Word DOM and all its page styles. Only designated blanks and highlighted runs become editable.
+ // Word floating tables can exceed the text area after DOCX conversion. Scale each whole
+ // table uniformly into that area, preserving column proportions, typography and cell layout.
+ const fitTables=()=>{for(const table of body.querySelectorAll('article table')){if(table.parentElement.closest('table'))continue;const article=table.closest('article'),computed=frame.contentWindow.getComputedStyle(table);table.style.zoom='1';const width=table.offsetWidth+(parseFloat(computed.marginLeft)||0)+(parseFloat(computed.marginRight)||0);if(width>article.clientWidth)table.style.zoom=String((article.clientWidth-2)/width);}};
+ fitTables();frame.contentDocument.fonts?.ready.then(fitTables);
  const candidates=[];for(const p of body.querySelectorAll('article p')){
   if(p.closest('header,footer')||p.querySelector('p,img,svg'))continue;
   if(!p.textContent.trim()&&p.closest('td')){candidates.push(p);continue;}
