@@ -1,5 +1,6 @@
 import {openTrainingForm,canLeaveForm,clearForm,trainingFormPaper} from './training-form.js';
 import {trainingTasks,trainingSheetHTML} from './equipment-training-sheet.js';
+import {trainingDraftInventory} from './training-drafts.js';
 import {effective,registerRows,observationResult,entryLabels,practicalDate,isPractical} from './equipment-training-model.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -23,6 +24,7 @@ function draw(message=''){
  if(!root||!state)return;dirty=false;report=null;
  const eq=equipment(),rows=rowList();
  root.innerHTML=`<div class="et-intro"><strong>Une personne · un équipement · une tâche</strong><p>Un cours ou un témoignage ne valide pas la pratique. Les dossiers vides restent « À vérifier ».</p></div><p id="etMessage" role="status">${esc(message)}</p>
+ ${trainingDraftInventory(state)}
  <div class="et-filters"><label>Département<select data-filter="department">${opt('','Tout le magasin',selection.department)}${state.departments.map(d=>opt(String(d.id),d.name,selection.department)).join('')}</select></label>
  <label>Équipement<select data-filter="equipment">${opt('','Choisir un équipement',selection.equipment)}${state.equipment.filter(e=>!e.archived_at&&(!selection.department||String(e.department_id)===selection.department)).map(e=>opt(e.id,e.title,selection.equipment)).join('')}</select></label>
  <label>Tâche<select data-filter="task">${tasks().map(t=>opt(t,t,selection.task)).join('')}</select></label>
@@ -119,6 +121,12 @@ function sheet(){
 
 function openForm(prior){
  if(!canLeave())return;
+ if(prior){
+  const target=state.equipment.find(e=>e.id===prior.equipment_id);
+  if(!target){banner('Cet équipement n’est plus disponible dans le registre.',true);return;}
+  selection.equipment=target.id;selection.employee=prior.data.employeeKeys[0];selection.task=prior.data.tasks[0];selection.department='';
+  draw();
+ }
  if(!prior&&selection.employee)prior=state.entries.filter(e=>e.kind==='training_form'&&e.equipment_id===selection.equipment&&e.data.employeeKeys.includes(selection.employee)&&e.data.tasks.includes(selection.task)&&!state.entries.some(x=>x.supersedes===e.id)).at(-1);
  openTrainingForm({prior,equipment:equipment(),employeeKey:selection.employee,employees:state.employees,department:state.departments.find(x=>String(x.id)===String(equipment()?.department_id))?.name||'',task:prior?.data.tasks[0]||selection.task,procedures:procedures(),actorName:state.actor?.name||lastEntered||'Administration',save:body=>api('/entries',body),onSaved:async(entry)=>{selection.employee=entry.data.employeeKeys[0];state=await api();draw('Formulaire conservé dans le registre.');}});
 }
