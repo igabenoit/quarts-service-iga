@@ -23,6 +23,8 @@ try{
  const calendar=page.locator('#meetingCalendar');
  await calendar.locator(`[data-print-record="${meeting}"]`).click();
  assert.match(await page.evaluate(()=>window.printedText),/Camille et Alex/);
+ assert.doesNotMatch(await page.evaluate(()=>window.printedText),/État des dossiers au|créé le|dernière saisie|Ajouté le|SHA-256/);
+ assert.match(await page.evaluate(()=>window.printedText),/15 août 2026/);
  assert.match(await page.evaluate(()=>window.printedText),/Prévention des chutes/);
  assert.match(await page.evaluate(()=>window.printedText),/Suivi des tapis/);
  await calendar.locator(`[data-record="${meeting}"]`).click();

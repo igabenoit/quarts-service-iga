@@ -14,7 +14,7 @@ test('SST : administration, répertoire partagé en lecture seule, preuves, hist
   const headers={Origin:f.base,'X-SST-Request':'1'};
   const call=(method,path,body,extra={})=>f.call(method,'/api/sst/'+path,{cookie:admin,headers,body,...extra});
   await t.test('les données, les originaux et la sauvegarde exigent la session administrateur',async()=>{
-   for(const path of ['state','history','export','documents/00000000-0000-4000-8000-000000000000'])assert.equal((await f.call('GET','/api/sst/'+path)).status,401);
+   for(const path of ['state','history','export','audit-export','documents/00000000-0000-4000-8000-000000000000'])assert.equal((await f.call('GET','/api/sst/'+path)).status,401);
    assert.equal((await f.call('POST','/api/sst/records',{cookie:admin,body:{}})).status,403);
    assert.equal((await f.call('POST','/api/sst/records',{cookie:admin,headers:{Origin:'https://autre.example','X-SST-Request':'1'},body:{}})).status,403);
   });
@@ -59,6 +59,12 @@ test('SST : administration, répertoire partagé en lecture seule, preuves, hist
    const downloaded=await fetch(f.base+'/api/sst/documents/'+fileId,{headers:{Cookie:admin}});assert.equal(downloaded.status,200);assert.equal(downloaded.headers.get('content-type'),'application/pdf');assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),raw);
    assert.equal((await f.call('GET','/api/sst/documents/'+fileId)).status,401);
    assert.equal((await call('POST','documents/'+fileId+'/archive',{version:1,archived:true})).status,200);assert.equal((await call('POST','documents/'+fileId+'/archive',{version:1,archived:false})).status,409);assert.equal((await call('POST','documents/'+fileId+'/archive',{version:2,archived:false})).status,200);
+  });
+  await t.test('historique séparé : dates conservées, accès privé et fichiers exclus',async()=>{
+   const out=await call('GET','audit-export');assert.equal(out.status,200);assert.equal(out.body.format,'iga-sst-audit-v1');
+   const record=out.body.records.find(r=>r.id===id);assert.ok(record.created_at);assert.ok(record.updated_at);
+   const file=out.body.documents.find(d=>d.id===fileId);assert.ok(file.created_at);assert.ok(!('dataBase64' in file));
+   assert.ok(out.body.events.some(e=>e.action==='record.updated'));assert.ok(out.body.events.some(e=>e.action==='document.added'));
   });
   await t.test('la sauvegarde contient les dossiers, les traces et les fichiers originaux',async()=>{
    const out=await call('GET','export');assert.equal(out.status,200,JSON.stringify(out.body));assert.equal(out.body.format,'iga-sst-v1');assert.ok(out.body.records.find(r=>r.id===id));assert.ok(out.body.events.some(e=>e.action==='document.added'));assert.deepEqual(Buffer.from(out.body.documents.find(d=>d.id===fileId).dataBase64,'base64'),raw);
