@@ -1,3 +1,4 @@
+import {normalizeWelcome,welcomeContent,validateWelcomeCompletion} from './public/welcome-form-schema.js';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
 import {normalizeIncidentReport} from './public/incident-report-schema.js';
@@ -11,6 +12,7 @@ export function normalizeSST(body){
  if(!SST_KINDS.includes(body?.kind)||!['draft','open','progress','done'].includes(body?.status)||typeof body.title!=='string'||!body.title.trim()||body.title.length>180)fail('Indiquez le type, le titre et le statut du dossier.');
  const fields={};for(const key of ['meetingType','trainer','participants','location','model','serial','procedure','findings','reportedFacts','analysis','verification','outcome','reference']){if(body.fields?.[key]!==undefined){if(typeof body.fields[key]!=='string'||body.fields[key].length>6000)fail('Un renseignement est trop long.');fields[key]=body.fields[key].trim();}}
  if(body.fields?.accidentReport!==undefined){if(body.kind!=='incident')fail('Le rapport d’enquête doit rester dans un incident.');fields.accidentReport=normalizeIncidentReport(body.fields.accidentReport);if(body.status==='done'&&!body.employeeKey)fail('Associez le rapport à un employé avant de le consolider.');}
+ if(body.fields?.welcomeForm!==undefined){if(body.kind!=='training'||!['draft','done'].includes(body.status))fail('Type ou état du formulaire d’accueil invalide.');fields.welcomeForm=normalizeWelcome(body.fields.welcomeForm);if(!body.employeeKey)fail('Choisissez le travailleur.');if(body.status==='done')validateWelcomeCompletion(fields.welcomeForm,body.employeeKey);if((body.eventDate||'')!==fields.welcomeForm.signatureDate)fail('La date du dossier doit correspondre à la date de signature.');}
  if(fields.meetingType&&!['Comité SST','Réunion SST','Réunion SIMDUT'].includes(fields.meetingType))fail('Choisissez Comité SST, Réunion SST ou Réunion SIMDUT.');
  const eventDate=day(body.eventDate),dueDate=day(body.dueDate);
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -19,7 +21,7 @@ export function normalizeSST(body){
  if(body.employeeKey!==null&&body.employeeKey!==undefined&&!/^(service|store):[1-9]\d*$/.test(body.employeeKey))fail('Employé invalide.');
  if(body.departmentId!==null&&body.departmentId!==undefined&&(!Number.isSafeInteger(body.departmentId)||body.departmentId<1))fail('Département invalide.');
  if(body.relatedId!==null&&body.relatedId!==undefined&&!uuid(body.relatedId))fail('Dossier lié invalide.');
- if(body.kind==='training'&&body.status==='done'&&(!body.employeeKey||!eventDate||!fields.trainer||!fields.verification))fail('Pour une formation réalisée, précisez l’employé, la date, le formateur et comment la compréhension ou la compétence a été vérifiée.');
+ if(body.kind==='training'&&!fields.welcomeForm&&body.status==='done'&&(!body.employeeKey||!eventDate||!fields.trainer||!fields.verification))fail('Pour une formation réalisée, précisez l’employé, la date, le formateur et comment la compréhension ou la compétence a été vérifiée.');
  if(body.kind==='action'&&body.status==='done'&&(!eventDate||!fields.verification))fail('Précisez la date de réalisation et la vérification du correctif.');
  return {kind:body.kind,title:body.title.trim(),status:body.status,eventDate,dueDate,employeeKey:body.employeeKey||null,departmentId:body.departmentId||null,relatedId:body.relatedId||null,owner:text(body.owner,120),details:text(body.details,10000),fields};
 }
@@ -98,6 +100,13 @@ export async function installSST(app,pool,{identity}){
   const v=normalizeSST(req.body),directory=await sstDirectory(pool),person=directory.employees.find(p=>p.key===v.employeeKey);
   if(v.employeeKey&&!person)fail('Cet employé ne figure plus dans le répertoire.');if(v.departmentId&&!directory.departments.some(d=>d.id===v.departmentId))fail('Département introuvable.');
   const id=await tx(async db=>{let before=null;if(req.body.id){before=await record(db,req.body.id);if(before.archived_at)fail('Restaurez ce dossier avant de le modifier.',409);if(req.body.version!==before.version)fail('Ce dossier a changé. Actualisez avant de réessayer.',409);if(v.kind!==before.kind)fail('Le type de dossier ne peut pas être changé.');}
+   const previousWelcome=before?.fields?.welcomeForm;
+   if(previousWelcome){
+    const next=v.fields.welcomeForm;if(!next)fail('Ouvrez le formulaire d’accueil pour conserver son contenu.');
+    if(before.status==='done'&&(typeof req.body.correctionReason!=='string'||req.body.correctionReason.trim().length<5||req.body.correctionReason.length>1000))fail('Indiquez le motif de la correction (5 à 1000 caractères).');
+    const changed=before.employee_key!==v.employeeKey||welcomeContent(previousWelcome,before.status==='done')!==welcomeContent(next,before.status==='done');
+    if(changed&&previousWelcome.signature.length&&JSON.stringify(previousWelcome.signature)===JSON.stringify(next.signature))fail('Le contenu a changé : une nouvelle signature du travailleur est nécessaire.');
+   }
    const previousReport=before?.fields?.accidentReport,newReport=v.fields.accidentReport;
    if(previousReport){
     if(!newReport)fail('Ouvrez le rapport d’enquête pour modifier ce dossier sans perdre son formulaire.');
@@ -111,7 +120,7 @@ export async function installSST(app,pool,{identity}){
    const id=before?.id||randomUUID(),values=[v.title,v.status,v.employeeKey,person?.name||'',v.departmentId,v.relatedId,v.owner,v.eventDate,v.dueDate,v.details,JSON.stringify(v.fields),id];
    if(before)await db.query('UPDATE sst_records SET title=$1,status=$2,employee_key=$3,employee_name=$4,department_id=$5,related_id=$6,owner=$7,event_date=$8,due_date=$9,details=$10,fields=$11,version=version+1,updated_at=clock_timestamp() WHERE id=$12',values);
    else await db.query('INSERT INTO sst_records(title,status,employee_key,employee_name,department_id,related_id,owner,event_date,due_date,details,fields,id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',[...values,v.kind]);
-   const after=await record(db,id);await audit(db,req,before?'record.updated':'record.created',before,previousReport?{...after,correction_reason:req.body.correctionReason.trim()}:after,id);return id;});res.json({id});
+   const after=await record(db,id);await audit(db,req,before?'record.updated':'record.created',before,previousReport||previousWelcome&&before.status==='done'?{...after,correction_reason:req.body.correctionReason.trim()}:after,id);return id;});res.json({id});
  }));
  app.post('/api/sst/records/:id/archive',admin,origin,route(async(req,res)=>{if(typeof req.body?.archived!=='boolean')fail('État invalide.');await tx(async db=>{const before=await record(db,req.params.id);if(before.version!==req.body.version)fail('Ce dossier a changé. Actualisez.',409);await db.query('UPDATE sst_records SET archived_at=CASE WHEN $1 THEN clock_timestamp() ELSE NULL END,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[req.body.archived,before.id]);await audit(db,req,req.body.archived?'record.archived':'record.restored',before,await record(db,before.id),before.id)});res.json({ok:true})}));
  app.get('/api/sst/history',admin,route(async(req,res)=>{if(req.query.id&&!uuid(req.query.id))fail('Dossier invalide.');const events=await pool.query('SELECT * FROM sst_events WHERE ($1::uuid IS NULL OR record_id=$1) ORDER BY id DESC LIMIT 300',[req.query.id||null]);res.json({events:events.rows})}));
