@@ -9,4 +9,4 @@
 
 @media print{dialog::backdrop{display:none!important}#sstPrint .mc-event-actions{display:none!important}}
 
-@media print{#sstPrint .et-meta,#sstPrint .sst-audit-meta{display:none!important}}
+@media print{.et-meta,.sst-audit-meta{display:none!important}}
