@@ -32,8 +32,11 @@ export async function signedEmergency(a,strokes){
  for(const key of ['employeeName','contact1Name','contact1Relationship','contact1Phone','contact2Name','contact2Relationship','contact2Phone'])if(!String(a[key]||'').trim())throw Error('Champ obligatoire : '+key);
  for(const key of ['foodAllergy','medicineAllergy','urgentCondition'])if(!responses.has(a[key]))throw Error('Précisez votre réponse : '+key);
  if(a.accessConsent!=='yes')throw Error('L’autorisation de traitement en situation d’urgence doit être confirmée.');
+ for(const [flag,detail] of [['foodAllergy','foodDetails'],['medicineAllergy','medicineDetails'],['urgentCondition','conditionDetails']]){
+  if(a[flag]==='yes'&&!String(a[detail]||'').trim())throw Error('Précisions requises : '+detail);
+ }
  validSignature(strokes);
- const pdf=await PDFLib.PDFDocument.create(),page=pdf.addPage(letter);
+ const pdf=await PDFLib.PDFDocument.create();let page=pdf.addPage(letter);
  const font=await pdf.embedFont(PDFLib.StandardFonts.Helvetica),bold=await pdf.embedFont(PDFLib.StandardFonts.HelveticaBold);
  const top=(y)=>792-y;
  function rect(x,y,w,h,color=white,stroke=border){page.drawRectangle({x,y:top(y+h),width:w,height:h,color,borderColor:stroke,borderWidth:.7});}
@@ -71,12 +74,40 @@ export async function signedEmergency(a,strokes){
  else field('Précisions (facultatif)',a.medicineAllergy==='undisclosed'?'Non divulgué':'Aucune déclarée',39,620,535,32);
  section('04','CONDITION NÉCESSITANT DES SOINS RAPIDES',665);
  txt('Asthme, épilepsie, diabète, anaphylaxie, etc. : '+answer(a.urgentCondition),39,702,8.8);
- const supplement=a.urgentCondition==='yes'?[a.conditionDetails,a.symptoms,a.carePlan].filter(Boolean).join(' · '):'';
+ const supplement=['foodAllergy','medicineAllergy','urgentCondition'].some(k=>a[k]==='yes')?'Informations complémentaires : voir page 2.':'';
  if(supplement)wrap(font,supplement,8.1,535,2).forEach((line,i)=>txt(line,39,717+i*11,8.1));
  txt('Signature de l’employé :',39,752,8.5,true);
  page.drawLine({start:{x:164,y:top(771)},end:{x:425,y:top(771)},color:border,thickness:.8});
  const now=new Intl.DateTimeFormat('fr-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  txt('Date : '+now,471,756,8,true);
  for(const stroke of strokes){let previous;for(const [x,y] of stroke){const next={x:165+x*245,y:top(742+y*28)};if(previous)page.drawLine({start:previous,end:next,thickness:.85,color:navy});previous=next;}}
+ const hasDetails=['foodAllergy','medicineAllergy','urgentCondition'].some(k=>a[k]==='yes');
+ if(hasDetails){
+  page=pdf.addPage(letter);
+  page.drawRectangle({x:0,y:0,width:6,height:792,color:blue});
+  txt('IGA EXTRA · FAMILLE BENOIT',39,43,10,true);
+  txt('SANTÉ ET SÉCURITÉ AU TRAVAIL · ANNEXE CONFIDENTIELLE',39,62,9,true,blue);
+  txt('Consignes d’urgence · informations détaillées',39,91,17,true);
+  page.drawLine({start:{x:39,y:top(103)},end:{x:574,y:top(103)},color:blue,thickness:1.3});
+  txt('Employé : '+a.employeeName,39,133,10,true);
+  let pos=171;
+  function detail(label,value){
+   txt(label,39,pos,10,true,blue);
+   pos+=17;
+   const rows=wrap(font,value||'Non précisé',9,515,24);
+   for(const row of rows){txt(row,42,pos,9);pos+=13;}
+   pos+=18;
+  }
+  if(a.foodAllergy==='yes')detail('Allergies alimentaires · aliments et réactions',a.foodDetails);
+  if(a.medicineAllergy==='yes')detail('Allergies aux médicaments · médicaments et réactions',a.medicineDetails);
+  if(a.urgentCondition==='yes'){
+   detail('Condition médicale nécessitant une intervention rapide',a.conditionDetails);
+   detail('Symptômes à surveiller',a.symptoms);
+   detail('Soins prévus / médication prescrite / emplacement',a.carePlan);
+  }
+  txt('Ces renseignements sont fournis volontairement pour la prise en charge d’une urgence.',39,723,8,false,muted);
+  txt('Ils ne constituent pas une ordonnance ni une autorisation d’administrer un médicament.',39,737,8,false,muted);
+  txt('Annexe liée à la fiche signée en page 1.',39,755,8,true,blue);
+ }
  return Buffer.from(await pdf.save());
 }
