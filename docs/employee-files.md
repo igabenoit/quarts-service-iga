@@ -39,7 +39,10 @@ Les nouveaux dossiers restent traités par le serveur Render aux États-Unis : u
 ## Limites de la première version
 
 - Invitations et courriels réels désactivés côté serveur.
-- Collecte bancaire, fiscale et médicale désactivée côté serveur; modèles préparatoires possibles.
+- Collecte bancaire et fiscale désactivée côté serveur; les modèles médicaux génériques demeurent non publiables. Exception ciblée : la fiche facultative « Informations en cas d’urgence » dans le parcours d’accueil et sur place (contacts, allergies et soins rapides), réservée au coffre des dossiers employés et enregistrée en catégorie `medical`.
+- Formulaires d’accueil dans l’ordre : TUAC 500, régime de retraite, fiche d’urgence. Le modèle PDF vierge est accessible dans l’onglet Formulaires; une fiche remplie est conservée dans le coffre, non sur Google Drive.
+- Les renseignements médicaux ne sont consultables que par leur employé, la direction administratrice ou une responsabilité médicale explicitement accordée et limitée au département. Les gérants et RH sans autorisation médicale ne peuvent pas ouvrir le PDF; leur tableau de suivi indique uniquement son achèvement.
+- L’employé peut choisir « Je préfère ne pas répondre » pour chacune des questions de santé. Une réponse positive exige d’identifier la condition ou l’allergie; des détails complémentaires sont conservés dans l’annexe du PDF signé. La fiche n’autorise pas l’administration de médicaments.
 - Authentification existante réutilisée; aucun SSO commun aux employés n’existe actuellement. Renforcement à approuver avant ouverture des données sensibles.
 - Les modèles et la politique doivent être approuvés par la direction. L’acquittement de la politique publiée est personnel, explicite, non précoché; ce n’est pas un consentement universel.
 - La signature est une confirmation personnelle horodatée sous la session existante; aucune signature qualifiée ou certification juridique n’est revendiquée.
