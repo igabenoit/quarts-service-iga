@@ -14,10 +14,11 @@ function show(state){
  list.replaceChildren();editor.replaceChildren();
  if(onsite){
   document.querySelector('h1').textContent=state.employee;
+  const back=node('a','← Formulaires');back.href='/dossiers-employes?vue=direction#formulaires';list.append(back);
   const d=state.documents[0];
   if(!d.done){openForm(state,d);return;}
   list.append(node('p',d.title+' · PDF signé et classé.'));
-  const link=node('a','Ouvrir et imprimer le PDF signé');link.href='/lecture-pdf.html#'+new URLSearchParams({id:d.originalId,view:'direction'});list.append(link);return;
+  const link=node('a','Ouvrir et imprimer le PDF signé');link.href='/lecture-pdf.html#'+new URLSearchParams({id:d.originalId,view:'direction',key:localParams.get('key')});list.append(link);return;
  }
  const done=state.documents.filter(d=>d.done).length;
  list.append(node('p',done+' document(s) sur '+state.documents.length+' complété(s)'),node('p','Échéance · '+String(state.due).slice(0,10)));

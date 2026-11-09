@@ -1,6 +1,10 @@
 const params=new URLSearchParams(location.hash.slice(1));
 const id=params.get('id'), view=params.get('view')||'direction';
 const get=id=>document.getElementById(id);
+const employeeKey=params.get('key');
+const folder= /^(store|service):[1-9]\d*$/.test(employeeKey||'')?'dossiers/'+employeeKey:'dossiers';
+get('backToFiles').href='/dossiers-employes?'+new URLSearchParams({vue:view})+'#'+folder;
+if(folder!=='dossiers')get('backToFiles').textContent='← Dossier de l’employé';
 const status=get('status'), download=get('download'), canvas=document.querySelector('canvas');
 let pdf, pageNumber=1;
 async function draw(number){
