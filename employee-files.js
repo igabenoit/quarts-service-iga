@@ -82,8 +82,10 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  const scope=(g,e)=>g.all_departments||intersects(g.departments,e.departments);
  const visible=(a,e)=>a.view==='employe'?e.personId===Number(a.employee.id)&&e.active:a.admin?true:a.view==='gerant'?intersects(a.manager.departments,e.departments):a.grants.some(g=>(a.view==='sst'?g.role==='sst':['rh','payroll','medical'].includes(g.role))&&scope(g,e));
  const content=(a,e,category)=>{
-  if(['payroll','medical'].includes(category))return false;
-  if(!visible(a,e))return false;if(a.view==='employe')return true;if(a.view==='sst')return category==='sst';if(a.view==='gerant')return ['general','sst'].includes(category);if(a.admin)return true;
+  if(category==='payroll')return false;
+  if(!visible(a,e))return false;
+  if(category==='medical')return a.view==='employe'||a.view==='direction'&&(a.admin||a.grants.some(g=>g.role==='medical'&&scope(g,e)));
+  if(a.view==='employe')return true;if(a.view==='sst')return category==='sst';if(a.view==='gerant')return ['general','sst'].includes(category);if(a.admin)return true;
   return a.grants.some(g=>scope(g,e)&&(g.role===category||(g.role==='rh'&&['general','rh','sst'].includes(category))));
  };
  const templateAllowed=(a,t,e)=>a.view!=='employe'&&a.view!=='sst'&&content(a,e,t.category)&&(a.view!=='gerant'||t.manager_assignable&&['general','sst'].includes(t.category));
@@ -125,7 +127,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
      entry.total++;
      if(r.original_id){
       entry.done++;
-      if(content(a,byKey.get(r.employee_key),'rh'))receivedDocuments.push({key:r.employee_key,title:onboardingTitle(r.kind),originalId:r.original_id});
+      if(content(a,byKey.get(r.employee_key),r.kind==='urgence'?'medical':'rh'))receivedDocuments.push({key:r.employee_key,title:onboardingTitle(r.kind),originalId:r.original_id});
      }
     }
    }
