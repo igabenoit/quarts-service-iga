@@ -2,9 +2,10 @@ import {signedRetirement,retirementKeys} from './retirement.js';
 import {sendPending,invitationToken} from './mail.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {signedTuac,tuacFields} from './tuac.js';
+import {signedEmergency,emergencyFields} from './emergency.js';
 
 const base='/api/employee-files/onboarding';
-const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement}};
+const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
@@ -29,13 +30,13 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(!['direction','gerant'].includes(req.ef.view)||!content(req.ef,e,'rh'))fail(403,'Accès RH requis.');
   return e;
  }
- const docs=async(db,key)=>(await db.query('SELECT kind,version,original_id FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN $$tuac$$ THEN 0 ELSE 1 END,kind',[key])).rows;
+ const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>d.kind==='urgence'&&!allowedMedical?{...d,done:!!d.original_id,original_id:null,restricted:true}:{...d,done:!!d.original_id});
  app.get(base,auth,wrap(async(req,res)=>{
   const e=await manager(req);
   if(!await eligible(e.key))return res.json({eligible:false});
   await pool.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);
   const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
-  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,documents:await docs(pool,e.key),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;
@@ -65,12 +66,13 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     if(!['save','sign'].includes(action)||(!onsite&&row.completed_at))fail(409,'Dossier fermé.');
     const b=req.body,doc=(await db.query('SELECT * FROM onboarding_docs WHERE employee_key=$1 AND kind=$2',[key,b.kind])).rows[0];
     if(!doc||(!onsite&&!doc.invited)||doc.original_id||doc.version!==b.version)fail(409,'Rechargez le document.');
+     if(!Object.hasOwn(catalog,doc.kind))fail(400,'Formulaire inconnu.');
     if(b.policy!==String(policy.id)||!b.answers||typeof b.answers!=='object')fail(400,'Confirmez la politique et vérifiez les champs.');
     const spec=catalog[doc.kind], answers=Object.fromEntries(spec.fields.map(k=>[k,String(b.answers[k]??'').slice(0,200)]));
     let original=null;
     if(action==='sign'){
      let bytes;try{bytes=await spec.render(answers,b.strokes);}catch{fail(400,'Vérifiez les champs et la signature.');}
-     const file=await saveOriginal(db,{audit:onsite?{...req.ef.audit,kind:'sur-place',policy:String(policy.id)}:{kind:'invitation',generation:row.generation,policy:String(policy.id)}},{key},'rh',bytes,{name:spec.title+'.pdf',mime:'application/pdf',provenance:onsite?'Signature en présence de l’employé':'Signature du parcours d’accueil',documentDate:new Date().toISOString().slice(0,10),signatureKind:'drawn'});
+     const file=await saveOriginal(db,{audit:onsite?{...req.ef.audit,kind:'sur-place',policy:String(policy.id)}:{kind:'invitation',generation:row.generation,policy:String(policy.id)}},{key},spec.category||'rh',bytes,{name:spec.title+'.pdf',mime:'application/pdf',provenance:onsite?'Signature en présence de l’employé':'Signature du parcours d’accueil',documentDate:new Date().toISOString().slice(0,10),signatureKind:'drawn'});
      original=file.id;
     }
     await db.query('UPDATE onboarding_docs SET draft=$3,version=version+1,original_id=$4 WHERE employee_key=$1 AND kind=$2',[key,doc.kind,JSON.stringify(original?{}:answers),original]);
@@ -80,6 +82,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  app.post(base+'/sur-place/:action',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req),kind=req.body.kind,action=req.params.action;
   if(!e.active||e.issue||!Object.hasOwn(catalog,kind)||!['state','save','sign'].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
+  if(kind==='urgence'&&!content(req.ef,e,'medical'))fail(403,'Accès aux informations médicales réservé aux personnes autorisées.');
   const policy=await publishedPolicy(pool);
   if(!policy)fail(428,'Publiez la politique de confidentialité avant de remplir un formulaire.');
   res.set('Cache-Control','no-store');
@@ -105,7 +108,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;
    await updateDocument(db,req,row,policy,action,false);
-   const items=(await db.query('SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN $$tuac$$ THEN 0 ELSE 1 END,kind',[key])).rows;
+   const items=(await db.query('SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind',[key])).rows;
    return {documents:items.map(d=>({...d,title:catalog[d.kind].title,fields:catalog[d.kind].fields})),policy:{id:String(policy.id),text:policy.text},due:row.due};
   }));
  }));
