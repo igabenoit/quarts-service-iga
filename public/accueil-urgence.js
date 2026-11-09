@@ -45,7 +45,7 @@ export function buildEmergency(form,draft,fields){
  for(const [key,title,extra,desc] of groups){
   const selection=field(health,key,title,{choices,required:true});
   const detail=field(health,extra,desc,{multi:true});
-  const update=()=>{const enabled=selection.value==='yes';detail.disabled=!enabled;detail.parentElement.hidden=!enabled;};
+  const update=()=>{const enabled=selection.value==='yes';detail.disabled=!enabled;detail.required=enabled;detail.parentElement.hidden=!enabled;};
   selection.onchange=update;update();
  }
  const symptoms=field(health,'symptoms','Signes ou symptômes à surveiller',{multi:true});
