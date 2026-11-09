@@ -10,3 +10,8 @@
 @media print{dialog::backdrop{display:none!important}#sstPrint .mc-event-actions{display:none!important}}
 
 @media print{.et-meta,.sst-audit-meta{display:none!important}}
+
+#supervisionForm fieldset { margin: .75rem 0; padding: .75rem; border: 1px solid #cad4d0; border-radius: .5rem; min-width: 0; }
+#supervisionForm legend { font-weight: 650; padding: 0 .25rem; }
+#supervisionForm label:has(input[type=checkbox]) { display: flex; align-items: baseline; gap: .6rem; margin: .35rem 0; }
+#supervisionForm input[type=checkbox] { width: 1.1rem; min-height: auto; flex: none; }

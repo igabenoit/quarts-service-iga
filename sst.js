@@ -1,3 +1,4 @@
+import {normalizeSupervision} from './public/supervision-schema.js';
 import {normalizeWelcome,welcomeContent,validateWelcomeCompletion} from './public/welcome-form-schema.js';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
@@ -13,6 +14,10 @@ export function normalizeSST(body){
  const fields={};for(const key of ['meetingType','trainer','participants','location','model','serial','procedure','findings','reportedFacts','analysis','verification','outcome','reference']){if(body.fields?.[key]!==undefined){if(typeof body.fields[key]!=='string'||body.fields[key].length>6000)fail('Un renseignement est trop long.');fields[key]=body.fields[key].trim();}}
  if(body.fields?.accidentReport!==undefined){if(body.kind!=='incident')fail('Le rapport d’enquête doit rester dans un incident.');fields.accidentReport=normalizeIncidentReport(body.fields.accidentReport);if(body.status==='done'&&!body.employeeKey)fail('Associez le rapport à un employé avant de le consolider.');}
  if(body.fields?.welcomeForm!==undefined){if(body.kind!=='training'||!['draft','done'].includes(body.status))fail('Type ou état du formulaire d’accueil invalide.');fields.welcomeForm=normalizeWelcome(body.fields.welcomeForm);if(!body.employeeKey)fail('Choisissez le travailleur.');if(body.status==='done')validateWelcomeCompletion(fields.welcomeForm,body.employeeKey);if((body.eventDate||'')!==fields.welcomeForm.signatureDate)fail('La date du dossier doit correspondre à la date de signature.');}
+ if(body.fields?.supervision!==undefined){
+  if(body.kind!=='inspection')fail('La grille doit être enregistrée comme inspection.');
+  fields.supervision=normalizeSupervision(body.fields.supervision);
+ }
  if(fields.meetingType&&!['Comité SST','Réunion SST','Réunion SIMDUT'].includes(fields.meetingType))fail('Choisissez Comité SST, Réunion SST ou Réunion SIMDUT.');
  const eventDate=day(body.eventDate),dueDate=day(body.dueDate);
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
