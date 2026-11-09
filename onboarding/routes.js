@@ -108,7 +108,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;
    await updateDocument(db,req,row,policy,action,false);
-   const items=(await db.query('SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind',[key])).rows;
+   const items=(await db.query("SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows;
    return {documents:items.map(d=>({...d,title:catalog[d.kind].title,fields:catalog[d.kind].fields})),policy:{id:String(policy.id),text:policy.text},due:row.due};
   }));
  }));
