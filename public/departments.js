@@ -302,7 +302,9 @@ $('#personForm').onsubmit=async event=>{
   let saved=false;personSaving=true;$('#personDialog').inert=true;$('#personError').textContent='Enregistrement…';
   await withWeekLock(async()=>{try{
     b.displayPriorities=Object.fromEntries([...$('#personPriorities').querySelectorAll('input:not(:disabled)')].filter(i=>i.value!==''&&(b.group!==person?.group||Number(i.value)!==person?.displayPriorities?.[i.dataset.priority])).map(i=>[i.dataset.priority,Number(i.value)]));b.availability=normalizeAvailability(b.availability);
-    await api('/api/departments/people'+(person?'/'+person.id:''),{method:person?'PUT':'POST',body:JSON.stringify(b)});saved=true;$('#personDialog').close();
+    const result=await api('/api/departments/people'+(person?'/'+person.id:''),{method:person?'PUT':'POST',body:JSON.stringify(b)});saved=true;
+    if(creationAccueil&&!person){location.replace('/dossiers-employes#accueil/store:'+result.id);return;}
+    $('#personDialog').close();
     await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;current.related=fresh.related;current.warnings=fresh.warnings;renderPeople();renderSchedule();renderPrint();renderWarnings();
     message(person?'Fiche enregistrée.'+(current.publishedAt?' Publiez à nouveau l’horaire pour actualiser les renseignements affichés aux employés.':''):'Fiche enregistrée. Dans l’horaire, utilisez « Actualiser la liste d’employés » pour l’ajouter à la feuille.');
   }catch(err){if(saved)message('La fiche est enregistrée, mais son actualisation a échoué. Réessayez « Actualiser » sans recréer la fiche. '+err.message);else $('#personError').textContent=err.message;}
@@ -540,7 +542,16 @@ $('#weekPicker').onchange=async()=>{if(!$('#weekPicker').value||!mayLeave()){$('
 $('#refreshWeek').onclick=async()=>{if(!mayLeave())return;return withWeekLock(async()=>{try{await loadMeta();await loadWeek();}catch(err){message(err.message);}});};
 // Keep a whole save/publish/copy sequence locked, including the refresh after saving.
 for(const id of ['saveDraft','copyWeek','syncRoster','publishWeek','unpublishWeek','loadHistory']){const button=$('#'+id),handler=button.onclick;button.onclick=async event=>{if(weekLocks||weekLoading)return;return withWeekLock(()=>handler(event));};}
-try{await loadMeta();await loadWeek();$('#managerContent').hidden=false;}catch(err){message(err.message);}
+const creationAccueil=initialSelection.get('creation')==='accueil';
+try{
+  await loadMeta();
+  if(creationAccueil){
+    $('#personDialog').addEventListener('close',()=>location.replace('/dossiers-employes'),{once:true});
+    openPerson();
+  }else{
+    await loadWeek();$('#managerContent').hidden=false;
+  }
+}catch(err){message(err.message);}
 
 $('#refreshViews').onclick=()=>loadViews().catch(err=>message(err.message));
 
