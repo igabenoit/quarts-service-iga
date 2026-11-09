@@ -408,8 +408,8 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
     await beginUndo(client,"Ajouter un employé",request.params.weekStart||null,request);
-    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,onboarding_new)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
     const id = Number(result.rows[0].id);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
