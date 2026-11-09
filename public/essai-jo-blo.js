@@ -1,0 +1,14 @@
+'use strict';
+const labels=['Prénom','Nom','Date de naissance','Numéro et rue','Appartement','Ville','Province','Code postal','Indicatif régional','Téléphone','Courriel','Date d’emploi','Date de signature'];
+const defaults=['Jo','Blo','1990-01-01','123 rue Exemple','S/O','Ville Exemple','Québec','H0H 0H0','450','555-0100','jo@example.invalid','2026-11-08','2026-11-08'];
+const key='tuac-demo-jo-v1',by=id=>document.getElementById(id),canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
+let saved={},lines=[],active=null,url;
+try{saved=JSON.parse(localStorage.getItem(key)||'{}');lines=Array.isArray(saved.lines)?saved.lines:[];}catch{}
+const inputs=labels.map((s,i)=>{const label=document.createElement('label'),field=document.createElement('input');label.textContent=s;field.type=s.startsWith('Date')?'date':s==='Courriel'?'email':'text';field.required=true;field.maxLength=120;field.value=saved.values?.[i]??defaults[i];label.append(field);by('fields').append(label);return field;});
+function paint(){ctx.clearRect(0,0,700,140);ctx.lineWidth=2;for(const line of lines){ctx.beginPath();line.forEach(([x,y],i)=>i?ctx.lineTo(x*700,y*140):ctx.moveTo(x*700,y*140));ctx.stroke();}}
+function pos(e){const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height].map(n=>Math.min(1,Math.max(0,n)));}
+canvas.onpointerdown=e=>{if(active!==null)return;active=e.pointerId;canvas.setPointerCapture(active);lines.push([pos(e)]);};canvas.onpointermove=e=>{if(e.pointerId===active){lines.at(-1).push(pos(e));paint();}};canvas.onpointerup=canvas.onpointercancel=()=>active=null;
+by('clear').onclick=()=>{lines=[];paint();};paint();
+function save(){localStorage.setItem(key,JSON.stringify({values:inputs.map(e=>e.value),lines}));}
+by('save').onclick=()=>{try{save();by('status').textContent='Brouillon enregistré. Rouvrez ce lien dans le même navigateur pour reprendre.';}catch{by('status').textContent='Ce navigateur ne permet pas de conserver le brouillon.';}};
+by('form').onsubmit=e=>{e.preventDefault();if(!lines.some(l=>l.length>1)){by('status').textContent='Tracez un paraphe fictif avant de finaliser.';return;}try{const p=new window.jspdf.jsPDF({unit:'mm',format:'letter'});for(const top of [0,139]){p.setFontSize(14);p.text('Adhésion TUAC 500 — ESSAI FICTIF',14,top+13);p.setFontSize(9);p.text('Simulation de Jo Blo · Sans valeur · Aucune transmission',14,top+20);labels.forEach((l,i)=>p.text((l+' : '+inputs[i].value).slice(0,92),14,top+29+6*i));p.text('Paraphe fictif :',14,top+111);p.addImage(canvas.toDataURL('image/png'),'PNG',42,top+104,90,18);}if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(p.output('blob'));by('pdf').href=url;by('pdf').hidden=false;by('status').textContent='PDF d’essai créé. Téléchargez-le pour le conserver.';}catch{by('status').textContent='Le PDF n’a pas pu être créé. Rechargez la page puis réessayez.';}};
