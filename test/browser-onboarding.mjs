@@ -3,8 +3,9 @@ import {createRequire} from 'node:module';
 import {liveAppFixture} from './live-app-fixture.mjs';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
 const trial=process.argv.includes('--single-trial');
-const f=await liveAppFixture({employeeVault:!trial,singleTrial:trial});let browser;
+const f=await liveAppFixture({employeeVault:!trial,singleTrial:trial,trialDirectoryKey:'store:987651'});let browser;
 try{
+ if(trial)await f.query("INSERT INTO schedule_store_people(id,name,job_title) VALUES (987651,'Jo blo',''),(987652,'Jo Blo','Gérante')");
  const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
  const headers={Origin:f.base,'X-Employee-Files':'1'};
  if(!trial)await f.call('POST','/api/employee-files/policy?view=direction',{cookie,headers,body:{text:'Politique fictive. '.repeat(24),confirmed:true}});
@@ -48,5 +49,12 @@ try{
  const canvas=employee.locator('canvas');await canvas.scrollIntoViewIfNeeded();const box=await canvas.boundingBox();
  await employee.mouse.move(box.x+8,box.y+10);await employee.mouse.down();await employee.mouse.move(box.x+50,box.y+40,{steps:4});await employee.mouse.up();
  await employee.getByRole('button',{name:'Signer et classer le PDF'}).click();await employee.getByText(/Votre dossier est complet/).waitFor();
+ await manager.goto(f.base+'/dossiers-employes?vue=direction');
+ const card=manager.getByRole('article').filter({has:manager.getByRole('heading',{name:trial?'Jo blo':'Camille Exemple',exact:true})});
+ await card.getByText(/1 \/ 1 document/).waitFor();
+ await card.getByRole('button',{name:'Ouvrir le dossier'}).click();
+ const section=manager.getByRole('heading',{name:'Documents reçus'}).locator('..');
+ const pdf=await manager.request.get(await section.getByRole('link',{name:'Ouvrir le PDF signé'}).getAttribute('href').then(path=>new URL(path,f.base).href));
+ assert.equal(pdf.status(),200);assert.equal(pdf.headers()['content-type'],'application/pdf');
  console.log('Invitation, trois largeurs, reprise et signature vérifiées.');
 }finally{await browser?.close();await f.close();}

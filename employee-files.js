@@ -1,5 +1,5 @@
 import {installSingleTrial} from './onboarding/single-trial.js';
-import {installOnboarding} from './onboarding/routes.js';
+import {installOnboarding,onboardingTitle} from './onboarding/routes.js';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
 import {jsPDF} from 'jspdf';
@@ -97,7 +97,15 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  async function originals(id,db=pool){return (await db.query('SELECT l.id AS link_id,l.reason,l.created_at AS linked_at,o.id,o.name,o.mime,o.size,o.sha256,o.provenance,o.document_date::text AS document_date,o.signature_kind,o.actor,o.created_at,o.sst_document_id FROM employee_file_links l JOIN employee_file_originals o ON o.id=l.original_id WHERE l.assignment_id=$1 ORDER BY l.created_at,l.id',[id])).rows;}
  async function state(a){
   const dir=await directory(),employees=dir.employees.filter(e=>visible(a,e)),byKey=new Map(employees.map(e=>[e.key,e]));
-  if(!pool)return {storage:storageStatus,view:a.view,views:a.views,identity:a.audit,canManage:a.admin&&a.view==='direction',invitationsEnabled:false,sensitiveCollectionEnabled:false,policyVersion:null,policyAcknowledged:true,employees:employees.map(publicEmployee),departments:dir.departments.filter(d=>a.admin||employees.some(e=>e.departments.includes(d.id))),assignments:[],missing:[],templates:[],exceptions:a.view==='direction'?employees.filter(e=>e.issue).map(publicEmployee):[]};
+  const receivedDocuments=[];
+  if(trialPool && a.admin && a.view==='direction'){
+   const owner=process.env.EMPLOYEE_TRIAL_DIRECTORY_KEY;
+   if(byKey.has(owner)){
+    const signed=await trialPool.query("SELECT kind,original_id FROM onboarding_docs WHERE employee_key='trial:unique' AND original_id IS NOT NULL");
+    for(const doc of signed.rows)receivedDocuments.push({key:owner,title:onboardingTitle(doc.kind),originalId:doc.original_id});
+   }
+  }
+  if(!pool)return {receivedDocuments,storage:storageStatus,view:a.view,views:a.views,identity:a.audit,canManage:a.admin&&a.view==='direction',invitationsEnabled:false,sensitiveCollectionEnabled:false,policyVersion:null,policyAcknowledged:true,employees:employees.map(publicEmployee),departments:dir.departments.filter(d=>a.admin||employees.some(e=>e.departments.includes(d.id))),assignments:[],missing:[],templates:[],exceptions:a.view==='direction'?employees.filter(e=>e.issue).map(publicEmployee):[]};
   const allTemplates=await templates(),rows=(await pool.query('SELECT a.id,a.employee_key,a.template_id,a.workflow,a.due_date,a.status,a.version FROM employee_file_assignments a ORDER BY a.created_at DESC')).rows;
   const assignments=rows.filter(r=>byKey.has(r.employee_key)).flatMap(r=>{const t=allTemplates.find(t=>t.id===r.template_id),e=byKey.get(r.employee_key);if(a.view==='sst'&&t.category!=='sst')return [];const access=content(a,e,t.category);return [{...r,title:access?t.title:LABELS[t.category],category:t.category,access,template_id:access?r.template_id:null,due_date:day(r.due_date)}];});
   const selectedTemplates=latest(allTemplates).filter(t=>employees.some(e=>templateAllowed(a,t,e))||a.admin&&a.view==='direction').map(t=>({...t,actor:undefined}));
@@ -113,10 +121,16 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
    for(const r of cases){
     if(!byKey.has(r.employee_key))continue;
     const entry=onboarding[r.employee_key]??={total:0,done:0};entry.invited=r.invited_at;
-    if(r.kind){entry.total++;if(r.original_id)entry.done++;}
+    if(r.kind){
+     entry.total++;
+     if(r.original_id){
+      entry.done++;
+      if(content(a,byKey.get(r.employee_key),'rh'))receivedDocuments.push({key:r.employee_key,title:onboardingTitle(r.kind),originalId:r.original_id});
+     }
+    }
    }
   }
-  return {onboarding,storage:storageStatus,view:a.view,views:a.views,identity:a.audit,canManage:a.admin&&a.view==='direction',invitationsEnabled:false,sensitiveCollectionEnabled:false,policyVersion:policy?.id||null,policyAcknowledged,employees:employees.map(publicEmployee),departments:deps,assignments,missing,templates:selectedTemplates,exceptions:a.view==='direction'?employees.filter(e=>e.issue).map(publicEmployee):[]};
+  return {receivedDocuments,onboarding,storage:storageStatus,view:a.view,views:a.views,identity:a.audit,canManage:a.admin&&a.view==='direction',invitationsEnabled:false,sensitiveCollectionEnabled:false,policyVersion:policy?.id||null,policyAcknowledged,employees:employees.map(publicEmployee),departments:deps,assignments,missing,templates:selectedTemplates,exceptions:a.view==='direction'?employees.filter(e=>e.issue).map(publicEmployee):[]};
  }
  await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
