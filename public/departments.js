@@ -543,7 +543,7 @@ $('#refreshWeek').onclick=async()=>{if(!mayLeave())return;return withWeekLock(as
 // Keep a whole save/publish/copy sequence locked, including the refresh after saving.
 for(const id of ['saveDraft','copyWeek','syncRoster','publishWeek','unpublishWeek','loadHistory']){const button=$('#'+id),handler=button.onclick;button.onclick=async event=>{if(weekLocks||weekLoading)return;return withWeekLock(()=>handler(event));};}
 const creationAccueil=initialSelection.get('creation')==='accueil';
-try{
+async function initializeDepartmentPage(){
   await loadMeta();
   if(creationAccueil){
     $('#personDialog').addEventListener('close',()=>location.replace('/dossiers-employes'),{once:true});
@@ -551,7 +551,8 @@ try{
   }else{
     await loadWeek();$('#managerContent').hidden=false;
   }
-}catch(err){message(err.message);}
+}
+await initializeDepartmentPage().catch(err=>message(err.message));
 
 $('#refreshViews').onclick=()=>loadViews().catch(err=>message(err.message));
 
