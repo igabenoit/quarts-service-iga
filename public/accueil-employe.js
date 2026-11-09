@@ -1,3 +1,4 @@
+import {buildRetirement} from './accueil-retraite.js';
 const token=location.hash.slice(1);
 const list=document.querySelector('#list'),editor=document.querySelector('#editor'),status=document.querySelector('#status');
 const node=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
@@ -15,7 +16,8 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
- for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
+ const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
+ if(!validateRetirement)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);
@@ -27,8 +29,8 @@ function openForm(state,d){
  const erase=node('button','Effacer la signature');erase.type='button';erase.onclick=()=>{ctx.clearRect(0,0,800,200);strokes=[];};form.append(erase);
  for(const [action,title] of [['save','Enregistrer et reprendre plus tard'],['sign','Signer et classer le PDF']]){
   const b=node('button',title);b.type='button';form.append(b);
-  b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'&&!form.reportValidity())return;
-   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].map(([k,i])=>[k,i.value])),strokes:action==='sign'?strokes:[]});show(result);status.textContent=action==='save'?'Brouillon enregistré. Conservez votre lien pour reprendre.':'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
+  b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'){validateRetirement?.();if(!form.reportValidity())return;}
+   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.value])),strokes:action==='sign'?strokes:[]});show(result);status.textContent=action==='save'?'Brouillon enregistré. Conservez votre lien pour reprendre.':'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
  }
  form.onsubmit=e=>e.preventDefault();editor.scrollIntoView();
 }

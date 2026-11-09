@@ -20,7 +20,8 @@ export async function installSingleTrial(app,pool,{managerAccess,wrap,date}){
   try{await db.query('BEGIN');const result=await fn(db);await db.query('COMMIT');return result;}
   catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}
  };
- await pool.query("CREATE TABLE IF NOT EXISTS employee_file_originals(id uuid PRIMARY KEY, employee_key text UNIQUE NOT NULL CHECK(employee_key='trial:unique'), data bytea NOT NULL)");
+ await pool.query("CREATE TABLE IF NOT EXISTS employee_file_originals(id uuid PRIMARY KEY, employee_key text NOT NULL CHECK(employee_key='trial:unique'), data bytea NOT NULL)");
+ await pool.query('ALTER TABLE employee_file_originals DROP CONSTRAINT IF EXISTS employee_file_originals_employee_key_key');
  await installOnboarding(router,{
   pool,auth,wrap,origin,date,trial,transaction,directory:async()=>({employees:[employee]}),
   person:(_a,_d,k)=>{if(k!==key)throw Object.assign(Error('Fiche hors essai.'),{status:404});return employee;},
@@ -32,7 +33,7 @@ export async function installSingleTrial(app,pool,{managerAccess,wrap,date}){
  router.get('/api/employee-files/originals/:id',auth,wrap(async(req,res)=>{
   const result=await pool.query('SELECT data FROM employee_file_originals WHERE id::text=$1 AND employee_key=$2',[req.params.id,key]);
   if(!result.rows.length)return res.sendStatus(404);
-  res.set({'Content-Type':'application/pdf','Content-Disposition':'inline; filename="TUAC-essai.pdf"','X-Content-Type-Options':'nosniff'}).send(Buffer.from(result.rows[0].data));
+  res.set({'Content-Type':'application/pdf','Content-Disposition':'inline; filename="Document-accueil-essai.pdf"','X-Content-Type-Options':'nosniff'}).send(Buffer.from(result.rows[0].data));
  }));
  app.use(router);
 }

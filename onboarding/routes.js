@@ -1,9 +1,10 @@
+import {signedRetirement,retirementKeys} from './retirement.js';
 import {sendPending,invitationToken} from './mail.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {signedTuac,tuacFields} from './tuac.js';
 
 const base='/api/employee-files/onboarding';
-const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac}};
+const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
@@ -27,7 +28,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(!['direction','gerant'].includes(req.ef.view)||!content(req.ef,e,'rh'))fail(403,'Accès RH requis.');
   return e;
  }
- const docs=async(db,key)=>(await db.query('SELECT kind,version,original_id FROM onboarding_docs WHERE employee_key=$1 ORDER BY kind',[key])).rows;
+ const docs=async(db,key)=>(await db.query('SELECT kind,version,original_id FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN $$tuac$$ THEN 0 ELSE 1 END,kind',[key])).rows;
  app.get(base,auth,wrap(async(req,res)=>{
   const e=await manager(req);
   if(!await eligible(e.key))return res.json({eligible:false});
@@ -81,7 +82,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     await db.query('UPDATE onboarding_docs SET draft=$3,version=version+1,original_id=$4 WHERE employee_key=$1 AND kind=$2',[key,doc.kind,JSON.stringify(original?{}:answers),original]);
     await db.query('UPDATE onboarding_cases SET activity=now(),completed_at=CASE WHEN NOT EXISTS(SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND original_id IS NULL) THEN now() END WHERE employee_key=$1',[key]);
    }
-   const items=(await db.query('SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 ORDER BY kind',[key])).rows;
+   const items=(await db.query('SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN $$tuac$$ THEN 0 ELSE 1 END,kind',[key])).rows;
    return {documents:items.map(d=>({...d,title:catalog[d.kind].title,fields:catalog[d.kind].fields})),policy:{id:String(policy.id),text:policy.text},due:row.due};
   }));
  }));
