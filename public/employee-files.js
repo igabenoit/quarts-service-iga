@@ -71,7 +71,7 @@ function models(){const rows=state.templates;$('#content').innerHTML=`<div class
 function onsiteForms(){
  const people=state.storage?.singleTrial&&!state.storage.ready?[{key:'trial:unique',name:'Jo Blo · Essai fictif'}]:state.employees.filter(e=>e.active&&!e.issue);
  const panel=$('#onsiteForms');
- panel.innerHTML='<section class="panel"><h3>Formulaires d’accueil</h3><label>Dossier de l’employé<select id="onsitePerson" required><option value="">Choisir un employé</option>'+people.map(e=>'<option value="'+esc(e.key)+'">'+esc(e.name)+'</option>').join('')+'</select></label><div class="actions"><button data-onsite="tuac">Adhésion TUAC 500</button><button data-onsite="retraite">Inscription au régime de retraite</button></div></section>';
+ panel.innerHTML='<section class="panel"><h3>Formulaires d’accueil</h3><label>Dossier de l’employé<select id="onsitePerson" required><option value="">Choisir un employé</option>'+people.map(e=>'<option value="'+esc(e.key)+'">'+esc(e.name)+'</option>').join('')+'</select></label><div class="actions"><button data-onsite="tuac">Adhésion TUAC 500</button><button data-onsite="retraite">Inscription au régime de retraite</button><button data-onsite="urgence">Informations en cas d’urgence</button></div><p class="muted">Renseignements médicaux facultatifs : accès réservé aux personnes habilitées.</p><p><a href="https://drive.google.com/file/d/1akRYYDrMZwCi-_EXiLkPjuqqw_wSS9D6/view?usp=drivesdk" target="_blank" rel="noopener noreferrer">Télécharger le formulaire d’urgence vierge (PDF remplissable)</a></p></section>';
  for(const button of panel.querySelectorAll('[data-onsite]'))button.onclick=()=>{
   const select=$('#onsitePerson');if(!select.reportValidity())return;
   location.assign('/accueil-employe.html?sur-place#'+new URLSearchParams({key:select.value,kind:button.dataset.onsite}));
@@ -141,11 +141,11 @@ async function onboardingPanel(panel,key){
  }
  const c=await request();
  if(!c.eligible)return;
- const items=c.documents,done=items.filter(d=>d.original_id).length;
+ const items=c.documents,done=items.filter(d=>d.done||d.original_id).length;
  panel.className='panel';
  panel.innerHTML=(c.trialPolicy?'<h3>Essai d’accueil · Jo Blo (fictif)</h3>':'<h3>Parcours d’accueil</h3>')+(c.invited_at?
   '<p><strong>'+done+' document(s) sur '+items.length+' complété(s)</strong></p><p>Invitation · '+fmt(c.invited_at)+' · Dernière activité · '+(c.activity?fmt(c.activity):'En attente')+' · Échéance · '+fmt(c.due)+'</p>'+
-  items.map(d=>'<p>'+esc(c.catalog[d.kind])+' · '+(d.original_id?'<a href="'+signedPdfUrl(d.original_id)+'" target="_blank" rel="noopener">Ouvrir le PDF signé</a>':'À compléter')+'</p>').join('')+
+  items.map(d=>'<p>'+esc(c.catalog[d.kind])+' · '+(d.done||d.original_id?(d.original_id?'<a href="'+signedPdfUrl(d.original_id)+'" target="_blank" rel="noopener">Ouvrir le PDF signé</a>':'Classé · accès médical restreint'):'À compléter')+'</p>').join('')+
   (c.completed_at?'':(c.active?'<button data-op="revoke">Révoquer le lien</button>':'<p>Lien révoqué</p>')+' <button data-op="renew">Renouveler le lien</button>'):
   '<p>Brouillon</p><form>'+Object.entries(c.catalog).map(([k,t])=>'<label><input type="checkbox" name="doc" value="'+esc(k)+'" checked> '+esc(t)+'</label>').join('')+'<label>Courriel de l’employé<input required type="email" name="email"></label><label>Courriel du gestionnaire<input required type="email" name="managerEmail"></label><label>Échéance<input required type="date" name="due"></label><label>Rappel après (jours)<input required type="number" name="days" value="3" min="1" max="365"></label><button>Inviter l’employé</button></form>');
  async function change(op,body){
