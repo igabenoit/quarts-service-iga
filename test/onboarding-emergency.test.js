@@ -17,10 +17,11 @@ test('fiche urgence : deux contacts, option de non-divulgation et PDF signé',as
  assert.ok(emergencyFields.indexOf('contact1Name')<emergencyFields.indexOf('contact2Name'));
  const buffer=await signedEmergency(answers,[[[0,0],[.4,.8],[1,.3]]]);
  assert.ok(Buffer.isBuffer(buffer));assert.ok(buffer.subarray(0,5).equals(Buffer.from('%PDF-')));
- const pdf=await PDFLib.PDFDocument.load(buffer);assert.equal(pdf.getPageCount(),1);
+ const pdf=await PDFLib.PDFDocument.load(buffer);assert.equal(pdf.getPageCount(),2,'une annexe complète les renseignements médicaux déclarés');
  await assert.rejects(()=>signedEmergency({...answers,contact2Name:''},[[[0,0],[1,1]]]),/Champ obligatoire/);
  await assert.rejects(()=>signedEmergency({...answers,accessConsent:'no'},[[[0,0],[1,1]]]),/autorisation/i);
  await assert.rejects(()=>signedEmergency({...answers,foodAllergy:'whatever'},[[[0,0],[1,1]]]),/réponse/);
+ await assert.rejects(()=>signedEmergency({...answers,conditionDetails:''},[[[0,0],[1,1]]]),/Précisions/);
  await assert.rejects(()=>signedEmergency(answers,[]),/Signature/);
 });
 
