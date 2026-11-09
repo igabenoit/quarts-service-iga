@@ -8,14 +8,15 @@ const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 
-export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date}){
+export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,trial=null}){
  if(!pool)return;
- await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_cases(employee_key text PRIMARY KEY, nonce text, token_hash text UNIQUE, generation integer NOT NULL DEFAULT 0, invited_at timestamptz, activity timestamptz, due date, reminder_at timestamptz, reminded boolean DEFAULT false, completed_at timestamptz, notified boolean DEFAULT false, employee_email text, manager_email text);
+ await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_cases(employee_key text PRIMARY KEY ${trial?"CHECK(employee_key='trial:unique')":''}, nonce text, token_hash text UNIQUE, generation integer NOT NULL DEFAULT 0, invited_at timestamptz, activity timestamptz, due date, reminder_at timestamptz, reminded boolean DEFAULT false, completed_at timestamptz, notified boolean DEFAULT false, employee_email text, manager_email text);
  CREATE TABLE IF NOT EXISTS onboarding_docs(employee_key text REFERENCES onboarding_cases, kind text, draft jsonb DEFAULT '{}', version integer DEFAULT 0, original_id uuid REFERENCES employee_file_originals, PRIMARY KEY(employee_key,kind))`);
  if(process.env.RESEND_API_KEY && process.env.SESSION_SECRET){
-  const timer=setInterval(()=>sendPending(pool).catch(()=>{}),60000);timer.unref();
+  const timer=setInterval(()=>sendPending(pool,{trial}).catch(()=>{}),60000);timer.unref();
  }
  async function eligible(key){
+  if(trial)return key===trial.key;
   const [kind,id]=key.split(':');
   const table=kind==='service'?'schedule_employees':'schedule_store_people';
   return (await sourcePool.query('SELECT onboarding_new FROM '+table+' WHERE id=$1',[id])).rows[0]?.onboarding_new===true;
@@ -31,7 +32,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(!await eligible(e.key))return res.json({eligible:false});
   await pool.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);
   const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
-  res.json({eligible:true,...row,documents:await docs(pool,e.key),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,documents:await docs(pool,e.key),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;
@@ -43,6 +44,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    const nonce=randomBytes(32).toString('hex'), token=invitationToken(nonce);
    if(op==='invite'&&!row.invited_at){
     const b=req.body;
+    if(trial && (b.email!==trial.employeeEmail||b.managerEmail!==trial.managerEmail||b.approvedPolicy!==trial.policyId))fail(400,'Vérifiez les destinataires et approuvez la politique de cet essai.');
     if(!await publishedPolicy(db))fail(428,'Publiez la politique de confidentialité avant l’invitation.');
     if(!Array.isArray(b.documents)||!b.documents.length||b.documents.some(k=>!Object.hasOwn(catalog,k))||!mail(b.email)||!mail(b.managerEmail)||!date(b.due)||!Number.isInteger(b.days)||b.days<1||b.days>365)fail(400,'Vérifiez les documents, les courriels, l’échéance et le délai.');
     for(const k of new Set(b.documents))await db.query('INSERT INTO onboarding_docs(employee_key,kind) VALUES($1,$2)',[e.key,k]);
@@ -59,7 +61,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   const token=req.get('authorization').slice(7);
   res.json(await transaction(async db=>{
    const row=(await db.query('SELECT * FROM onboarding_cases WHERE token_hash=$1 FOR UPDATE',[digest(token)])).rows[0];
-   if(!row || !(await directory()).employees.some(e=>e.key===row.employee_key && e.active && !e.issue))fail(404,'Lien indisponible.');
+   if(!row || (trial && row.employee_key!==trial.key) || !(await directory()).employees.some(e=>e.key===row.employee_key && e.active && !e.issue))fail(404,'Lien indisponible.');
    const policy=await publishedPolicy(db);
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;

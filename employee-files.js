@@ -1,3 +1,4 @@
+import {installSingleTrial} from './onboarding/single-trial.js';
 import {installOnboarding} from './onboarding/routes.js';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
@@ -34,7 +35,7 @@ export const privacyBaseline={
  sources:['https://www.cai.gouv.qc.ca/uploads/pdfs/CAI_GU_EFVP.pdf','https://www.cai.gouv.qc.ca/protection-renseignements-personnels/information-entreprises-privees/conservation-destruction-renseignements-personnels','https://render.com/docs/postgresql-creating-connecting','https://www.cai.gouv.qc.ca/protection-renseignements-personnels/information-entreprises-privees/incidents-confidentialite-mesures-securite-entreprises']
 };
 
-export async function installEmployeeFiles(app,sourcePool,{managerAccess,employeePortal,sstService,vaultPool=null,storageStatus={ready:false}}){
+export async function installEmployeeFiles(app,sourcePool,{managerAccess,employeePortal,sstService,vaultPool=null,trialPool=null,storageStatus={ready:false}}){
  const pool=vaultPool;
  if(pool)await pool.query(`CREATE TABLE IF NOT EXISTS employee_file_grants(account_id BIGINT NOT NULL ,role TEXT NOT NULL,departments JSONB NOT NULL DEFAULT '[]',all_departments BOOLEAN NOT NULL DEFAULT FALSE,actor JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(account_id,role));
  CREATE TABLE IF NOT EXISTS employee_file_templates(id UUID PRIMARY KEY,family_id UUID NOT NULL,version INTEGER NOT NULL,title TEXT NOT NULL,category TEXT NOT NULL,body TEXT NOT NULL,fields JSONB NOT NULL,departments JSONB NOT NULL,jobs JSONB NOT NULL,manager_assignable BOOLEAN NOT NULL,published BOOLEAN NOT NULL,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),UNIQUE(family_id,version));
@@ -53,6 +54,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  if(pool)await pool.query(`REVOKE ALL ON SCHEMA employee_files_private FROM PUBLIC; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON SCHEMA employee_files_private FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON SCHEMA employee_files_private FROM authenticated; END IF; END $$;`);
  // Mount only after schema initialization succeeds, so startup can safely retry
  // in consultation-only mode without leaving a partially initialized router.
+ if(trialPool)await installSingleTrial(app,trialPool,{managerAccess,wrap,date});
  app.use(BASE,(req,res,next)=>{if(pool||['/state','/policy','/privacy','/training','/legacy','/access','/reconcile'].includes(req.path)&&(['GET'].includes(req.method)||req.path==='/reconcile'))return next();res.status(503).json({error:storageStatus.message||'Connectez le coffre documentaire canadien avant toute saisie.'});});
  const transaction=async fn=>{const db=await pool.connect();try{await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835109)');const r=await fn(db);await db.query('COMMIT');return r;}catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}};
  const event=(db,a,action,data,id=null)=>db.query('INSERT INTO employee_file_events(assignment_id,action,actor,data) VALUES($1,$2,$3,$4)',[id,action,json(a.audit),json(data)]);

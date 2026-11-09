@@ -15,11 +15,23 @@ export async function employeeFilesStorage(env=process.env){
   // Connection-string SSL parameters must not override certificate validation.
   for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])u.searchParams.delete(key);
  }
- const pool=new pg.Pool({connectionString:isolated?url:u.toString(),ssl:isolated?false:{rejectUnauthorized:true,...(env.EMPLOYEE_FILES_CA_PEM?{ca:env.EMPLOYEE_FILES_CA_PEM}:{})},options:'-c search_path=employee_files_private',max:3,connectionTimeoutMillis:5000});
+ const trial=env.EMPLOYEE_FILES_SINGLE_TRIAL==='yes';
+ const schema=trial?'employee_files_single_trial':'employee_files_private';
+ const pool=new pg.Pool({connectionString:isolated?url:u.toString(),ssl:isolated?false:{rejectUnauthorized:true,...(env.EMPLOYEE_FILES_CA_PEM?{ca:env.EMPLOYEE_FILES_CA_PEM}:{})},options:'-c search_path='+schema,max:3,connectionTimeoutMillis:5000});
  pool.on('error',()=>{});
  // Verify only the connection and session configuration while collection is
  // closed. Never create a schema, read employee records, or return a usable
  // pool until the hosting review is explicitly recorded.
+ if(trial){
+  try{
+   const recipients=[env.EMPLOYEE_TRIAL_EMAIL,env.EMPLOYEE_TRIAL_MANAGER_EMAIL];
+   if(!recipients.every(s=>typeof s==='string'&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)))throw Error('Boîtes de test requises.');
+   await pool.query('CREATE SCHEMA IF NOT EXISTS employee_files_single_trial; REVOKE ALL ON SCHEMA employee_files_single_trial FROM PUBLIC');
+   const check=await pool.query("SELECT current_schema() AS name");
+   if(check.rows[0]?.name!==schema)throw Error('Schéma d’essai inaccessible.');
+   return {pool:null,trialPool:pool,status:{ready:false,singleTrial:true,message:'Essai limité à la fiche fictive. Le coffre RH général demeure fermé.'}};
+  }catch(e){await pool.end();throw e;}
+ }
  if(!isolated&&env.EMPLOYEE_FILES_HOSTING_REVIEWED!=='yes'){
   let status;
   try{
