@@ -79,6 +79,22 @@ async function policy(){
  const link=document.createElement('a');link.href='/confidentialite';link.textContent='Ouvrir la page complète';
  const content=document.importNode(article,true);content.classList.add('panel');
  actions.append(print,link);$('#content').replaceChildren(actions,content);
+ if(state?.canManage && state.storage?.ready){
+  const form=document.createElement('form');
+  form.className='panel';
+  form.innerHTML='<h3>Politique du parcours d’accueil</h3><label>Texte approuvé<textarea name="texte" minlength="300" maxlength="20000" required></textarea></label><button>Publier la politique d’accueil</button>';
+  const current=await api('policy');
+  if(current.published)form.elements.texte.value=current.text;
+  form.onsubmit=action(async event=>{
+   const button=form.querySelector('button');
+   button.disabled=true;
+   try {
+    const result=await api('policy',{text:form.elements.texte.value,confirmed:true});
+    notice('Politique d’accueil publiée · version '+result.id);
+   } finally {button.disabled=false;}
+  });
+  actions.after(form);
+ }
  print.onclick=()=>{const copy=content.cloneNode(true);$('#printReport').replaceChildren(copy);window.print();};
 }
 
