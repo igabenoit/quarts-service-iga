@@ -24,6 +24,23 @@ async function draw(number){
   get('next').disabled=pageNumber>=pdf.numPages;
  }
 }
+async function printDocument(){
+ const button=get('print'), pages=get('printPages');
+ button.disabled=true;
+ pages.replaceChildren();
+ try{
+  for(let n=1;n<=pdf.numPages;n++){
+   const page=await pdf.getPage(n), viewport=page.getViewport({scale:2});
+   const sheet=document.createElement('canvas');
+   sheet.width=Math.ceil(viewport.width);sheet.height=Math.ceil(viewport.height);
+   await page.render({canvasContext:sheet.getContext('2d'),viewport,intent:'print'}).promise;
+   pages.append(sheet);
+  }
+  window.print();
+ }catch{status.textContent='Impression indisponible. Tu peux télécharger le PDF original.';}
+ finally{button.disabled=false;}
+}
+window.addEventListener('afterprint',()=>get('printPages').replaceChildren());
 async function open(){
  if(!/^[a-f0-9-]{36}$/i.test(id||''))throw Error('Lien de document invalide. Rouvre le document depuis le dossier employé.');
  const url='/api/employee-files/originals/'+id+'?'+new URLSearchParams({view});
@@ -37,6 +54,6 @@ async function open(){
  document.querySelector('nav').hidden=false;
  get('prev').onclick=()=>draw(pageNumber-1);
  get('next').onclick=()=>draw(pageNumber+1);
- await draw(1);
+ await draw(1);get('print').hidden=false;get('print').onclick=printDocument;
 }
 open().catch(error=>{status.textContent=download.hidden?(error.message||'Document indisponible.'):'L’aperçu est indisponible. Tu peux télécharger le PDF original.';});

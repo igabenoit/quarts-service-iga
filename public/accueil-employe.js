@@ -1,13 +1,24 @@
 import {buildRetirement} from './accueil-retraite.js';
 const token=location.hash.slice(1);
+const onsite=new URLSearchParams(location.search).has('sur-place');
+const localParams=new URLSearchParams(location.hash.slice(1));
 const list=document.querySelector('#list'),editor=document.querySelector('#editor'),status=document.querySelector('#status');
 const node=(tag,text)=>{const el=document.createElement(tag);if(text)el.textContent=text;return el;};
 async function call(action,body={}){
- const r=await fetch('/api/accueil-employe/'+action,{method:'POST',cache:'no-store',credentials:'omit',headers:{'Content-Type':'application/json','X-Employee-Files':'1',Authorization:'Bearer '+token},body:JSON.stringify(body)});
+ const url=onsite?'/api/employee-files/onboarding/sur-place/'+action+'?'+new URLSearchParams({key:localParams.get('key'),view:'direction'}):'/api/accueil-employe/'+action;
+ if(onsite)body.kind=localParams.get('kind');
+ const r=await fetch(url,{method:'POST',cache:'no-store',credentials:onsite?'same-origin':'omit',headers:{'Content-Type':'application/json','X-Employee-Files':'1',...(onsite?{}:{Authorization:'Bearer '+token})},body:JSON.stringify(body)});
  const result=await r.json();if(!r.ok)throw Error(result.error);return result;
 }
 function show(state){
  list.replaceChildren();editor.replaceChildren();
+ if(onsite){
+  document.querySelector('h1').textContent=state.employee;
+  const d=state.documents[0];
+  if(!d.done){openForm(state,d);return;}
+  list.append(node('p',d.title+' · PDF signé et classé.'));
+  const link=node('a','Ouvrir et imprimer le PDF signé');link.href='/lecture-pdf.html#'+new URLSearchParams({id:d.originalId,view:'direction'});list.append(link);return;
+ }
  const done=state.documents.filter(d=>d.done).length;
  list.append(node('p',done+' document(s) sur '+state.documents.length+' complété(s)'),node('p','Échéance · '+String(state.due).slice(0,10)));
  for(const d of state.documents){const b=node('button',d.title+' · '+(d.done?'Signé':d.version?'Reprendre':'Remplir'));b.disabled=d.done;b.onclick=()=>openForm(state,d);list.append(b);}
@@ -30,7 +41,7 @@ function openForm(state,d){
  for(const [action,title] of [['save','Enregistrer et reprendre plus tard'],['sign','Signer et classer le PDF']]){
   const b=node('button',title);b.type='button';form.append(b);
   b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'){validateRetirement?.();if(!form.reportValidity())return;}
-   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.value])),strokes:action==='sign'?strokes:[]});show(result);status.textContent=action==='save'?'Brouillon enregistré. Conservez votre lien pour reprendre.':'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
+   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.value])),strokes:action==='sign'?strokes:[]});show(result);status.textContent=action==='save'?(onsite?'Brouillon enregistré dans le dossier.':'Brouillon enregistré. Conservez votre lien pour reprendre.'):'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
  }
  form.onsubmit=e=>e.preventDefault();editor.scrollIntoView();
 }
