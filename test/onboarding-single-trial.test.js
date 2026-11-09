@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {liveAppFixture} from './live-app-fixture.mjs';
 import {tuacFields} from '../onboarding/tuac.js';
 test('essai unique : coffre général fermé, destinataires fixes et PDF isolé',async()=>{
- const f=await liveAppFixture({singleTrial:true});
+ const f=await liveAppFixture({singleTrial:true,trialDirectoryKey:'store:987651'});
  try{
   const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
   const headers={Origin:f.base,'X-Employee-Files':'1'};
   const call=(method,path,body)=>f.call(method,'/api/employee-files/'+path,{cookie,headers,body});
   const route=(op='',key='trial:unique')=>'onboarding'+(op?'/'+op:'')+'?key='+key;
+  await f.query("INSERT INTO schedule_store_people(id,name,job_title) VALUES (987651,'Jo blo',''),(987652,'Jo Blo','Gérante')");
   const state=await call('GET','state');assert.equal(state.body.storage.singleTrial,true);assert.equal(state.body.storage.ready,false);
   assert.equal((await call('POST','policy',{confirmed:true,text:'politique'})).status,503);
   assert.equal((await call('GET','policy')).body.published,false);
@@ -25,6 +26,8 @@ test('essai unique : coffre général fermé, destinataires fixes et PDF isolé'
   Object.assign(answers,{Naissance:'1990-01-01',Emploi:'2026-11-09',Signature:'2026-11-09'});
   assert.equal((await employee('sign',{version:0,kind:'tuac',answers,policy:c.policyId,strokes:[[[0,0],[1,1]]]})).status,200);
   const done=(await call('GET',route())).body;assert.ok(done.completed_at);
+  const after=(await call('GET','state')).body;
+  assert.deepEqual(after.receivedDocuments,[{key:'store:987651',title:'Adhésion TUAC 500',originalId:done.documents[0].original_id}]);
   assert.equal((await call('GET','originals/'+done.documents[0].original_id)).status,200);
   assert.equal((await call('GET','originals/00000000-0000-0000-0000-000000000000')).status,404);
   assert.equal((await call('POST','campaigns',{})).status,503);

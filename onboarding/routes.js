@@ -4,6 +4,7 @@ import {signedTuac,tuacFields} from './tuac.js';
 
 const base='/api/employee-files/onboarding';
 const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac}};
+export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
