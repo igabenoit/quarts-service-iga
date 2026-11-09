@@ -29,6 +29,6 @@ export async function liveAppFixture({employeeVault=false,employeeSchemaFailure=
   }
   try{await start();}catch(error){await stop();await rm(directory,{recursive:true,force:true});throw error;}
   let requestId=0;
-  async function query(sql,args){const id=++requestId;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.off('message',reply);reject(Error('Test SQL timeout'));},10000);const reply=m=>{if(m.id!==id)return;clearTimeout(timer);child.off('message',reply);m.error?reject(Error(m.error)):resolve(m.result);};child.on('message',reply);child.send({id,sql,args});});}
-  return {base,call,query,stop,start,logs:()=>logs,async close(){await stop();await rm(directory,{recursive:true,force:true});}};
+  async function query(sql,args,extra={}){const id=++requestId;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{child.off('message',reply);reject(Error('Test SQL timeout'));},10000);const reply=m=>{if(m.id!==id)return;clearTimeout(timer);child.off('message',reply);m.error?reject(Error(m.error)):resolve(m.result);};child.on('message',reply);child.send({id,sql,args,...extra});});}
+  return {base,call,query,onboardingMail:(advance=false)=>query(null,null,{onboardingMail:true,advance}),stop,start,logs:()=>logs,async close(){await stop();await rm(directory,{recursive:true,force:true});}};
 }
