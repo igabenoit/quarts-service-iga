@@ -12,8 +12,9 @@ export async function displayDocument(host,doc){
    for(const [path,file] of Object.entries(zip.files))if(path.endsWith('.rels')){const xml=new DOMParser().parseFromString(await file.async('string'),'application/xml');for(const rel of [...xml.getElementsByTagName('Relationship')])if(rel.getAttribute('TargetMode')==='External')rel.remove();zip.file(path,new XMLSerializer().serializeToString(xml));}
    const sanitized=await zip.generateAsync({type:'arraybuffer'});if(!host.isConnected)return;
    host.replaceChildren();const frame=document.createElement('iframe');frame.title='Programme de prévention — document original remplissable';frame.setAttribute('sandbox','allow-same-origin allow-modals');frame.className='pp-original-frame';
-   const loaded=new Promise(resolve=>{frame.onload=resolve;});frame.src='/sst-document-frame';host.append(frame);await loaded;
-   if(!host.isConnected)return;const body=frame.contentDocument.body;
+   const loaded=new Promise(resolve=>{frame.onload=resolve;});frame.src='/api/sst/document-frame';host.append(frame);await loaded;
+   if(!host.isConnected)return;const body=frame.contentDocument?.body;
+   if(!body)throw Error('Le lecteur du programme ne peut pas s’ouvrir. Actualisez la page et vérifiez votre connexion administrateur.');
    await window.docx.renderAsync(sanitized,body,frame.contentDocument.head,{className:'docx',inWrapper:true,breakPages:true,ignoreLastRenderedPageBreak:false,renderAltChunks:false,useBase64URL:true});
    await mountEditor(host,doc,body,frame);return;
   }else if(doc.mime==='application/pdf'||/\.pdf$/i.test(doc.name)){

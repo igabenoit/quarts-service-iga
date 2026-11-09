@@ -24,12 +24,27 @@ function progress(){if(!run)return;const values=Object.values(run.data.answers),
 function changed(){dirty=true;toast('Modifications à enregistrer.');progress()}
 async function showPage(el,number){try{if(!pdf){const lib=await import('/vendor/pdfjs/pdf.min.mjs');lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';pdfTask=lib.getDocument({url:'/api/sst/documents/'+template().document_id,isEvalSupported:false});pdf=await pdfTask.promise}const p=await pdf.getPage(number);if(!el.isConnected)return;const viewport=p.getViewport({scale:1.6}),canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;canvas.style='width:100%;height:auto';el.replaceChildren(canvas);await p.render({canvasContext:canvas.getContext('2d'),viewport}).promise}catch{if(el.isConnected)el.textContent='Aperçu indisponible. Vérifiez votre connexion puis rouvrez cette page.'}}
 async function save(finish=false){if(saving||!run)return;saving=true;const requested=finish?'done':run.status==='done'&&!dirty?'done':'progress',snapshot=JSON.stringify({id:run.id,templateId:run.templateId,revision:run.revision,recordVersion:run.recordVersion,status:requested,data:run.data});host.querySelectorAll('input,select,textarea,button').forEach(e=>e.disabled=true);toast('Enregistrement en cours…');try{const result=await request('runs',snapshot);Object.assign(run,result);run.status=requested;dirty=false;toast(finish?'Inspection terminée et enregistrée.':'Inspection enregistrée. Vous pouvez la reprendre sur un autre appareil.')}catch(e){toast(e.message,true)}finally{saving=false;host.querySelectorAll('input,select,textarea,button').forEach(e=>e.disabled=false);host.querySelectorAll('[data-grid-prev]').forEach(e=>e.disabled=page===0);host.querySelectorAll('[data-grid-next]').forEach(e=>e.disabled=page===template().schema.pages.length)}}
-function print(){const t=template(),fragment=document.createElement('template');fragment.innerHTML=`<div class="grid-app grid-print"><h1>INSPECTION SST</h1>${header()}<p>${dirty||!run.revision?'Brouillon — réponses non enregistrées':run.status==='done'?'Inspection terminée':'Inspection en cours'} · ${esc(t.schema.sourceVersion)}</p>${t.schema.pages.map((p,i)=>`<section class="grid-print-page">${pageHTML(i)}</section>`).join('')}<section class="grid-print-page">${actionRows()}</section></div>`;
- for(const e of fragment.content.querySelectorAll('button,.grid-source,.grid-bulk'))e.remove();
- for(const e of fragment.content.querySelectorAll('input[type=radio]')){const selected=e.hasAttribute('checked'),label=e.parentElement;label.classList.toggle('grid-print-selected',selected);label.querySelector('span').prepend(selected?'☑ ':'☐ ');e.remove();}
- for(const e of fragment.content.querySelectorAll('textarea,input,select')){const value=e.tagName==='TEXTAREA'?e.textContent:e.getAttribute('value')||'',text=document.createElement('div');text.className='grid-print-value';text.textContent=value||'—';e.replaceWith(text);}
- for(const e of fragment.content.querySelectorAll('details')){if(e.querySelector('.grid-print-value')?.textContent==='—')e.remove();else e.open=true;}
- document.getElementById('sstPrint').replaceChildren(fragment.content);window.print();}
+function print(){
+ const {schema}=template();
+ const {date,inspector,establishment,answers,actions}=run.data;
+ const status=dirty||!run.revision?'Brouillon — réponses non enregistrées':run.status==='done'?'Inspection terminée':'Inspection en cours';
+ const labels={yes:'Oui',no:'Non',na:'N/A'};
+ const sections=schema.pages.map(page=>{
+  const rows=page.blocks.map(block=>{
+   if(block.type==='heading')return '<tr class="inspection-heading"><th colspan="2">'+esc(block.text)+'</th></tr>';
+   if(block.type!=='item')return '<tr><td colspan="2">'+esc(block.text)+'</td></tr>';
+   const answer=answers[block.id]||{};
+   const note=answer.note?'<div class="inspection-note"><b>Observation</b> · '+esc(answer.note)+'</div>':'';
+   return '<tr><td>'+esc(block.text)+note+'</td><td>'+esc(labels[answer.value]||'—')+'</td></tr>';
+  }).join('');
+  return '<table><colgroup><col><col class="inspection-result"></colgroup><thead><tr><th>'+esc(page.title)+'</th><th>Réponse</th></tr></thead><tbody>'+rows+'</tbody></table>';
+ }).join('');
+ const measures=actions.filter(action=>Object.values(action).some(value=>String(value||'').trim()));
+ const followup=measures.length?'<table><thead><tr><th>Constatation</th><th>Mesure corrective</th><th>Responsable</th><th>Échéance</th></tr></thead><tbody>'+
+  measures.map(a=>'<tr>'+[a.finding,a.measure,a.owner,a.due].map(v=>'<td>'+esc(v||'—')+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<p>Aucune mesure corrective consignée.</p>';
+ document.getElementById('sstPrint').innerHTML='<div class="inspection-legal"><h1>Inspection SST</h1><p><b>Établissement</b> · '+esc(establishment||'—')+'　 <b>Date</b> · '+esc(date||'—')+'　 <b>Inspecteur</b> · '+esc(inspector||'—')+'</p><p>'+esc(status)+' · '+esc(schema.sourceVersion)+' · — = sans réponse</p>'+sections+'<h2>Mesures correctives</h2>'+followup+'</div>';
+ window.print();
+}
 
 function bind(){
  host.onclick=async e=>{const b=e.target.closest('button');if(!b)return;const d=b.dataset;try{

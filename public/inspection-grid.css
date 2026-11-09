@@ -2,5 +2,20 @@
 
 
 .grid-bulk{display:flex;gap:10px;flex-wrap:wrap;padding:12px;background:#eaf4f6;border:1px solid #7c9da4}.grid-print-value{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #cdd8cd;border-radius:6px;padding:10px;min-height:38px;font-weight:400}.grid-print-selected span{background:#0c6b7c!important;color:white!important;border:2px solid #064e5a!important}.grid-print-selected.no span{background:#a33124!important}.grid-print-selected.na span{background:#52636b!important}
-@media print{#sstPrint .grid-print{font:10pt/1.4 Arial,sans-serif;max-width:none;print-color-adjust:exact;-webkit-print-color-adjust:exact}#sstPrint .grid-print-page{break-before:page}#sstPrint .grid-print h2.grid-band{background:#9ccfdc;color:#15353e;padding:12px;margin:0;border:0;font-size:15pt}#sstPrint .grid-print .grid-questions{grid-template-columns:repeat(2,minmax(0,1fr))}#sstPrint .grid-print .grid-question{break-inside:avoid;padding:10px}#sstPrint .grid-print .grid-question>p{font-size:10pt;line-height:1.4;margin-bottom:10px}#sstPrint .grid-print .grid-subhead{font-size:11pt;margin:0;break-after:avoid}#sstPrint .grid-print .grid-choice{min-width:45px}#sstPrint .grid-print .grid-choice span{min-height:28px;padding:4px 8px;font-size:9pt}#sstPrint .grid-print .grid-meta{grid-template-columns:1fr 1fr 1.4fr}#sstPrint .grid-print .grid-action-fields{grid-template-columns:1fr 1fr}#sstPrint .grid-print .grid-action{break-inside:avoid}#sstPrint .grid-print details summary{min-height:0}#sstPrint .grid-print .grid-note{margin:0}#sstPrint .grid-print .grid-band small{font-size:9pt}}
 
+@page inspectionLegal { size: legal portrait !important; margin: .42in .48in; }
+@media print {
+ html:has(#sstPrint > .inspection-legal), body:has(#sstPrint > .inspection-legal), #sstPrint:has(> .inspection-legal), #sstPrint > .inspection-legal { page: inspectionLegal; }
+ #sstPrint .inspection-legal { font: 9pt/1.22 Arial, sans-serif; color: #14241e; }
+ #sstPrint .inspection-legal h1 { font-size: 16pt; margin: 0 0 3pt; }
+ #sstPrint .inspection-legal h2 { font-size: 12pt; margin: 6pt 0 3pt; break-after: avoid; }
+ #sstPrint .inspection-legal p { margin: 2pt 0; }
+ #sstPrint .inspection-legal table { display: table; width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; margin: 5pt 0 0; font: inherit; }
+ #sstPrint .inspection-legal th, #sstPrint .inspection-legal td { white-space: pre-wrap; overflow-wrap: anywhere; border: .5pt solid #9caaa3; text-align: left; vertical-align: top; padding: 2pt 4pt; }
+ #sstPrint .inspection-legal thead { display: table-header-group; }
+ #sstPrint .inspection-legal thead th { font-size: 10pt; background: #e3ece7; }
+ #sstPrint .inspection-heading { break-after: avoid; }
+ #sstPrint .inspection-heading th { background: #f2f5f3; }
+ .inspection-result { width: 15mm; }
+ .inspection-note { margin-top: 2pt; }
+}
