@@ -6,7 +6,7 @@ import {PGlite} from '@electric-sql/pglite';
 if(!process.env.TEST_STARTUP_DB||process.env.NODE_ENV!=='test')throw Error('Isolated test environment required');
 let primary,employeeVaultPool;
 class TestPool extends EventEmitter{
-  constructor(options={}){super();const vault=options.connectionString==='postgres://employee-files.test/test';if(!vault)primary=this;else employeeVaultPool=this;this.db=new PGlite(process.env.TEST_STARTUP_DB+(vault?'-employee-vault':''));this.ready=vault?this.db.exec('SET search_path=employee_files_private'):Promise.resolve();this.waiting=Promise.resolve();this.failSchema=vault&&process.env.TEST_EMPLOYEE_SCHEMA_FAILURE==='yes';}
+  constructor(options={}){super();const vault=options.connectionString==='postgres://employee-files.test/test';if(!vault)primary=this;else employeeVaultPool=this;this.db=new PGlite(process.env.TEST_STARTUP_DB+(vault?'-employee-vault':''));this.ready=vault?this.db.exec(options.options==='-c search_path=employee_files_single_trial'?'SET search_path=employee_files_single_trial':'SET search_path=employee_files_private'):Promise.resolve();this.waiting=Promise.resolve();this.failSchema=vault&&process.env.TEST_EMPLOYEE_SCHEMA_FAILURE==='yes';}
   async connect(){
     const previous=this.waiting;let unlock;
     this.waiting=new Promise(resolve=>unlock=resolve);await previous;

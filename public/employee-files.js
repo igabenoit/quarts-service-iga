@@ -29,6 +29,10 @@ async function render(){const hash=location.hash.slice(1)||'dossiers';if(hash.st
 function dossiers(){if(view==='employe'){const e=state.employees[0];if(e)return person(e.key);}
  const list=state.employees.filter(e=>(!department||e.departments.includes(Number(department)))&&(!search||e.name.toLocaleLowerCase('fr-CA').includes(search.toLocaleLowerCase('fr-CA'))));
  $('#content').innerHTML=`<div class="row spread"><div><p class="eyebrow">DOSSIERS PARTAGÉS AVEC LE PERSONNEL</p><h2>${views[view]}</h2></div><div class="actions">${['direction','gerant'].includes(view)?'<a class="button" href="/departements.html?creation=accueil">Créer un employé</a>':''}<a class="button secondary" href="${apiUrl('export')}">Exporter mon périmètre</a></div></div><p>Les pièces déjà au dossier, les documents à examiner et les étapes à compléter.</p><div class="banner">Invitations désactivées. Les campagnes ajoutent des documents au portail sans envoyer de courriel. La collecte bancaire, fiscale et médicale reste désactivée.</div><div class="filters"><label>Rechercher un employé<input id="search" type="search" value="${esc(search)}" placeholder="Nom de l’employé"></label><label>Département<select id="department"><option value="">Tous mes départements</option>${state.departments.map(d=>`<option value="${d.id}" ${String(d.id)===department?'selected':''}>${esc(d.name)}</option>`).join('')}</select></label></div><p class="muted">${list.length} fiche(s) · Les matricules sont masqués, car ils servent aussi à se connecter.</p><div class="cards">${list.map(e=>{const rows=state.assignments.filter(r=>r.employee_key===e.key&&r.status!=='superseded'),done=rows.filter(r=>['signed','filed'].includes(r.status)).length,missing=state.missing.filter(r=>r.employee_key===e.key).length;return `<article class="card"><h3>${esc(e.name)}</h3><p class="muted">${esc(e.jobTitle||'Poste à préciser')}<br>${esc(depNames(e))}</p><div>${e.issue?'<span class="badge warn">Rapprochement à vérifier</span>':'<span class="badge">Matricule rapproché</span>'}${!e.active?' <span class="badge">Inactif</span>':''}</div>${state.onboarding?.[e.key]?'<p><strong>Accueil · '+(state.onboarding[e.key].invited?state.onboarding[e.key].done+' sur '+state.onboarding[e.key].total+' complété(s)':'Brouillon')+'</strong></p>':''}<p>${done} / ${rows.length} document(s) terminé(s) · ${missing} manquant(s)</p><div class="progress"><progress max="${Math.max(1,rows.length)}" value="${done}"></progress></div><div class="actions"><button data-person="${e.key}">Ouvrir le dossier</button></div></article>`;}).join('')||'<p>Aucun employé dans ce périmètre.</p>'}</div>`;
+ if(state.storage?.singleTrial && state.canManage){
+  const panel=document.createElement('section');$('#content .filters').before(panel);
+  onboardingPanel(panel,'trial:unique').catch(err=>panel.textContent=err.message);
+ }
  $('#search').oninput=e=>{search=e.target.value;const pos=e.target.selectionStart;dossiers();$('#search').focus();$('#search').setSelectionRange(pos,pos);};$('#department').onchange=e=>{department=e.target.value;dossiers();};$('#content').querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>person(b.dataset.person));
 }
 function person(key){currentPerson=key;const e=emp(key),rows=state.assignments.filter(r=>r.employee_key===key),missing=state.missing.filter(r=>r.employee_key===key),done=rows.filter(r=>['signed','filed'].includes(r.status)).length;
@@ -91,7 +95,7 @@ async function onboardingPanel(panel,key){
  if(!c.eligible)return;
  const items=c.documents,done=items.filter(d=>d.original_id).length;
  panel.className='panel';
- panel.innerHTML='<h3>Parcours d’accueil</h3>'+(c.invited_at?
+ panel.innerHTML=(c.trialPolicy?'<h3>Essai d’accueil · Jo Blo (fictif)</h3>':'<h3>Parcours d’accueil</h3>')+(c.invited_at?
   '<p><strong>'+done+' document(s) sur '+items.length+' complété(s)</strong></p><p>Invitation · '+fmt(c.invited_at)+' · Dernière activité · '+(c.activity?fmt(c.activity):'En attente')+' · Échéance · '+fmt(c.due)+'</p>'+
   items.map(d=>'<p>'+esc(c.catalog[d.kind])+' · '+(d.original_id?'<a href="'+apiUrl('originals/'+d.original_id)+'" target="_blank" rel="noopener">Ouvrir le PDF signé</a>':'À compléter')+'</p>').join('')+
   (c.completed_at?'':(c.active?'<button data-op="revoke">Révoquer le lien</button>':'<p>Lien révoqué</p>')+' <button data-op="renew">Renouveler le lien</button>'):
@@ -100,7 +104,15 @@ async function onboardingPanel(panel,key){
   const result=await request(op,body);await onboardingPanel(panel,key);
   if(result.path){const label=document.createElement('label');label.textContent='Lien individuel à transmettre';const field=document.createElement('input');field.readOnly=true;field.value=new URL(result.path,location.origin).href;label.append(field);panel.append(label);field.select();}
  }
- const form=panel.querySelector('form');if(form)form.onsubmit=action(async()=>{const f=new FormData(form);await change('invite',{...Object.fromEntries(f),days:Number(f.get('days')),documents:f.getAll('doc')});});
+ const form=panel.querySelector('form');
+ if(form && c.trialPolicy){
+  form.elements.email.value=c.employeeEmail;form.elements.email.readOnly=true;
+  form.elements.managerEmail.value=c.managerEmail;form.elements.managerEmail.readOnly=true;
+  const policy=document.createElement('details');policy.innerHTML='<summary>Politique de l’essai</summary><pre>'+esc(c.trialPolicy)+'</pre>';
+  const consent=document.createElement('label');consent.innerHTML='<input type="checkbox" required name="approvedPolicy" value="'+esc(c.policyId)+'"> J’approuve cette politique pour la fiche fictive et ces deux destinataires.';
+  form.querySelector('button').before(policy,consent);
+ }
+ if(form)form.onsubmit=action(async()=>{const f=new FormData(form);await change('invite',{...Object.fromEntries(f),days:Number(f.get('days')),documents:f.getAll('doc')});});
  for(const b of panel.querySelectorAll('[data-op]'))b.onclick=action(()=>change(b.dataset.op,{}));
  clearTimeout(panel.refreshTimer);if(c.invited_at&&!c.completed_at){panel.refreshTimer=setTimeout(()=>{if(panel.isConnected && !panel.querySelector('input[readonly]'))onboardingPanel(panel,key).catch(()=>{});},30000);}
 }

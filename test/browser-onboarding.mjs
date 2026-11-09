@@ -2,15 +2,21 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {liveAppFixture} from './live-app-fixture.mjs';
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
-const f=await liveAppFixture({employeeVault:true});let browser;
+const trial=process.argv.includes('--single-trial');
+const f=await liveAppFixture({employeeVault:!trial,singleTrial:trial});let browser;
 try{
  const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
  const headers={Origin:f.base,'X-Employee-Files':'1'};
- await f.call('POST','/api/employee-files/policy?view=direction',{cookie,headers,body:{text:'Politique fictive. '.repeat(24),confirmed:true}});
+ if(!trial)await f.call('POST','/api/employee-files/policy?view=direction',{cookie,headers,body:{text:'Politique fictive. '.repeat(24),confirmed:true}});
  browser=await chromium.launch({executablePath:process.env.CHROME_PATH,headless:true});
  const manager=await browser.newPage();
  const [name,value]=cookie.split('=');await manager.context().addCookies([{name,value,url:f.base}]);
  await manager.goto(f.base+'/dossiers-employes?vue=direction');
+ if(trial){
+  await manager.getByRole('heading',{name:/Essai d’accueil/}).waitFor();
+  assert.equal(await manager.getByLabel('Courriel de l’employé').inputValue(),'employee@example.invalid');
+  await manager.getByLabel(/J’approuve cette politique/).check();
+ }else{
  await manager.getByRole('link',{name:'Créer un employé'}).click();
  await manager.locator('#personName').fill('Camille Exemple');
  await manager.locator('#personEmployeeCode').fill('887551');
@@ -19,6 +25,7 @@ try{
  await manager.getByRole('heading',{name:'Camille Exemple'}).waitFor();
  await manager.getByLabel('Courriel de l’employé').fill('camille@example.invalid');
  await manager.getByLabel('Courriel du gestionnaire').fill('rh@example.invalid');
+ }
  await manager.getByLabel('Échéance',{exact:true}).fill('2030-11-10');
  await manager.getByRole('button',{name:'Inviter l’employé'}).click();
  const link=await manager.getByLabel('Lien individuel à transmettre').inputValue();
