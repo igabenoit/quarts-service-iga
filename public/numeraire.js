@@ -14,7 +14,7 @@ else {
    heading.textContent=(row.pickup||'Date inconnue')+' · Casier '+(row.lockers||[]).join(' et ');
    info.textContent='Envoyée à '+row.recipient+' · '+new Date(row.created_at).toLocaleDateString('fr-CA');
    link.href='/lecture-pdf.html#'+new URLSearchParams({source:'numeraire',id:row.id});
-   link.textContent='Ouvrir ou imprimer le PDF signé';article.append(heading,info,link);list.append(article);
+   link.textContent='Ouvrir ou imprimer le PDF signé';article.append(heading,info,link);for(const n of [24,25])if(row['x'+n]){const a=document.createElement('a');a.href='/api/numeraire/excel/'+row.id+'/'+n;a.textContent='Excel envoyé · casier '+n;article.append(document.createElement('br'),a);}list.append(article);
   }
   if(!list.children.length)list.textContent='Aucune commande envoyée pour cette sélection.';
  }
