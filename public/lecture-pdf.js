@@ -1,10 +1,15 @@
 const params=new URLSearchParams(location.hash.slice(1));
 const id=params.get('id'), view=params.get('view')||'direction';
 const get=id=>document.getElementById(id);
+const cash=params.get('source')==='numeraire';
 const employeeKey=params.get('key');
 const folder= /^(store|service):[1-9]\d*$/.test(employeeKey||'')?'dossiers/'+employeeKey:'dossiers';
 get('backToFiles').href='/dossiers-employes?'+new URLSearchParams({vue:view})+'#'+folder;
 if(folder!=='dossiers')get('backToFiles').textContent='← Dossier de l’employé';
+if(cash){
+ get('backToFiles').href='/numeraire#historique';get('backToFiles').textContent='← Historique des commandes';
+ document.querySelector('h1').textContent='Commande de numéraire signée';
+}
 const status=get('status'), download=get('download'), canvas=document.querySelector('canvas');
 let pdf, pageNumber=1;
 async function draw(number){
@@ -47,7 +52,7 @@ async function printDocument(){
 window.addEventListener('afterprint',()=>get('printPages').replaceChildren());
 async function open(){
  if(!/^[a-f0-9-]{36}$/i.test(id||''))throw Error('Lien de document invalide. Rouvre le document depuis le dossier employé.');
- const url='/api/employee-files/originals/'+id+'?'+new URLSearchParams({view});
+ const url=cash?'/api/numeraire/pdf/'+id+'?source=historique':'/api/employee-files/originals/'+id+'?'+new URLSearchParams({view});
  const response=await fetch(url,{credentials:'same-origin',cache:'no-store'});
  if(response.status===401||response.status===403)throw Error('Accès au document refusé. Reconnecte-toi au portail avec ton compte autorisé puis rouvre le dossier.');
  if(!response.ok||!response.headers.get('content-type')?.startsWith('application/pdf'))throw Error('Document indisponible. Rouvre-le depuis le dossier employé.');

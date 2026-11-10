@@ -3,8 +3,40 @@ import {bindDirectionInk} from './direction-ink.js';
 const $=s=>document.querySelector(s),form=$('form'),result=$('#result');
 const session=await fetch('/api/session',{cache:'no-store'}).then(r=>r.json()).catch(()=>({}));
 if(session?.user?.kind!=='admin')$('#login').hidden=false;
-else init();
-function init(){
+else {
+ $('#cashTabs').hidden=false;
+ let records=[];
+ function renderHistory(){
+  const date=$('#pickupFilter').value,locker=Number($('#lockerFilter').value);
+  const list=$('#orders');list.replaceChildren();
+  for(const row of records.filter(r=>(!date||r.pickup===date)&&(!locker||r.lockers?.includes(locker)))){
+   const article=document.createElement('article'),heading=document.createElement('h3'),info=document.createElement('p'),link=document.createElement('a');
+   heading.textContent=(row.pickup||'Date inconnue')+' · Casier '+(row.lockers||[]).join(' et ');
+   info.textContent='Envoyée à '+row.recipient+' · '+new Date(row.created_at).toLocaleDateString('fr-CA');
+   link.href='/lecture-pdf.html#'+new URLSearchParams({source:'numeraire',id:row.id});
+   link.textContent='Ouvrir ou imprimer le PDF signé';article.append(heading,info,link);list.append(article);
+  }
+  if(!list.children.length)list.textContent='Aucune commande envoyée pour cette sélection.';
+ }
+ async function tab(){
+  const history=location.hash==='#historique';
+  $('#history').hidden=!history;$('#draft').hidden=history;
+  if(history){
+   $('#orders').textContent='Chargement…';
+   try{const r=await fetch('/api/numeraire/historique',{cache:'no-store'});if(!r.ok)throw Error();records=await r.json();renderHistory();}
+   catch{$('#orders').textContent='Impossible de charger l’historique.';}
+  }
+ }
+ $('#pickupFilter').oninput=$('#lockerFilter').onchange=renderHistory;
+ window.addEventListener('hashchange',tab);tab();
+ try{
+  const r=await fetch('/api/numeraire/config',{cache:'no-store'});const config=await r.json();
+  if(!r.ok||!config.recipient)throw Error();
+  $('#testMode').textContent='Mode test · Les commandes seront envoyées à '+config.recipient+'.';
+  $('#recipient').textContent=config.recipient;init(config.recipient);
+ }catch{result.textContent='Envoi désactivé : destinataire de test indisponible.';}
+}
+function init(testRecipient){
  form.hidden=false;
  const quantities=[];
  for(const locker of [24,25]){
@@ -39,14 +71,14 @@ function init(){
     if(invalid>=0)throw Error('Casier '+(24+invalid)+' · '+amounts[invalid].error);
     if(!amounts.some(a=>a.total))throw Error('Ajoute au moins une quantité.');
     if(!strokes.some(l=>l.some(p=>Math.hypot(p[0]-l[0][0],p[1]-l[0][1])>.01)))throw Error('Trace ta signature.');
-    pending={id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:form.elements.time.value,name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
+    pending={testRecipient,id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:form.elements.time.value,name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
     for(const f of form.querySelectorAll('fieldset'))f.disabled=true;
    }
    $('#send').disabled=true;result.textContent='Envoi en cours…';
    const r=await fetch('/api/numeraire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pending)});
    const data=await r.json();
    if(!r.ok){if(r.status===400){pending=null;for(const f of form.querySelectorAll('fieldset'))f.disabled=false;}throw Error(data.error||'Envoi non confirmé.');}
-   form.hidden=true;result.textContent='Commande envoyée à caisse.t90044@desjardins.com pour le '+pending.date+'.';$('#again').hidden=false;
+   form.hidden=true;result.textContent='Commande test envoyée à '+testRecipient+' pour le '+pending.date+'.';$('#again').hidden=false;
   }catch(error){result.textContent=error.message;}finally{$('#send').disabled=false;}
  };
 }
