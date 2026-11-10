@@ -1,3 +1,4 @@
+import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
 import {employeeFilesStorage} from './employee-files-storage.js';
@@ -628,6 +629,7 @@ const employeePortal=departmentService.employeePortal;
 await managerAccess.installEmployeeLinks();
 startupPhase('schema_sst');
 await installEthicsSource(app,pool);
+await installCash(app,pool,requireManager,sameOrigin);
 const sstService=await installSST(app,pool,{identity:req=>managerAccess.identity(req)});
 installSSTIntake(app,pool,sstService);
 await installInspectionGrid(app,pool,sstService);

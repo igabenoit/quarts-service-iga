@@ -52,7 +52,7 @@ if(path==='/horaire-famille'){
   const admin=user.kind==='admin';
   const items=[['Dossiers d’employés','/dossiers-employes'],['Horaires des départements','/departements'],
    ['Gestion des congés','/conges-gestion'],['Gestion des disponibilités','/disponibilites-gestion']];
-  if(admin)items.push(['Santé et sécurité','/sst'],['Horaires du magasin','/horaires-departements?vue=magasin'],
+  if(admin)items.push(['Commande de numéraire','/numeraire'],['Santé et sécurité','/sst'],['Horaires du magasin','/horaires-departements?vue=magasin'],
    ['Commandes de chandails','/chandails-gestion'],['Gestion des accès','/acces'],['Clés des employés','/cles-employes'],
    ['Accès familiaux','/acces-famille'],['Courriels des employés','/courriels']);
   if(user.serviceAccess)items.push(['Quarts Service','/'],['Discussion du Service','/discussion?mode=manager']);
