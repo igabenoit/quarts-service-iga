@@ -7,7 +7,7 @@ function signedPdfUrl(id){
  const key=state.receivedDocuments?.find(doc=>doc.originalId===id)?.key||currentPerson;
  return '/lecture-pdf.html#'+new URLSearchParams({id,view,...(key?{key}:{})});
 }
-async function api(path,body,method=body===undefined?'GET':'POST'){if(state?.storage?.ready===false&&method!=='GET'&&path!=='reconcile')throw Error(state.storage.message);const r=await fetch(apiUrl(path),{method,cache:'no-store',headers:{'Content-Type':'application/json','X-Employee-Files':'1'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error||'Opération impossible.'),{status:r.status});return data;}
+async function api(path,body,method=body===undefined?'GET':'POST'){if(state?.storage?.ready===false&&method!=='GET'&&!['reconcile','direction-signature'].includes(path))throw Error(state.storage.message);const r=await fetch(apiUrl(path),{method,cache:'no-store',headers:{'Content-Type':'application/json','X-Employee-Files':'1'},...(body===undefined?{}:{body:JSON.stringify(body)})});const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error||'Opération impossible.'),{status:r.status});return data;}
 const fmt=v=>v?new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeZone:'America/Toronto'}).format(new Date(/^\d{4}-\d{2}-\d{2}$/.test(v)?v+'T12:00:00Z':v)):'Date inconnue';
 const badge=s=>`<span class="badge ${['signed','filed'].includes(s)?'ok':['missing','review'].includes(s)?'warn':''}">${esc(statuses[s]||s)}</span>`;
 const emp=key=>state.employees.find(e=>e.key===key),depNames=e=>e.departments.map(id=>state.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · ');
@@ -72,10 +72,47 @@ function onsiteForms(){
  const people=state.storage?.singleTrial&&!state.storage.ready?[{key:'trial:unique',name:'Jo Blo · Essai fictif'}]:state.employees.filter(e=>e.active&&!e.issue);
  const panel=$('#onsiteForms');
  panel.innerHTML='<section class="panel"><h3>Formulaires d’accueil</h3><label>Dossier de l’employé<select id="onsitePerson" required><option value="">Choisir un employé</option>'+people.map(e=>'<option value="'+esc(e.key)+'">'+esc(e.name)+'</option>').join('')+'</select></label><div class="actions"><button data-onsite="tuac">Adhésion TUAC 500</button><button data-onsite="retraite">Inscription au régime de retraite</button><button data-onsite="urgence">Informations en cas d’urgence</button><button data-onsite="ethique">Code d’éthique et politiques</button><button data-onsite="sst">Accueil général SST · Annexe 11.1</button></div><p class="muted">Renseignements médicaux facultatifs : accès réservé aux personnes habilitées.</p><p><a href="https://drive.google.com/file/d/1akRYYDrMZwCi-_EXiLkPjuqqw_wSS9D6/view?usp=drivesdk" target="_blank" rel="noopener noreferrer">Télécharger le formulaire d’urgence vierge (PDF remplissable)</a></p></section>';
+ if(state.canManage){
+  const button=document.createElement('button');
+  button.textContent='Ma signature de direction';
+  panel.firstElementChild.append(button);
+  button.onclick=editDirectionSignature;
+ }
  for(const button of panel.querySelectorAll('[data-onsite]'))button.onclick=()=>{
   const select=$('#onsitePerson');if(!select.reportValidity())return;
   location.assign('/accueil-employe.html?sur-place#'+new URLSearchParams({key:select.value,kind:button.dataset.onsite}));
  };
+}
+function editDirectionSignature(){
+ modal('Signature de Marc-Andre Benoit',`<p>Trace ta signature pour la page 52 des nouveaux codes d’éthique.</p>
+ <canvas id="directionInk" width="1000" height="250" aria-label="Zone de signature" style="width:100%;height:auto;touch-action:none;border:1px solid #88998e;background:white"></canvas>
+ <div class="actions"><button id="clearInk">Recommencer</button><button id="saveInk" disabled>Enregistrer ma signature</button></div>`);
+ const canvas=$('#directionInk'),ctx=canvas.getContext('2d'),save=$('#saveInk');
+ const strokes=[];
+ let pointer=null,line;
+ ctx.strokeStyle='#103476';ctx.lineWidth=3;ctx.lineCap='round';
+ function point(e){
+  const box=canvas.getBoundingClientRect();
+  return [(e.clientX-box.left)/box.width,(e.clientY-box.top)/box.height].map(n=>Math.min(1,Math.max(0,n)));
+ }
+ canvas.onpointerdown=e=>{
+  if(pointer!==null)return;
+  pointer=e.pointerId;canvas.setPointerCapture(pointer);line=[point(e)];strokes.push(line);dialogDirty=true;
+ };
+ canvas.onpointermove=e=>{
+  if(pointer!==e.pointerId)return;
+  const p=point(e),last=line.at(-1);
+  ctx.beginPath();ctx.moveTo(last[0]*1000,last[1]*250);ctx.lineTo(p[0]*1000,p[1]*250);ctx.stroke();line.push(p);save.disabled=false;
+ };
+ canvas.onlostpointercapture=()=>{pointer=null;};
+ $('#clearInk').onclick=()=>{ctx.clearRect(0,0,1000,250);strokes.length=0;save.disabled=true;};
+ save.onclick=action(async()=>{
+  save.disabled=true;
+  try{
+   await api('direction-signature',{strokes:strokes.filter(l=>l.length>1)});
+   dialogDirty=false;$('#editor').close();notice('Signature enregistrée pour la page 52 des nouveaux codes d’éthique.');
+  }finally{save.disabled=false;}
+ });
 }
 function fillPrintable(t){
  const controls=t.fields.map((f,i)=>{

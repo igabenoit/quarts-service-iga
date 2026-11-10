@@ -1,4 +1,4 @@
-import {ethicsSource} from './ethics-source.js';
+import {ethicsSource,directionSignature} from './ethics-source.js';
 import PDFLib from './tuac/pdf-lib.min.cjs';
 
 export const ethicsKeys=['Prénom','Nom','Poste','Signature','Respect','Vente','Réception'];
@@ -42,8 +42,25 @@ async function makePDF(values,strokes){
   receipt.drawText(text,{x:x+1,y:height-top-10,size:11,font});
  }
  receipt.drawText('Marc-Andre Benoit',{x:126,y:height-412,size:11,font,color:ink});
+ const signature=await directionSignature();
+ if(signature){
+  const points=signature.flat().map(([u,v])=>[u*4,v]);
+  const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+  const minX=xs.reduce((a,b)=>Math.min(a,b)),maxX=xs.reduce((a,b)=>Math.max(a,b));
+  const minY=ys.reduce((a,b)=>Math.min(a,b)),maxY=ys.reduce((a,b)=>Math.max(a,b));
+  const scale=Math.min(182/Math.max(.01,maxX-minX),34/Math.max(.01,maxY-minY));
+  for(const line of signature){
+   let previous;
+   for(const [u,v] of line){
+    const next={x:68+(4*u-minX)*scale,y:height-480+(maxY-v)*scale};
+    if(previous)receipt.drawLine({start:previous,end:next,thickness:1,color:ink});
+    previous=next;
+   }
+  }
+ }else{
  const signatureFont=await pdf.embedFont(PDFLib.StandardFonts.TimesRomanBoldItalic);
  receipt.drawText('Marc-Andre Benoit',{x:66,y:height-477,size:18,font:signatureFont,color:ink});
+ }
  receipt.drawText('Direction  |  ALIMENTATION SOGESCO INC.',{x:67,y:height-491,size:8,font,color:ink});
  for(const [number,label,left,top,width,height,kind] of regions){
   const page=pdf.getPage(number-1),scale=72/84;
@@ -69,8 +86,7 @@ async function makePDF(values,strokes){
  form.updateFieldAppearances(font);
  return Buffer.from(await pdf.save());
 }
-let template;
-export function blankEthics(){return template??=makePDF().catch(error=>{template=null;throw error;});}
+export function blankEthics(){return makePDF();}
 export async function signedEthics(a,strokes){
  validate(a,strokes);
  const date=a.Signature;

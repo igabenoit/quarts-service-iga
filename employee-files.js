@@ -1,3 +1,4 @@
+import {saveDirectionSignature} from './onboarding/ethics-source.js';
 import {installSingleTrial} from './onboarding/single-trial.js';
 import {installOnboarding,onboardingTitle} from './onboarding/routes.js';
 import express from 'express';
@@ -55,7 +56,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  // Mount only after schema initialization succeeds, so startup can safely retry
  // in consultation-only mode without leaving a partially initialized router.
  if(trialPool)await installSingleTrial(app,trialPool,{managerAccess,wrap,date});
- app.use(BASE,(req,res,next)=>{if(pool||['/state','/policy','/privacy','/training','/legacy','/access','/reconcile'].includes(req.path)&&(['GET'].includes(req.method)||req.path==='/reconcile'))return next();res.status(503).json({error:storageStatus.message||'Connectez le coffre documentaire canadien avant toute saisie.'});});
+ app.use(BASE,(req,res,next)=>{if(pool||req.path==='/direction-signature'||['/state','/policy','/privacy','/training','/legacy','/access','/reconcile'].includes(req.path)&&(['GET'].includes(req.method)||req.path==='/reconcile'))return next();res.status(503).json({error:storageStatus.message||'Connectez le coffre documentaire canadien avant toute saisie.'});});
  const transaction=async fn=>{const db=await pool.connect();try{await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835109)');const r=await fn(db);await db.query('COMMIT');return r;}catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}};
  const event=(db,a,action,data,id=null)=>db.query('INSERT INTO employee_file_events(assignment_id,action,actor,data) VALUES($1,$2,$3,$4)',[id,action,json(a.audit),json(data)]);
  async function directory(){
@@ -134,6 +135,11 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   }
   return {receivedDocuments,onboarding,storage:storageStatus,view:a.view,views:a.views,identity:a.audit,canManage:a.admin&&a.view==='direction',invitationsEnabled:false,sensitiveCollectionEnabled:false,policyVersion:policy?.id||null,policyAcknowledged,employees:employees.map(publicEmployee),departments:deps,assignments,missing,templates:selectedTemplates,exceptions:a.view==='direction'?employees.filter(e=>e.issue).map(publicEmployee):[]};
  }
+ app.post(BASE+'/direction-signature',auth,origin,wrap(async(req,res)=>{
+  manage(req.ef);
+  await saveDirectionSignature(req.body?.strokes,req.ef.audit);
+  res.json({ok:true});
+ }));
  await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));

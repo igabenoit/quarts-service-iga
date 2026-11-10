@@ -10,5 +10,23 @@ async function source(hash){
 }
 export async function installEthicsSource(app,pool){
  db=pool;
+ await pool.query('CREATE SCHEMA IF NOT EXISTS onboarding_private');
+ await pool.query('CREATE TABLE IF NOT EXISTS onboarding_private.direction_signature (singleton boolean PRIMARY KEY CHECK(singleton), strokes jsonb NOT NULL, actor jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())');
  await db.query('CREATE TABLE IF NOT EXISTS onboarding_ethics_source(sha256 text PRIMARY KEY,document bytea NOT NULL)');
 }
+
+export async function directionSignature(){
+ const result=await db.query('SELECT strokes FROM onboarding_private.direction_signature WHERE singleton=true');
+ return result.rows[0]?.strokes;
+}
+export async function saveDirectionSignature(strokes,actor){
+ const validPoint=p=>Array.isArray(p)&&p.length===2&&p.every(n=>Number.isFinite(n)&&n>=0&&n<=1);
+ if(!Array.isArray(strokes)||!strokes.length||strokes.length>200||
+    !strokes.every(line=>Array.isArray(line)&&line.length>=2&&line.length<=4000&&line.every(validPoint))||
+    !strokes.some(line=>line.some(p=>Math.hypot(p[0]-line[0][0],p[1]-line[0][1])>.01))){
+  throw Object.assign(Error('Tracez votre signature avant de l’enregistrer.'),{status:400});
+ }
+ await db.query(`INSERT INTO onboarding_private.direction_signature(singleton,strokes,actor) VALUES(true,$1,$2)
+ ON CONFLICT(singleton) DO UPDATE SET strokes=EXCLUDED.strokes,actor=EXCLUDED.actor,updated_at=now()`,[JSON.stringify(strokes),JSON.stringify(actor)]);
+}
+
