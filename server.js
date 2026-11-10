@@ -1,3 +1,4 @@
+import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
 import {employeeFilesStorage} from './employee-files-storage.js';
 import {installPreventionProgram} from './prevention-program.js';
@@ -626,6 +627,7 @@ const departmentService=await installDepartmentSchedules(app,pool,{requireManage
 const employeePortal=departmentService.employeePortal;
 await managerAccess.installEmployeeLinks();
 startupPhase('schema_sst');
+await installEthicsSource(app,pool);
 const sstService=await installSST(app,pool,{identity:req=>managerAccess.identity(req)});
 installSSTIntake(app,pool,sstService);
 await installInspectionGrid(app,pool,sstService);

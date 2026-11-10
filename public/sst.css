@@ -15,3 +15,16 @@
 #supervisionForm legend { font-weight: 650; padding: 0 .25rem; }
 #supervisionForm label:has(input[type=checkbox]) { display: flex; align-items: baseline; gap: .6rem; margin: .35rem 0; }
 #supervisionForm input[type=checkbox] { width: 1.1rem; min-height: auto; flex: none; }
+@page supervisionPaper{size:legal portrait!important;margin:.45in .5in}
+@media print{
+ html:has(.sv-paper),body:has(.sv-paper),#sstPrint:has(.sv-paper),.sv-paper{page:supervisionPaper}
+ #sstPrint .sv-paper{font:10pt/1.24 Arial,sans-serif}
+ #sstPrint .sv-sheet+.sv-sheet{break-before:page}
+ #sstPrint .sv-paper h1{font-size:16pt;margin:0 0 4pt}
+ #sstPrint .sv-paper h2{font-size:11pt;margin:9pt 0 4pt}
+ #sstPrint .sv-paper table{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse;margin:7pt 0}
+ #sstPrint .sv-paper th,#sstPrint .sv-paper td{font-size:9pt;padding:4pt;white-space:normal;overflow-wrap:anywhere}
+ #sstPrint .sv-paper th:not(:first-child),#sstPrint .sv-paper td:not(:first-child){text-align:center;vertical-align:middle}
+ .sv-rating{width:13mm}.sv-box{display:inline-block;width:9pt;height:9pt;border:1pt solid black;vertical-align:-1pt}
+ .sv-actions div{margin:3pt 0}.sv-lines{height:54pt;background:repeating-linear-gradient(transparent 0 17pt,#888 17pt 18pt);print-color-adjust:exact}
+}

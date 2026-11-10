@@ -9,6 +9,7 @@ async function call(action,body={}){
  const url=onsite?'/api/employee-files/onboarding/sur-place/'+action+'?'+new URLSearchParams({key:localParams.get('key'),view:'direction'}):'/api/accueil-employe/'+action;
  if(onsite)body.kind=localParams.get('kind');
  const r=await fetch(url,{method:'POST',cache:'no-store',credentials:onsite?'same-origin':'omit',headers:{'Content-Type':'application/json','X-Employee-Files':'1',...(onsite?{}:{Authorization:'Bearer '+token})},body:JSON.stringify(body)});
+ if(action==='lecture'&&r.ok)return r.blob();
  const result=await r.json();if(!r.ok)throw Error(result.error);return result;
 }
 function show(state){
@@ -29,9 +30,26 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
+ if(d.kind==='ethique'){
+  const read=node('button','Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
+  read.onclick=async()=>{try{
+   const blob=await call('lecture',{kind:d.kind}),url=URL.createObjectURL(blob),link=node('a');
+   link.href=url;link.download='Code d’éthique et politiques - septembre 2025.pdf';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(error){status.textContent=error.message;}};
+  form.append(read);
+  const confirmations={Respect:'Page 40 · Je signe le registre de la politique de respect au travail.',Vente:'Page 51 · Je reconnais avoir été informé des obligations relatives à la vente aux mineurs décrites dans cette attestation.',Réception:'Page 52 · Je certifie avoir reçu le code d’éthique et les politiques et j’accepte les dispositions de l’accusé de réception.'};
+  for(const key of d.fields){
+   const label=node('label',confirmations[key]||(key==='Signature'?'Date de signature':key==='Poste'?'Titre du poste':key));
+   const input=node('input');input.name=key;input.required=true;
+   if(confirmations[key]){input.type='checkbox';input.checked=d.draft[key]==='yes';label.prepend(input);}
+   else{input.type=key==='Signature'?'date':'text';input.maxLength=100;input.value=d.draft[key]||'';label.append(input);}
+   fields.set(key,input);form.append(label);
+  }
+  form.append(node('p','Ta signature sera apposée aux trois emplacements de l’employé. La dernière signature de la page 52 est réservée au supérieur immédiat.'));
+ }
  const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
   const validateEmergency=d.kind==='urgence'?buildEmergency(form,d.draft,fields):null;
- if(!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
+ if(d.kind!=='ethique'&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);
