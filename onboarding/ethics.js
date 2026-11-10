@@ -32,6 +32,19 @@ function validate(a,lines){
 async function makePDF(values,strokes){
  const pdf=await PDFLib.PDFDocument.load(await ethicsSource());
  const font=await pdf.embedFont(PDFLib.StandardFonts.Helvetica),form=pdf.getForm();
+ const receipt=pdf.getPage(51);
+ const height=receipt.getHeight();
+ for(const [x,top,width,text] of [
+  [294,69,245,'ALIMENTATION SOGESCO INC.'],
+  [179,83,350,'3000 boul. Laframboise, Saint-Hyacinthe, J2S 4Z4']
+ ]){
+  receipt.drawRectangle({x,y:height-top-13,width,height:13,color:PDFLib.rgb(1,1,1)});
+  receipt.drawText(text,{x:x+1,y:height-top-10,size:11,font});
+ }
+ receipt.drawText('Marc-Andre Benoit',{x:126,y:height-412,size:11,font,color:ink});
+ const signatureFont=await pdf.embedFont(PDFLib.StandardFonts.TimesRomanBoldItalic);
+ receipt.drawText('Marc-Andre Benoit',{x:66,y:height-477,size:18,font:signatureFont,color:ink});
+ receipt.drawText('Direction  |  ALIMENTATION SOGESCO INC.',{x:67,y:height-491,size:8,font,color:ink});
  for(const [number,label,left,top,width,height,kind] of regions){
   const page=pdf.getPage(number-1),scale=72/84;
   const x=left*scale,y=page.getHeight()-(top+height)*scale,w=width*scale,h=height*scale;
