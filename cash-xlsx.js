@@ -6,7 +6,7 @@ const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 function cell(sheet,address,value,formula){
  const re=new RegExp('<c\\b([^>]*\\br="'+address+'"[^>]*?)(?:/>|>[\\s\\S]*?</c>)');
  if(!re.test(sheet))throw Error('Missing template cell '+address);
- return sheet.replace(re,(_,attrs)=>'<c'+attrs.replace(/\s+t="[^"]*"/g,'').replace(/\/$/,'')+(typeof value==='number'?'>': ' t="inlineStr">')+(typeof value==='number'?(formula?'<f>'+xml(formula)+'</f>':'')+'<v>'+value+'</v>':'<is><t xml:space="preserve">'+xml(value)+'</t></is>')+'</c>');
+ return sheet.replace(re,(original,attrs)=>'<c'+attrs.replace(/\s+t="[^"]*"/g,'').replace(/\/$/,'')+(typeof value==='number'?'>': ' t="inlineStr">')+(typeof value==='number'?((formula&&original.match(/<f(?:\s[^>]*)?>[\s\S]*?<\/f>/)?.[0])||'')+'<v>'+value+'</v>':'<is><t xml:space="preserve">'+xml(value)+'</t></is>')+'</c>');
 }
 function crc(bytes){let c=0xffffffff;for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
 function chunk(type,data){const t=Buffer.from(type),n=Buffer.alloc(4),c=Buffer.alloc(4);n.writeUInt32BE(data.length);c.writeUInt32BE(crc(Buffer.concat([t,data])));return Buffer.concat([n,t,data,c]);}
@@ -22,6 +22,7 @@ export function signaturePng(ink){
 export async function orderXlsx(b,locker,template){
  const q=b.lockers[locker-24],{bills,total,error}=totals(q);if(error||!total)throw Error(error||'Empty locker');
  const zip=await JSZip.loadAsync(template);let sheet=await zip.file('xl/worksheets/sheet1.xml').async('string');
+ sheet=cell(sheet,'K6','CAD');
  for(let i=0;i<5;i++){
   const r=9+i,n=i<2?q[i]:0,boxes=q[i+2];
   sheet=cell(sheet,'A'+r,n);sheet=cell(sheet,'F'+r,boxes);sheet=cell(sheet,'K'+r,0);sheet=cell(sheet,'O'+r,0);
