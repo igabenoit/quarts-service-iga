@@ -49,7 +49,7 @@ function openForm(state,d){
    else{input.type=key==='Signature'?'date':'text';input.maxLength=100;input.value=d.draft[key]||'';label.append(input);}
    fields.set(key,input);form.append(label);
   }
-  form.append(node('p','Ta signature sera apposée aux trois emplacements de l’employé. La dernière signature de la page 52 est réservée au supérieur immédiat.'));
+  form.append(node('p','Ta signature sera apposée aux trois emplacements de l’employé. Le nom et la signature du supérieur immédiat figurent déjà à la page 52.'));
  }
  const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
   const validateEmergency=d.kind==='urgence'?buildEmergency(form,d.draft,fields):null;

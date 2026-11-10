@@ -20,8 +20,6 @@ const regions=[
  [52,'Réception - date',158,257,278,24,'date'],
  [52,'Réception - poste',150,306,283,22,'role'],
  [52,'Réception - signature employé',68,370,359,51,'ink'],
- [52,'Supérieur immédiat - nom',145,456,295,27,'supervisor'],
- [52,'Supérieur immédiat - signature',68,524,363,54,'supervisor']
 ];
 function validate(a,lines){
  for(const k of ['Prénom','Nom','Poste'])if(!a[k]?.trim()||a[k].length>100)throw Error(k);
@@ -37,7 +35,7 @@ async function makePDF(values,strokes){
  for(const [number,label,left,top,width,height,kind] of regions){
   const page=pdf.getPage(number-1),scale=72/84;
   const x=left*scale,y=page.getHeight()-(top+height)*scale,w=width*scale,h=height*scale;
-  if(!values||kind==='supervisor'){
+  if(!values){
    const field=form.createTextField(label);
    field.addToPage(page,{x,y,width:w,height:h,borderWidth:0,borderColor:undefined,backgroundColor:undefined,textColor:ink,font});
    field.setFontSize(0);
