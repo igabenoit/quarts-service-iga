@@ -1,6 +1,7 @@
 import {buildRetirement} from './accueil-retraite.js';
 import {buildEmergency} from './accueil-urgence.js';
 import {buildSst} from './accueil-sst.js';
+import {buildGeneralSst} from './accueil-sst-general.js';
 const token=location.hash.slice(1);
 const onsite=new URLSearchParams(location.search).has('sur-place');
 const localParams=new URLSearchParams(location.hash.slice(1));
@@ -31,15 +32,16 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
- if(['sst','ethique'].includes(d.kind)){
-  const read=node('button',d.kind==='sst'?'Ouvrir l’annexe SST (PDF remplissable)':'Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
+ if(['sst','sst_general','ethique'].includes(d.kind)){
+  const read=node('button',d.kind==='sst_general'?'Ouvrir le programme d’accueil SST (PDF remplissable)':d.kind==='sst'?'Ouvrir l’ancienne annexe SST (PDF remplissable)':'Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
   read.onclick=async()=>{try{
    const blob=await call('lecture',{kind:d.kind}),url=URL.createObjectURL(blob),link=node('a');
-   link.href=url;link.download=d.kind==='sst'?'Annexe 11.1 - Accueil SST.pdf':'Code d’éthique et politiques - septembre 2025.pdf';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+   link.href=url;link.download=d.kind==='sst_general'?'Programme accueil général SST - 2026.pdf':d.kind==='sst'?'Annexe 11.1 - Accueil SST.pdf':'Code d’éthique et politiques - septembre 2025.pdf';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
   }catch(error){status.textContent=error.message;}};
   form.append(read);
  }
  if(d.kind==='sst')buildSst(form,d.draft,fields,onsite);
+ if(d.kind==='sst_general')buildGeneralSst(form,d.draft,fields,onsite);
  if(d.kind==='ethique'){
   const confirmations={Respect:'Page 40 · Je signe le registre de la politique de respect au travail.',Vente:'Page 51 · Je reconnais avoir été informé des obligations relatives à la vente aux mineurs décrites dans cette attestation.',Réception:'Page 52 · Je certifie avoir reçu le code d’éthique et les politiques et j’accepte les dispositions de l’accusé de réception.'};
   for(const key of d.fields){
@@ -53,7 +55,7 @@ function openForm(state,d){
  }
  const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
   const validateEmergency=d.kind==='urgence'?buildEmergency(form,d.draft,fields):null;
- if(!['ethique','sst'].includes(d.kind)&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
+ if(!['ethique','sst','sst_general'].includes(d.kind)&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);
@@ -63,10 +65,22 @@ function openForm(state,d){
  c.onpointermove=e=>{if(e.pointerId!==active)return;const p=point(e);line.push(p);ctx.lineTo(p[0]*800,p[1]*200);ctx.stroke();};
  c.onpointerup=c.onpointercancel=()=>{active=null;};
  const erase=node('button','Effacer la signature');erase.type='button';erase.onclick=()=>{ctx.clearRect(0,0,800,200);strokes=[];};form.append(erase);
+ let supervisorStrokes=[];
+ if(onsite&&d.kind==='sst_general'){
+  form.append(node('h3','Signature du responsable SST'));
+  form.append(node('p','À tracer uniquement par la personne qui a réellement présenté l’accueil ou vérifié les tâches.'));
+  const extra=node('canvas');extra.width=800;extra.height=200;extra.setAttribute('aria-label','Signature du responsable');form.append(extra);
+  const painter=extra.getContext('2d');let activeSupervisor=null,supervisorLine;
+  const scaled=e=>{const bounds=extra.getBoundingClientRect();return [(e.clientX-bounds.left)/bounds.width,(e.clientY-bounds.top)/bounds.height].map(v=>Math.min(1,Math.max(0,v)));};
+  extra.onpointerdown=e=>{if(activeSupervisor!==null)return;activeSupervisor=e.pointerId;extra.setPointerCapture(e.pointerId);supervisorLine=[scaled(e)];supervisorStrokes.push(supervisorLine);painter.beginPath();painter.moveTo(supervisorLine[0][0]*800,supervisorLine[0][1]*200);};
+  extra.onpointermove=e=>{if(e.pointerId!==activeSupervisor)return;const p=scaled(e);supervisorLine.push(p);painter.lineTo(p[0]*800,p[1]*200);painter.stroke();};
+  extra.onpointerup=extra.onpointercancel=()=>{activeSupervisor=null;};
+  const eraseSupervisor=node('button','Effacer la signature du responsable');eraseSupervisor.type='button';eraseSupervisor.onclick=()=>{painter.clearRect(0,0,800,200);supervisorStrokes=[];};form.append(eraseSupervisor);
+ }
  for(const [action,title] of [['save','Enregistrer et reprendre plus tard'],['sign','Signer et classer le PDF']]){
   const b=node('button',title);b.type='button';form.append(b);
   b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'){validateRetirement?.();validateEmergency?.();if(!form.reportValidity())return;}
-   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.type==='checkbox'?(i.checked?'yes':'no'):i.value])),strokes:action==='sign'?strokes:[]});show(result);status.textContent=action==='save'?(onsite?'Brouillon enregistré dans le dossier.':'Brouillon enregistré. Conservez votre lien pour reprendre.'):'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
+   b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.type==='checkbox'?(i.checked?'yes':'no'):i.value])),strokes:action==='sign'?strokes:[],supervisorStrokes:action==='sign'?supervisorStrokes:[]});show(result);status.textContent=action==='save'?(onsite?'Brouillon enregistré dans le dossier.':'Brouillon enregistré. Conservez votre lien pour reprendre.'):'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
  }
  form.onsubmit=e=>e.preventDefault();editor.scrollIntoView();
 }
