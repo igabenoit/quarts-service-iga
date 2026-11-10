@@ -1,5 +1,6 @@
 import {buildRetirement} from './accueil-retraite.js';
 import {buildEmergency} from './accueil-urgence.js';
+import {buildSst} from './accueil-sst.js';
 const token=location.hash.slice(1);
 const onsite=new URLSearchParams(location.search).has('sur-place');
 const localParams=new URLSearchParams(location.hash.slice(1));
@@ -30,13 +31,16 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
- if(d.kind==='ethique'){
-  const read=node('button','Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
+ if(['sst','ethique'].includes(d.kind)){
+  const read=node('button',d.kind==='sst'?'Ouvrir l’annexe SST (PDF remplissable)':'Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
   read.onclick=async()=>{try{
    const blob=await call('lecture',{kind:d.kind}),url=URL.createObjectURL(blob),link=node('a');
-   link.href=url;link.download='Code d’éthique et politiques - septembre 2025.pdf';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+   link.href=url;link.download=d.kind==='sst'?'Annexe 11.1 - Accueil SST.pdf':'Code d’éthique et politiques - septembre 2025.pdf';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
   }catch(error){status.textContent=error.message;}};
   form.append(read);
+ }
+ if(d.kind==='sst')buildSst(form,d.draft,fields,onsite);
+ if(d.kind==='ethique'){
   const confirmations={Respect:'Page 40 · Je signe le registre de la politique de respect au travail.',Vente:'Page 51 · Je reconnais avoir été informé des obligations relatives à la vente aux mineurs décrites dans cette attestation.',Réception:'Page 52 · Je certifie avoir reçu le code d’éthique et les politiques et j’accepte les dispositions de l’accusé de réception.'};
   for(const key of d.fields){
    const label=node('label',confirmations[key]||(key==='Signature'?'Date de signature':key==='Poste'?'Titre du poste':key));
@@ -49,7 +53,7 @@ function openForm(state,d){
  }
  const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
   const validateEmergency=d.kind==='urgence'?buildEmergency(form,d.draft,fields):null;
- if(d.kind!=='ethique'&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
+ if(!['ethique','sst'].includes(d.kind)&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);

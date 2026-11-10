@@ -5,8 +5,11 @@ import {randomBytes,createHash} from 'node:crypto';
 import {signedTuac,tuacFields} from './tuac.js';
 import {signedEmergency,emergencyFields} from './emergency.js';
 
+import {annexKeys,signedAnnex,annexPdf} from './annexe-sst.js';
+import {annexSource} from './ethics-source.js';
+const blankAnnex=async()=>annexPdf(await annexSource());
 const base='/api/employee-files/onboarding';
-const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics}};
+const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics},sst:{title:'Accusé de réception – Programme d’accueil général SST',fields:annexKeys,render:signedAnnex}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
@@ -70,6 +73,9 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
      if(!Object.hasOwn(catalog,doc.kind))fail(400,'Formulaire inconnu.');
     if(b.policy!==String(policy.id)||!b.answers||typeof b.answers!=='object')fail(400,'Confirmez la politique et vérifiez les champs.');
     const spec=catalog[doc.kind], answers=Object.fromEntries(spec.fields.map(k=>[k,String(b.answers[k]??'').slice(0,200)]));
+    if(doc.kind==='sst'&&!onsite){
+      for(const k of spec.fields.filter(k=>k.startsWith('initiales')))answers[k]=doc.draft?.[k]||'';
+    }
     let original=null;
     if(action==='sign'){
      let bytes;try{bytes=await spec.render(answers,b.strokes);}catch{fail(400,'Vérifiez les champs et la signature.');}
@@ -82,8 +88,8 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  }
  app.post(base+'/sur-place/:action',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req),kind=req.body.kind,action=req.params.action;
-  if(!e.active||e.issue||!Object.hasOwn(catalog,kind)||!['state','save','sign',...(kind==='ethique'?['lecture']:[])].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
-  if(action==='lecture')return res.set('Cache-Control','no-store').type('pdf').send(await blankEthics());
+  if(!e.active||e.issue||!Object.hasOwn(catalog,kind)||!['state','save','sign',...(['ethique','sst'].includes(kind)?['lecture']:[])].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
+  if(action==='lecture')return res.set('Cache-Control','no-store').type('pdf').send(kind==='sst'?await blankAnnex():await blankEthics());
   if(kind==='urgence'&&!content(req.ef,e,'medical'))fail(403,'Accès aux informations médicales réservé aux personnes autorisées.');
   const policy=await publishedPolicy(pool);
   if(!policy)fail(428,'Publiez la politique de confidentialité avant de remplir un formulaire.');
@@ -110,7 +116,9 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;
    if(action==='lecture'){
-    const allowed=await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND kind='ethique' AND invited",[key]);
+    const kind=req.body.kind||'ethique';
+    if(!['sst','ethique'].includes(kind))fail(404,'Document indisponible.');
+    const allowed=await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND kind=$2 AND invited",[key,kind]);
     if(!allowed.rowCount)fail(404,'Document indisponible.');
     return null;
    }
@@ -118,7 +126,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    const items=(await db.query("SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows;
    return {documents:items.map(d=>({...d,title:catalog[d.kind].title,fields:catalog[d.kind].fields})),policy:{id:String(policy.id),text:policy.text},due:row.due};
   });
-  if(result===null)return res.type('pdf').send(await blankEthics());
+  if(result===null)return res.type('pdf').send(req.body.kind==='sst'?await blankAnnex():await blankEthics());
   res.json(result);
  }));
 }
