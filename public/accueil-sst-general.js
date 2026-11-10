@@ -21,7 +21,7 @@ function node(parent,tag,text){
 function field(parent,fields,draft,key,title,type='text',required=false){
  const label=node(parent,'label',title),input=document.createElement('input');
  input.name=key;input.type=type;input.required=required;input.maxLength=200;
- if(type==='checkbox'){input.checked=draft[key]==='yes';label.prepend(input);}
+ if(type==='checkbox'){label.classList.add('check');input.checked=draft[key]==='yes';label.prepend(input);}
  else{input.value=draft[key]||'';label.append(input);}
  fields.set(key,input);
 }
