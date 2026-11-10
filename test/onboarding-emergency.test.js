@@ -38,7 +38,8 @@ test('embauche : formulaire d’urgence en troisième position, signé et access
   const key=expect(await admin('GET','state')).employees.find(e=>e.name==='Camille Exemple').key;
   const route='onboarding?key='+encodeURIComponent(key)+'&view=direction';
   const start=expect(await admin('GET',route));
-  assert.deepEqual(Object.keys(start.catalog),['tuac','retraite','urgence']);
+  assert.deepEqual(Object.keys(start.catalog).slice(0,3),['tuac','retraite','urgence']);
+  assert.ok(Object.hasOwn(start.catalog,'sst_general'),'le programme d’accueil SST 2026 est offert à l’embauche');
   const link=expect(await admin('POST','onboarding/invite?key='+encodeURIComponent(key)+'&view=direction',
    {documents:['tuac','retraite','urgence'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-11-15'})).path;
   const employee=(action,body={})=>f.call('POST','/api/accueil-employe/'+action,{headers:{...headers,Authorization:'Bearer '+link.split('#')[1]},body});
