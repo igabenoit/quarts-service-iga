@@ -43,10 +43,9 @@ export async function installCash(app,pool,auth,origin){
   ADD COLUMN IF NOT EXISTS lockers smallint[], ADD COLUMN IF NOT EXISTS recipient text, ADD COLUMN IF NOT EXISTS excel24 bytea, ADD COLUMN IF NOT EXISTS excel25 bytea`);
  const access=cashAccess(auth,origin);
  const paths=(suffix='')=>['/api/numeraire'+suffix,'/api/depot/numeraire'+suffix];
- const testEmail=process.env.CASH_ORDER_TEST_EMAIL;
  app.get(paths('/config'),access,(req,res)=>{
   if(req.manager?.kind!=='admin')return res.sendStatus(403);
-  res.set('Cache-Control','no-store').json({recipient:testEmail||null});
+  res.set('Cache-Control','no-store').json({recipient:bank,mode:"production"});
  });
  app.get(paths('/historique'),access,async(req,res)=>{
   if(req.manager?.kind!=='admin')return res.sendStatus(403);
@@ -92,7 +91,7 @@ export async function installCash(app,pool,auth,origin){
   if(req.manager?.kind!=='admin')return res.sendStatus(403);
   const b=req.body||{};
   if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(b.id||''))return res.status(400).json({error:'Référence invalide.'});
-  if(!testEmail||b.testRecipient!==testEmail)return res.status(409).json({error:'Recharge la page pour vérifier le destinataire de test.'});
+  if(b.recipient!==bank)return res.status(409).json({error:'Recharge la page pour vérifier le destinataire.'});
   let lines;try{lines=orderLines(b);}catch(e){return res.status(400).json({error:e.message});}
   const configuredFrom=process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM;
   const address=configuredFrom?.match(/<([^<>]+)>\s*$/)?.[1]||configuredFrom;
@@ -102,13 +101,13 @@ export async function installCash(app,pool,auth,origin){
    const fingerprint=createHash('sha256').update(JSON.stringify([b.lockers,b.date,b.time,b.name,b.notes,b.ink])).digest('hex');
    const pdf=await orderPdf(b,lines,process.env.CASH_ORDER_FOLIO);
    const excel=await Promise.all(b.lockers.map((q,i)=>q.some(Boolean)?orderXlsx(b,24+i,Buffer.from(process.env['CASH_TEMPLATE_'+(24+i)]||'','base64')):null));
-   await pool.query('INSERT INTO cash_order_mail(id,fingerprint,attachment,pickup,lockers,recipient,excel24,excel25) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',[b.id,fingerprint,pdf,b.date,b.lockers.flatMap((q,i)=>q.some(Boolean)?[24+i]:[]),testEmail,...excel]);
+   await pool.query('INSERT INTO cash_order_mail(id,fingerprint,attachment,pickup,lockers,recipient,excel24,excel25) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',[b.id,fingerprint,pdf,b.date,b.lockers.flatMap((q,i)=>q.some(Boolean)?[24+i]:[]),bank,...excel]);
    const {rows:[row]}=await pool.query('SELECT * FROM cash_order_mail WHERE id=$1',[b.id]);
-   if(row.recipient!==testEmail||row.fingerprint!==fingerprint)return res.status(409).json({error:'Cette référence correspond déjà à une autre commande.'});
+   if(row.recipient!==bank||row.fingerprint!==fingerprint)return res.status(409).json({error:'Cette référence correspond déjà à une autre commande.'});
    if(!row.sent){
     if(!row.excel24&&!row.excel25)return res.status(409).json({error:"Cette ancienne tentative ne contient pas de fichier Excel. Vérifie sa réception avant de recommencer."});
     if(Date.now()-Number(row.created_at)>23*3600000)return res.status(409).json({error:'Vérifie la réception auprès de la caisse avant de refaire cette commande.'});
-    const mail=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'cash-'+b.id},signal:AbortSignal.timeout(15000),body:JSON.stringify({from,to:[testEmail],subject:'[TEST] Commande de numéraire CAD · '+b.date+' · ALIMENTATION SOGESCO INC.',text:'Bonjour,\n\nVeuillez trouver ci-joint notre commande signée pour le centre Les Salines.\n\n'+lines.join('\n'),attachments:[24,25].flatMap(n=>row['excel'+n]?[{filename:'Commande-Casier-'+n+'-'+b.date+'.xlsx',content:row['excel'+n].toString('base64')}]:[])})});
+    const mail=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'cash-'+b.id},signal:AbortSignal.timeout(15000),body:JSON.stringify({from,to:[bank],subject:'Commande de numéraire CAD · '+b.date+' · ALIMENTATION SOGESCO INC.',text:'Bonjour,\n\nVeuillez trouver ci-joint notre commande signée pour le centre Les Salines.\n\n'+lines.join('\n'),attachments:[24,25].flatMap(n=>row['excel'+n]?[{filename:'Commande-Casier-'+n+'-'+b.date+'.xlsx',content:row['excel'+n].toString('base64')}]:[])})});
     if(!mail.ok)throw Error('Mail');
     await pool.query('UPDATE cash_order_mail SET sent=true WHERE id=$1',[b.id]);
    }

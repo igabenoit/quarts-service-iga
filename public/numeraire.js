@@ -31,12 +31,11 @@ else {
  window.addEventListener('hashchange',tab);tab();
  try{
   const r=await fetch('/api/numeraire/config',{cache:'no-store'});const config=await r.json();
-  if(!r.ok||!config.recipient)throw Error();
-  $('#testMode').textContent='Mode test · Les commandes seront envoyées à '+config.recipient+'.';
+  if(!r.ok||config.mode!=='production'||!config.recipient)throw Error();
   $('#recipient').textContent=config.recipient;init(config.recipient);
- }catch{result.textContent='Envoi désactivé : destinataire de test indisponible.';}
+ }catch{result.textContent='Envoi désactivé : destinataire indisponible.';}
 }
-function init(testRecipient){
+function init(recipient){
  form.elements.date.value=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const units=(input,i)=>Number(input.value)*([20,10][i]||1);
  form.hidden=false;
@@ -74,14 +73,14 @@ function init(testRecipient){
     if(invalid>=0)throw Error('Casier '+(24+invalid)+' · '+amounts[invalid].error);
     if(!amounts.some(a=>a.total))throw Error('Ajoute au moins une quantité.');
     if(!strokes.some(l=>l.some(p=>Math.hypot(p[0]-l[0][0],p[1]-l[0][1])>.01)))throw Error('Trace ta signature.');
-    pending={testRecipient,id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:'11:00',name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
+    pending={recipient,id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:'11:00',name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
     for(const f of form.querySelectorAll('fieldset'))f.disabled=true;
    }
    $('#send').disabled=true;result.textContent='Envoi en cours…';
    const r=await fetch('/api/numeraire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pending)});
    const data=await r.json();
    if(!r.ok){if(r.status===400){pending=null;for(const f of form.querySelectorAll('fieldset'))f.disabled=false;}throw Error(data.error||'Envoi non confirmé.');}
-   form.hidden=true;result.textContent='Commande test envoyée à '+testRecipient+' pour le '+pending.date+'.';$('#again').hidden=false;
+   form.hidden=true;result.textContent='Commande envoyée à '+recipient+' pour le '+pending.date+'.';$('#again').hidden=false;
   }catch(error){result.textContent=error.message;}finally{$('#send').disabled=false;}
  };
 }
