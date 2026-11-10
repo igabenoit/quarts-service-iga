@@ -6,7 +6,7 @@ const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 function cell(sheet,address,value,formula){
  const re=new RegExp('<c\\b([^>]*\\br="'+address+'"[^>]*?)(?:/>|>[\\s\\S]*?</c>)');
  if(!re.test(sheet))throw Error('Missing template cell '+address);
- return sheet.replace(re,(original,attrs)=>'<c'+attrs.replace(/\s+t="[^"]*"/g,'').replace(/\/$/,'')+(typeof value==='number'?'>': ' t="inlineStr">')+(typeof value==='number'?((formula&&original.match(/<f(?:\s[^>]*)?>[\s\S]*?<\/f>/)?.[0])||'')+'<v>'+value+'</v>':'<is><t xml:space="preserve">'+xml(value)+'</t></is>')+'</c>');
+ return sheet.replace(re,(original,attrs)=>'<c'+attrs.replace(/\s+t="[^"]*"/g,'').replace(/\/$/,'')+(typeof value==='number'?'>': ' t="inlineStr">')+(typeof value==='number'?((formula&&original.match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/)?.[0])||'')+'<v>'+value+'</v>':'<is><t xml:space="preserve">'+xml(value)+'</t></is>')+'</c>');
 }
 function crc(bytes){let c=0xffffffff;for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;}
 function chunk(type,data){const t=Buffer.from(type),n=Buffer.alloc(4),c=Buffer.alloc(4);n.writeUInt32BE(data.length);c.writeUInt32BE(crc(Buffer.concat([t,data])));return Buffer.concat([n,t,data,c]);}
@@ -33,13 +33,14 @@ export async function orderXlsx(b,locker,template){
  for(const [a,v,f] of [['C14',bills,'SUM(D9:D13)'],['H14',total-bills,'SUM(I9:I13)'],['M14',0,'SUM(N9:N13)'],['Q14',0,'SUM(R9:R13)'],[locker===24?'I17':'I16',total,'SUM(C14,H14,M14,Q14)']])sheet=cell(sheet,a,v,f);
  const r=locker===24?22:21;
  sheet=cell(sheet,'A'+r,b.date);sheet=cell(sheet,'E'+r,b.time);sheet=cell(sheet,'I'+r,locker);sheet=cell(sheet,'A'+(r+2),b.name.trim());
- sheet=cell(sheet,'A'+(r+5),b.notes.trim());sheet=cell(sheet,'A'+(r+7),'');sheet=cell(sheet,'I'+(r+6),'Signature');
+ sheet=cell(sheet,'A'+(r+5),b.notes.trim());sheet=cell(sheet,'A'+(r+7),'');
  zip.file('xl/worksheets/sheet1.xml',sheet);
- let drawing=await zip.file('xl/drawings/drawing1.xml').async('string');
- const id=Math.max(0,...Array.from(drawing.matchAll(/\bid="(\d+)"/g),m=>+m[1]))+1;
- const anchor='<xdr:oneCellAnchor><xdr:from><xdr:col>8</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>'+(r+6)+'</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="2100000" cy="525000"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="'+id+'" name="Signature de la commande"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rIdCashSignature"/><a:stretch xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>';
- zip.file('xl/drawings/drawing1.xml',drawing.replace('</xdr:wsDr>',anchor+'</xdr:wsDr>'));
- const rel='xl/drawings/_rels/drawing1.xml.rels';zip.file(rel,(await zip.file(rel).async('string')).replace('</Relationships>','<Relationship Id="rIdCashSignature" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/cash-signature.png"/></Relationships>'));
- zip.file('xl/media/cash-signature.png',signaturePng(b.ink));
+ // Both original forms place the courier signature in image2, inside the print area.
+ zip.file('xl/media/image2.png',signaturePng(b.ink));
+ zip.remove('xl/calcChain.xml');
+ for(const [path,re] of [['xl/_rels/workbook.xml.rels',/<Relationship\b[^>]*\bType="[^"]*\/calcChain"[^>]*\/>/g],['[Content_Types].xml',/<Override\b[^>]*PartName="\/xl\/calcChain.xml"[^>]*\/>/g]]){
+  zip.file(path,(await zip.file(path).async('string')).replace(re,''));
+ }
+ const wb='xl/workbook.xml';zip.file(wb,(await zip.file(wb).async('string')).replace(/<calcPr\b[^>]*\/>/,'<calcPr calcId="0" fullCalcOnLoad="1"/>'));
  return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
 }

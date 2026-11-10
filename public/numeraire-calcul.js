@@ -7,5 +7,5 @@ export function totals(q){
  if(!Array.isArray(q)||q.length!==items.length||!q.every(n=>Number.isSafeInteger(n)&&n>=0&&n<=3000))throw Error('Entre des quantités entières positives ou nulles.');
  const amounts=q.map((v,i)=>v*items[i][1]);
  const bills=amounts[0]+amounts[1],total=amounts.reduce((a,b)=>a+b,0);
- return {bills,total,error:bills>1000?'Maximum de 1 000 $ en billets.':total>3000?'Maximum de 3 000 $ par casier.':''};
+ return {bills,total,error:q[0]%20||q[1]%10?'Les billets se commandent en paquets de 100 $.':bills>1000?'Maximum de 1 000 $ en billets.':total>3000?'Maximum de 3 000 $ par casier.':''};
 }

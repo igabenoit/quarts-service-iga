@@ -37,6 +37,8 @@ else {
  }catch{result.textContent='Envoi désactivé : destinataire de test indisponible.';}
 }
 function init(testRecipient){
+ form.elements.date.value=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const units=(input,i)=>Number(input.value)*([20,10][i]||1);
  form.hidden=false;
  const quantities=[];
  for(const locker of [24,25]){
@@ -45,12 +47,13 @@ function init(testRecipient){
   const inputs=[];
   items.forEach(([label,price],i)=>{
    const row=document.createElement('label');row.className='cash-row';
-   row.innerHTML='<span>'+label+'<br><small>'+price+' $ par '+(i<2?'billet':'boîte')+'</small></span><input type="number" inputmode="numeric" min="0" max="'+Math.floor((i<2?1000:3000)/price)+'" step="1" placeholder="0"><output>0 $</output>';
+   if(i<2){label='Paquets de billets de '+price+' $';price=100;}
+   row.innerHTML='<span>'+label+'<br><small>'+price+' $ par '+(i<2?'paquet ('+([20,10][i])+' billets)':'boîte')+'</small></span><input type="number" inputmode="numeric" min="0" max="'+Math.floor((i<2?1000:3000)/price)+'" step="1" placeholder="0"><output>0 $</output>';
    inputs.push(row.querySelector('input'));section.append(row);
   });
   const summary=document.createElement('strong');summary.setAttribute('aria-live','polite');section.append(summary);
   function update(){
-   const q=inputs.map(input=>Number(input.value));
+   const q=inputs.map(units);
    inputs.forEach((input,i)=>input.nextElementSibling.value=q[i]*items[i][1]+' $');
    try{const {bills,total,error}=totals(q);summary.textContent='Billets '+bills+' / 1 000 $ · Total '+total+' / 3 000 $'+(error?' · '+error:'');}catch(e){summary.textContent=e.message;}
   }
@@ -66,12 +69,12 @@ function init(testRecipient){
   e.preventDefault();
   try{
    if(!pending){
-    const lockers=quantities.map(inputs=>inputs.map(input=>Number(input.value)));
+    const lockers=quantities.map(inputs=>inputs.map(units));
     const amounts=lockers.map(totals);const invalid=amounts.findIndex(a=>a.error);
     if(invalid>=0)throw Error('Casier '+(24+invalid)+' · '+amounts[invalid].error);
     if(!amounts.some(a=>a.total))throw Error('Ajoute au moins une quantité.');
     if(!strokes.some(l=>l.some(p=>Math.hypot(p[0]-l[0][0],p[1]-l[0][1])>.01)))throw Error('Trace ta signature.');
-    pending={testRecipient,id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:form.elements.time.value,name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
+    pending={testRecipient,id:crypto.randomUUID(),lockers,date:form.elements.date.value,time:'11:00',name:form.elements.courier.value,notes:form.elements.notes.value,ink:strokes};
     for(const f of form.querySelectorAll('fieldset'))f.disabled=true;
    }
    $('#send').disabled=true;result.textContent='Envoi en cours…';

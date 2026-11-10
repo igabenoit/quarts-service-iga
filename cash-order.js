@@ -17,6 +17,7 @@ export function orderLines(b){
  });
  if(!lines.length)throw Error('Ajoute au moins une quantité.');
  if(!/^\d{4}-\d{2}-\d{2}$/.test(b.date)||!Number.isFinite(Date.parse(b.date))||new Date(b.date).toISOString().slice(0,10)!==b.date||!/^([01]\d|2[0-3]):[0-5]\d$/.test(b.time))throw Error('Vérifie la date et l’heure.');
+ if(b.time!=='11:00'||!['Marc-André Benoit','Badia Felhi'].includes(b.name))throw Error('Vérifie le commissionnaire autorisé et la cueillette à 11 h.');
  for(const s of [b.name,b.notes])if(typeof s!=='string'||s.length>100||/[\x00-\x1f]/.test(s))throw Error('Vérifie les renseignements de cueillette.');
  if(!Array.isArray(b.ink)||b.ink.length>180||!b.ink.every(l=>Array.isArray(l)&&l.length<=4000&&l.every(p=>Array.isArray(p)&&p.length===2&&p.every(v=>Number.isFinite(v)&&v>=0&&v<=1)))||!b.ink.some(l=>l.some(p=>Math.hypot(p[0]-l[0][0],p[1]-l[0][1])>.01)))throw Error('Trace ta signature.');
  return lines;
