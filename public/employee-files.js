@@ -1,3 +1,4 @@
+import {bindDirectionInk} from './direction-ink.js';
 import './direction-entry.js';
 const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labels={general:'Général',sst:'SST',rh:'RH',payroll:'Paie',medical:'Médical'},statuses={missing:'À remplir',draft:'Brouillon',review:'À examiner',signed:'Confirmé par l’employé',filed:'Classé après vérification',superseded:'Version antérieure'},views={employe:'Employé',gerant:'Gérant',direction:'Direction / RH',sst:'Responsable SST'};
@@ -85,26 +86,26 @@ function onsiteForms(){
 }
 function editDirectionSignature(){
  modal('Signature de Marc-Andre Benoit',`<p>Trace ta signature pour la page 52 des nouveaux codes d’éthique.</p>
- <canvas id="directionInk" width="1000" height="250" aria-label="Zone de signature" style="width:100%;height:auto;touch-action:none;border:1px solid #88998e;background:white"></canvas>
+ <canvas id="directionInk" width="1000" height="250" aria-label="Zone de signature" style="width:100%;height:auto;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;border:1px solid #88998e;background:white"></canvas>
  <div class="actions"><button id="clearInk">Recommencer</button><button id="saveInk" disabled>Enregistrer ma signature</button></div>`);
  const canvas=$('#directionInk'),ctx=canvas.getContext('2d'),save=$('#saveInk');
  const strokes=[];
- let pointer=null,line;
+ let line;
  ctx.strokeStyle='#103476';ctx.lineWidth=3;ctx.lineCap='round';
  function point(e){
   const box=canvas.getBoundingClientRect();
   return [(e.clientX-box.left)/box.width,(e.clientY-box.top)/box.height].map(n=>Math.min(1,Math.max(0,n)));
  }
- canvas.onpointerdown=e=>{
-  if(pointer!==null)return;
-  pointer=e.pointerId;canvas.setPointerCapture(pointer);line=[point(e)];strokes.push(line);dialogDirty=true;
- };
- canvas.onpointermove=e=>{
-  if(pointer!==e.pointerId)return;
-  const p=point(e),last=line.at(-1);
-  ctx.beginPath();ctx.moveTo(last[0]*1000,last[1]*250);ctx.lineTo(p[0]*1000,p[1]*250);ctx.stroke();line.push(p);save.disabled=false;
- };
- canvas.onlostpointercapture=()=>{pointer=null;};
+ bindDirectionInk(canvas,{
+  start(e){line=[point(e)];strokes.push(line);dialogDirty=true;},
+  move(e){
+   const p=point(e),last=line.at(-1);
+   if(p[0]===last[0]&&p[1]===last[1])return;
+   ctx.beginPath();ctx.moveTo(last[0]*1000,last[1]*250);ctx.lineTo(p[0]*1000,p[1]*250);ctx.stroke();
+   line.push(p);save.disabled=false;
+  },
+  end(){line=null;}
+ });
  $('#clearInk').onclick=()=>{ctx.clearRect(0,0,1000,250);strokes.length=0;save.disabled=true;};
  save.onclick=action(async()=>{
   save.disabled=true;
