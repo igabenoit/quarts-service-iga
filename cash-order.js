@@ -93,10 +93,11 @@ export async function installCash(app,pool,auth,origin){
   if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(b.id||''))return res.status(400).json({error:'Référence invalide.'});
   if(b.recipient!==bank)return res.status(409).json({error:'Recharge la page pour vérifier le destinataire.'});
   let lines;try{lines=orderLines(b);}catch(e){return res.status(400).json({error:e.message});}
+  const copyEmail=process.env.CASH_ORDER_COPY_EMAIL?.trim();
   const configuredFrom=process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM;
   const address=configuredFrom?.match(/<([^<>]+)>\s*$/)?.[1]||configuredFrom;
   const from=address&&/^[^\s<>@,;]+@[^\s<>@,;]+$/.test(address)?'IGA Extra Famille Benoit <'+address+'>':null;
-  if(!from||!process.env.RESEND_API_KEY||!process.env.CASH_ORDER_FOLIO)return res.status(503).json({error:'L’envoi de commandes est temporairement indisponible.'});
+  if(!copyEmail||!from||!process.env.RESEND_API_KEY||!process.env.CASH_ORDER_FOLIO)return res.status(503).json({error:'L’envoi de commandes est temporairement indisponible.'});
   try{
    const fingerprint=createHash('sha256').update(JSON.stringify([b.lockers,b.date,b.time,b.name,b.notes,b.ink])).digest('hex');
    const pdf=await orderPdf(b,lines,process.env.CASH_ORDER_FOLIO);
@@ -107,7 +108,7 @@ export async function installCash(app,pool,auth,origin){
    if(!row.sent){
     if(!row.excel24&&!row.excel25)return res.status(409).json({error:"Cette ancienne tentative ne contient pas de fichier Excel. Vérifie sa réception avant de recommencer."});
     if(Date.now()-Number(row.created_at)>23*3600000)return res.status(409).json({error:'Vérifie la réception auprès de la caisse avant de refaire cette commande.'});
-    const mail=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'cash-'+b.id},signal:AbortSignal.timeout(15000),body:JSON.stringify({from,to:[bank],subject:'Commande de numéraire CAD · '+b.date+' · ALIMENTATION SOGESCO INC.',text:'Bonjour,\n\nVeuillez trouver ci-joint notre commande signée pour le centre Les Salines.\n\n'+lines.join('\n'),attachments:[24,25].flatMap(n=>row['excel'+n]?[{filename:'Commande-Casier-'+n+'-'+b.date+'.xlsx',content:row['excel'+n].toString('base64')}]:[])})});
+    const mail=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'cash-'+b.id},signal:AbortSignal.timeout(15000),body:JSON.stringify({from,to:[bank],cc:[copyEmail],subject:'Commande de numéraire CAD · '+b.date+' · ALIMENTATION SOGESCO INC.',text:'Bonjour,\n\nVeuillez trouver ci-joint notre commande signée pour le centre Les Salines.\n\n'+lines.join('\n'),attachments:[24,25].flatMap(n=>row['excel'+n]?[{filename:'Commande-Casier-'+n+'-'+b.date+'.xlsx',content:row['excel'+n].toString('base64')}]:[])})});
     if(!mail.ok)throw Error('Mail');
     await pool.query('UPDATE cash_order_mail SET sent=true WHERE id=$1',[b.id]);
    }
