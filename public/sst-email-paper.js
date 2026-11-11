@@ -20,7 +20,17 @@ export async function emailPaper(title,source=document.getElementById('sstPrint'
   source.ownerDocument.body.append(host);
   await libraries;
   await source.ownerDocument.fonts.ready;
-  const pdf=new window.jspdf.jsPDF({unit:'pt',format:'letter',compress:true});
+  const sheets=host.querySelectorAll('.sv-document > .sv-sheet');
+  const pdf=new window.jspdf.jsPDF({unit:'pt',format:sheets.length?'legal':'letter',compress:true});
+  if(sheets.length){
+   for(const [index,sheet] of Array.from(sheets).entries()){
+    const canvas=await window.html2canvas(sheet,{scale:2,backgroundColor:'#fff',logging:false});
+    if(index)pdf.addPage();
+    const ratio=Math.min(540/canvas.width,943/canvas.height);
+    pdf.addImage(canvas.toDataURL('image/png'),'PNG',36,32,canvas.width*ratio,canvas.height*ratio,undefined,'FAST');
+    canvas.width=canvas.height=0;
+   }
+  }else{
   const width=Math.max(800,host.scrollWidth);
   const height=Math.ceil(host.getBoundingClientRect().height);
   const pageHeight=Math.floor(width*744/564);
@@ -30,6 +40,7 @@ export async function emailPaper(title,source=document.getElementById('sstPrint'
    if(y)pdf.addPage();
    pdf.addImage(canvas.toDataURL('image/jpeg',0.87),'JPEG',24,24,564,564*canvas.height/canvas.width);
    canvas.width=canvas.height=0;
+  }
   }
   const blob=pdf.output('blob');
   if(blob.size>12*1024*1024)throw Error('Le PDF dépasse la limite de 12 Mo.');

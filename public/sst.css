@@ -28,3 +28,17 @@
  .sv-rating{width:13mm}.sv-box{display:inline-block;width:9pt;height:9pt;border:1pt solid black;vertical-align:-1pt}
  .sv-actions div{margin:3pt 0}.sv-lines{height:54pt;background:repeating-linear-gradient(transparent 0 17pt,#888 17pt 18pt);print-color-adjust:exact}
 }
+
+.sv-document{overflow-x:auto;color:#111}
+.sv-document .sv-sheet{box-sizing:border-box;width:720px;background:white;color:#111;font: 13.33px/1.24 Arial,sans-serif;padding:0;margin:0 0 20px}
+.sv-document h1{font-size:21.33px;margin:0 0 6px}
+.sv-document h2{font-size:15px;margin:12px 0 5px}
+.sv-document p{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.sv-document table{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse;margin:9px 0}
+.sv-document th,.sv-document td{position:static;border:1px solid #555;padding:5px;color:#111;background:white;font:12px/1.24 Arial,sans-serif;white-space:normal;overflow-wrap:anywhere}
+.sv-document th{font-weight:bold;background:#eef1ef}
+.sv-document th:not(:first-child),.sv-document td:not(:first-child){text-align:center;vertical-align:middle}
+.sv-document .sv-rating{width:49px}
+.sv-document .sv-box{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border:1px solid black;vertical-align:middle}
+.sv-document .sv-actions div{margin:4px 0}
+.sv-document .sv-lines{height:72px;background:repeating-linear-gradient(transparent 0 23px,#888 23px 24px)}

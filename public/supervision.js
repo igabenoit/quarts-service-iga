@@ -41,15 +41,23 @@ export function summary(grid, escape) {
     }).join('') + '</ul>').join('') + '<h4>Actions prises</h4><p>' +
     actions.filter((_,i) => grid.actions[i]).join('<br>') + '</p><p>' + escape(grid.other) + '</p>';
 }
-export function printBlank(target,email=false){
-  const box='<span class="sv-box" aria-hidden="true"></span>';
+const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+export function paper(grid={},meta={}){
+  const field=(value,line)=>escape(value)||line;
+  const box=checked=>'<span class="sv-box">'+(checked?'✓':'')+'</span>';
+  let index=0;
   const table=section=>'<table><colgroup><col><col class="sv-rating" span="3"></colgroup><thead><tr><th>'+section.title+'</th>'+ratings.map(r=>'<th>'+r+'</th>').join('')+'</tr></thead><tbody>'+
-    section.rows.map(row=>'<tr><td><strong>'+row.label+'</strong>'+row.tasks.map(task=>'<div>'+box+' '+task+'</div>').join('')+'</td>'+ratings.map(()=>'<td>'+box+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
-  const groups=[[0],[1,2],[3,4,5]];
-  target.innerHTML='<div class="sv-paper">'+groups.map((indices,i)=>'<div class="sv-sheet"><h1>Grille de supervision SST — Gérants</h1><p>Feuille '+(i+1)+' sur 3　 ·　 Département ____________________　 Date ______________</p>'+
-    (i===0?'<p>Entreprise __________________________　 Nº magasin __________　 Gérant·e ______________________</p><p>Cochez les tâches observées et indiquez votre constat pour chaque point de vigilance.</p>':'')+
+    section.rows.map(row=>{
+      const answer=grid.rows?.[index++]||{};
+      return '<tr><td><strong>'+row.label+'</strong>'+row.tasks.map((task,j)=>'<div>'+box(answer.tasks?.[j])+' '+task+'</div>').join('')+'</td>'+ratings.map(r=>'<td>'+box(r===answer.rating)+'</td>').join('')+'</tr>';
+    }).join('')+'</tbody></table>';
+  return '<div class="sv-paper sv-document">'+[[0],[1,2],[3,4,5]].map((indices,i)=>'<section class="sv-sheet"><h1>Grille de supervision SST — Gérants</h1><p>Feuille '+(i+1)+' sur 3　 ·　 Département '+field(meta.department,'____________________')+'　 Date '+field(meta.date,'______________')+'</p>'+
+    (i===0?'<p>Entreprise '+field(grid.company,'__________________________')+'　 Nº magasin '+field(grid.store,'__________')+'　 Gérant·e '+field(meta.owner,'______________________')+'</p><p>Cochez les tâches observées et indiquez votre constat pour chaque point de vigilance.</p>':'')+
     indices.map(index=>table(sections[index])).join('')+
-    (i===2?'<h2>Actions prises à la suite de l’observation</h2><div class="sv-actions">'+actions.map(a=>'<div>'+box+' '+a+'</div>').join('')+'</div><p>Autre __________________________________________________________________________</p>':'')+
-    '<h2>Observations et commentaires</h2><div class="sv-lines"></div></div>').join('')+'</div>';
-  if(email)emailPaper('Grille de supervision vierge');else window.print();
+    (i===2?'<h2>Actions prises à la suite de l’observation</h2><div class="sv-actions">'+actions.map((a,j)=>'<div>'+box(grid.actions?.[j])+' '+a+'</div>').join('')+'</div><p>Autre '+field(grid.other,'__________________________________________________________________________')+'</p>':'')+
+    '<h2>Observations et commentaires</h2>'+(i===2&&meta.details?'<p>'+escape(meta.details)+'</p>':'')+'<div class="sv-lines"></div></section>').join('')+'</div>';
+}
+export function printBlank(target,email=false){
+  target.innerHTML=paper();
+  if(email)emailPaper('Grille de supervision vierge',target);else window.print();
 }
