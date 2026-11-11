@@ -24,6 +24,12 @@ test('Inventaire peut être régulier ou séparé, y compris dans le contrôle, 
   assert.equal(cellDetail(regular),timed.note);assert.equal(cellDetail(separate),timed.note);
   const data={revision:1,department:{key:'epicerie',name:'Épicerie',id:1},weekStart:'2026-11-09',people:[{id:1,name:'Employé test',group:'regular',availability:{}}],draft:{rows:[row],notes:''}};
   const print=sheetHTML(data);assert.match(print,/Inventaire &lt;annuel&gt; : 4 h/);assert.match(print,/Grand total : 8 h/);assert.doesNotMatch(print,/Inventaire <annuel>/);
+  const printedRow=print.match(/<td class="sheet-total">([\s\S]*?)<\/td>/)[1];
+  assert.match(printedRow,/Inventaire &lt;annuel&gt; <b>4 h<\/b>/);
+  const multi={...row,cells:[regular,separate,separate,{...separate,note:'formation interne'},...Array.from({length:3},blankCell)]};
+  const multiPrint=sheetHTML({...data,draft:{rows:[multi]}}).match(/<td class="sheet-total">([\s\S]*?)<\/td>/)[1];
+  assert.match(multiPrint,/Inventaire &lt;annuel&gt; <b>8 h<\/b>/);
+  assert.match(multiPrint,/formation interne <b>4 h<\/b>/);
   const summary=plannedSummary(data);
   assert.equal(summary.total,480);assert.equal(summary.totals.mention,240);assert.equal(controlReport(data).totals.mention,240);
   assert.match(controlCSV([controlReport(data)]),/"Mentions séparées";"Inventaire <annuel>"/);

@@ -49,6 +49,7 @@ try{
     const totals=await page.locator('.department-hours').innerText();
     assert.match(totals,/Grand total : 4 h/);
     assert.match(totals,mode==='regular'?/Régulier : 4 h/:/Inventaire : 4 h/);
+    if(mode==='separate')assert.equal(await page.locator('.editor-total .mention-hours').innerText(),'Inventaire 4 h');
     const saving=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().includes('/weeks/'));
     await page.locator('#saveDraft').click();assert.equal((await saving).status(),200);
     await page.reload();await page.getByRole('button',{name:/Test Cuisine, Lundi, Inventaire/}).click();
@@ -60,6 +61,7 @@ try{
   await page.locator('[data-view="print"]').click();
   await page.locator('#printKind').selectOption('filled');
   assert.match(await page.locator('#printPreview').innerText(),/Inventaire : 4 h/i);
+  assert.match(await page.locator('#printPreview .sheet-person .sheet-total .mention-hours').innerText(),/^Inventaire\s+4 h$/i);
   await page.locator('#printSheet').click();
   await page.locator('#downloadPdf').waitFor({state:'visible'});
   assert.match(await page.locator('#pdfStatus').innerText(),/1 page\(s\) légale/);
