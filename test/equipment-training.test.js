@@ -79,6 +79,19 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
    const reopened=(await call('GET','equipment-training')).body.entries.find(e=>e.id===scheduled.body.entry.id);
    assert.equal(reopened.data.date,planned.date);assert.equal(reopened.data.status,'draft');
    assert.equal((await entry('training_form',{...form,status:'completed',date:planned.date})).status,400);
+   const plannedFields={...planned,explained:true,demonstrated:true,practiced:true,questions:true,
+    observationDate:planned.date,employeeDate:planned.date,trainerDate:planned.date,procedureId,
+    points:[{id:'1',result:'review',note:'À compléter'}],signatures:form.signatures};
+   const detailedPlan=await entry('training_form',plannedFields);assert.equal(detailedPlan.status,201,JSON.stringify(detailedPlan.body));
+   const savedPlan=(await call('GET','equipment-training')).body.entries.find(e=>e.id===detailedPlan.body.entry.id);
+   assert.equal(savedPlan.data.observationDate,planned.date);assert.equal(savedPlan.data.employeeDate,planned.date);
+   assert.equal(savedPlan.data.trainerDate,planned.date);assert.deepEqual(savedPlan.data.signatures,form.signatures);
+   const updatedPlan=await entry('training_form',{...savedPlan.data,employeeDate:now},{supersedes:savedPlan.id,correctionReason:'Date de signature saisie'});
+   assert.equal(updatedPlan.status,201,JSON.stringify(updatedPlan.body));
+   assert.equal((await entry('training_form',{...planned,observationDate:'2099-02-30'})).status,400);
+   for(const field of ['employeeDate','trainerDate','observationDate']){
+    assert.equal((await entry('training_form',{...form,status:'completed',[field]:planned.date})).status,400);
+   }
    const preparation=await entry('preparation',{date:planned.date,trainer:planned.trainer});
    assert.equal(preparation.status,201);assert.equal(preparation.body.entry.data.date,planned.date);
    const signedDraft=await entry('training_form',{...form,status:'draft'});assert.equal(signedDraft.status,201);

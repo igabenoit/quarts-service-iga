@@ -11,13 +11,25 @@ export function clearForm(){dialog?.close();dirty=false;}
 function message(text,error=false){const el=dialog.querySelector('[data-tf-message]');el.textContent=text;el.setAttribute('role',error?'alert':'status');if(error)el.scrollIntoView({block:'center'});}
 const field=(key,label,value,edit,type='text',multi=false)=>`<label class="ir-field"><span>${esc(label)}</span>${edit?(multi?`<textarea data-tf="${key}" maxlength="6000" rows="4">${esc(value)}</textarea>`:`<input data-tf="${key}" type="${type}" value="${esc(value)}" maxlength="${['reference','note','immediate'].includes(key)?1000:120}">`):`<div class="ir-value">${esc(value)||'—'}</div>`}</label>`;
 function svg(strokes){return `<svg class="ir-signature-image" viewBox="0 0 1000 260" role="img" aria-label="Signature manuscrite">${strokes.map(s=>s.length===1?`<circle cx="${s[0][0]}" cy="${s[0][1]*.26}" r="3"/>`:`<polyline points="${s.map(([x,y])=>x+','+y*.26).join(' ')}" fill="none" stroke="#17302c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;}
+function formStateLabel(data){
+ return data.status==='completed'?'Formation consignée et signée':data.date>today()?'Formation planifiée':'Brouillon à compléter';
+}
+function updateDateDisplay(){
+ const planned=model.date>today();
+ const draft=dialog.querySelector('[data-tf-save="draft"]');
+ const finalize=dialog.querySelector('[data-tf-save="completed"]');
+ const state=dialog.querySelector('[data-tf-state]');
+ if(draft)draft.textContent=planned?'Enregistrer la formation planifiée':'Enregistrer le brouillon';
+ if(finalize)finalize.hidden=planned;
+ if(state)state.textContent=formStateLabel(model);
+}
 export function trainingFormPaper(data,{equipment,employeeName,task,department,procedures=[],guides=[]},edit=false){
  const f=(key,label,type='text',multi=false)=>field(key,label,data[key],edit,type,multi);
  const p=procedures.find(x=>x.id===data.procedureId);
  const guide=guides.find(g=>g.id===data.guideRevision);
  const choices=[['explained','Explications données'],['demonstrated','Démonstration faite par le formateur'],['practiced','Mise en pratique par l’employé'],['questions','Questions et compréhension vérifiées']];
  const results={unobserved:'Non observé',ok:'Maîtrisé / observé satisfaisant',review:'À revoir'};
- return `<div class="ir-document tf-document"><section class="ir-page"><h2 class="ir-document-title">Fiche de formation à un équipement</h2><p>IGA Extra Famille Benoit · ${data.status==='completed'?'Formation consignée et signée':data.date>today()?'Formation planifiée':'Brouillon à compléter'}</p>
+ return `<div class="ir-document tf-document"><section class="ir-page"><h2 class="ir-document-title">Fiche de formation à un équipement</h2><p>IGA Extra Famille Benoit · <span data-tf-state>${formStateLabel(data)}</span></p>
  <h3 class="ir-band">1. Identification</h3><div class="ir-two ir-bordered">${field('equipment','Appareil',equipment.title,false)}${field('model','Fabricant et modèle',equipment.fields?.model,false)}${field('serial','Numéro de série',equipment.fields?.serial,false)}${field('department','Département / emplacement',department+' · '+(equipment.fields?.location||''),false)}
  ${edit?`<label class="ir-field"><span>Employé</span><select data-tf-person ${prior?'disabled':''}><option value="">Choisir un employé</option>${ctx.employees.map(e=>`<option value="${esc(e.key)}" ${e.key===model.employeeKey?'selected':''}>${esc(e.name)}</option>`).join('')}</select></label>`:field('employee','Employé',employeeName,false)}${field('task','Tâche couverte par cette fiche',task,false)}${f('date',data.status==='completed'?'Date de formation':'Date de formation (prévue ou réalisée)','date')}${f('trainer','Nom du formateur')}</div>
  <h3 class="ir-band">2. Formation donnée</h3><div class="ir-bordered"><div class="ir-cell">${choices.map(([k,label])=>`<label class="ir-check">${edit?`<input type="checkbox" data-tf="${k}" ${data[k]?'checked':''}>`:data[k]?'☑':'☐'} ${label}</label>`).join('')}</div>${f('reference','Document ou méthode réellement utilisé')}${f('version','Version / révision (si connue)')}${f('content','Contenu enseigné, explications et démonstration','text',true)}<div class="ir-cell"><p>Repères pour préparer le contenu (à adapter à la procédure de cet appareil) :</p>${data.guideRevision&&guide?`<p><a href="/sst#file=${esc(guide.data.documentId)}" target="_blank" rel="noopener">${esc(guide.data.title)}</a></p>`:''}<ul>${((guide&&guide.data.criteria.filter(c=>c.task===task).map(c=>c.text+' ('+c.reference+')'))||topics[task]||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div></div>
@@ -43,6 +55,7 @@ function applyGuide(){
 }
 function render(){
  dialog.innerHTML=`<div class="ir-toolbar"><strong>Formation à un équipement</strong>${editing?'<button type="button" class="button primary" data-tf-save="draft">Enregistrer le brouillon</button><button type="button" class="button primary" data-tf-save="completed">Finaliser et conserver les signatures</button>':'<button type="button" class="button secondary" data-tf-correct>Corriger cette fiche</button>'}<button type="button" class="button primary" data-tf-email>Envoyer par courriel</button><button type="button" class="button secondary" data-tf-print>Imprimer / PDF</button>${prior&&ctx.onDelete?'<button type="button" class="quiet" data-tf-delete>Supprimer</button>':''}${prior?'<button type="button" class="button secondary" data-tf-new>Nouvelle formation</button>':''}<button type="button" class="quiet" data-tf-close>Fermer</button></div><p data-tf-message role="status">${prior?'Fiche enregistrée. Une correction conserve la version précédente.':'Nouveau formulaire — remplir, puis faire signer.'}</p>${prior&&editing?'<label class="ir-correction">Motif de la correction<input data-tf="correctionReason" maxlength="1000" value="'+esc(model.correctionReason||'')+'"></label>':''}${editing&&ctx.guide&&ctx.guide.id!==model.guideRevision?'<button type="button" class="button secondary" data-tf-guide>Utiliser la fiche de référence actuelle</button>':''}${paper(editing)}`;
+ if(editing)updateDateDisplay();
  dialog.oninput=e=>{const el=e.target,key=el.dataset.tf;
   if(!key&&!el.hasAttribute('data-tf-person')&&!el.hasAttribute('data-tf-point'))return;
   if(key==='correctionReason'){model.correctionReason=el.value;dirty=true;return;}
@@ -53,7 +66,8 @@ function render(){
   // Native date pickers can emit an empty intermediate value: never erase ink here.
   if(el.type==='date'&&prior?.data.status!=='completed'){
    model[key]=value;model.status='draft';dirty=true;
-   message(key==='date'&&value>today()?'Formation prévue le '+value+'. Cliquez sur « Enregistrer le brouillon ».':'Date modifiée — vos signatures sont conservées.');return;
+   if(key==='date')updateDateDisplay();
+   message(key==='date'&&value>today()?'Formation prévue le '+value+'. Vous pouvez maintenant l’enregistrer.':'Date modifiée — vos signatures sont conservées.');return;
   }
   const had=Object.values(model.signatures).some(x=>x.length);
   if(had&&!confirm('Modifier le contenu signé exige de refaire les signatures. Continuer ?')){if(el.type==='checkbox')el.checked=old;else el.value=old;return;}
@@ -64,6 +78,7 @@ function render(){
   else model[key]=el.type==='checkbox'?el.checked:el.value;
   if(key==='procedureId'){const p=ctx.procedures.find(x=>x.id===model.procedureId);model.points=(p?.data.criteria||[]).filter(x=>x.task===ctx.task).map(x=>({...x,result:'unobserved',note:''}));render();}
   if(key==='trainer'){const el=dialog.querySelector('.tf-name-trainer .ir-value');if(el)el.textContent=model.trainer||'—';}
+  if(key==='date')updateDateDisplay();
   redraw();message(had?'Le contenu a changé : faites signer à nouveau cette version.':'Modifications à enregistrer.');
  };
  dialog.onclick=async e=>{const b=e.target.closest('button');if(!b||busy)return;const d=b.dataset;
@@ -94,7 +109,7 @@ if(model.signatures[key].length>=60||model.signatures[key].reduce((n,s)=>n+s.len
 async function save(status){
  if(!model.employeeKey){message('Choisissez l’employé concerné.',true);return;}
  if(status==='completed'){
-  if(model.date>today()){message('Pour cette date future, choisissez « Enregistrer le brouillon ». Vous pourrez finaliser la fiche après la formation.',true);return;}
+  if(model.date>today()){message('Pour conserver cette fiche, cliquez sur « Enregistrer la formation planifiée ».',true);return;}
   const required=[['date','la date réelle de formation'],['trainer','le nom du formateur'],['reference','le document ou la méthode utilisé'],['content','le contenu enseigné']];
   const missing=required.filter(([key])=>!model[key]?.trim()).map(([,label])=>label);
   for(const [key,label] of FORM_SIGNERS)if(!model.signatures[key].length)missing.push('la signature : '+label);

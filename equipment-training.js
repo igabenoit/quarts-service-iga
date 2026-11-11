@@ -30,19 +30,21 @@ export function validateTrainingEntry(body,context){
    d.guideRevision=b.guideRevision;
   }
   const completed=b.status==='completed',signatures=normalizeTrainingSignatures(b.signatures);
+  // A draft may contain planned dates. Check the chronology of the evidence at finalization.
+  const formDate=value=>completed&&value?past(value):day(value,false);
   for(const k of ['explained','demonstrated','practiced','questions']){if(typeof b[k]!=='boolean')fail('Cochez les activités réalisées.');d[k]=b[k];}
-  Object.assign(d,{status:b.status,date:day(b.date,false),trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:b.observationDate?past(b.observationDate):'',supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:b.employeeDate?past(b.employeeDate):'',trainerDate:b.trainerDate?past(b.trainerDate):''});
+  Object.assign(d,{status:b.status,date:day(b.date,false),trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:formDate(b.observationDate),supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:formDate(b.employeeDate),trainerDate:formDate(b.trainerDate)});
   if(completed&&d.date>localDay(new Date()))fail('Cette formation est prévue dans le futur. Enregistrez le brouillon et finalisez-le après la formation.');
   if(completed&&!d.date)fail('Indiquez la date réelle de formation.');
   for(const [key,date] of [['employee',d.employeeDate],['trainer',d.trainerDate]]){
    if(completed&&!signatures[key].length)fail('Les deux signatures sont requises pour finaliser.');
-   if(signatures[key].length&&(!date||!d.date||date<d.date))fail('Date de signature requise, au plus tôt à la date de formation.');
+   if(completed&&(!date||date<d.date))fail('Date de signature requise, au plus tôt à la date de formation.');
   }
   if(b.procedureId){const p=procedure(b.procedureId),criteria=p.data.criteria.filter(c=>c.task===tasks[0]);
    if(!Array.isArray(b.points)||b.points.length!==criteria.length||new Set(b.points.map(x=>x.id)).size!==criteria.length)fail('Renseignez tous les critères de cette procédure.');
    d.procedureId=p.id;d.points=criteria.map(c=>{const x=b.points.find(x=>x.id===c.id);if(!x||!['ok','review','unobserved'].includes(x.result))fail('Résultat pratique invalide.');return {...c,result:x.result,note:text(x.note||'','note',1500,false)};});
-   if(d.points.some(x=>x.result!=='unobserved')&&(!d.observationDate||!d.supervisor))fail('Date réelle et superviseur requis pour les points observés.');
-   if(d.points.some(x=>x.result==='review')&&(!d.immediate||!d.owner||!d.dueDate))fail('Précisez la mesure immédiate, le responsable et la date de suivi.');
+   if(completed&&d.points.some(x=>x.result!=='unobserved')&&(!d.observationDate||!d.supervisor))fail('Date réelle et superviseur requis pour les points observés.');
+   if(completed&&d.points.some(x=>x.result==='review')&&(!d.immediate||!d.owner||!d.dueDate))fail('Précisez la mesure immédiate, le responsable et la date de suivi.');
    if(completed&&d.points.some(x=>x.result!=='unobserved')&&[d.employeeDate,d.trainerDate].some(date=>date<d.observationDate))fail('Les signatures doivent suivre les observations consignées.');
   }else if(b.points?.length)fail('Les critères pratiques exigent une procédure approuvée pour ce modèle.');
  }
