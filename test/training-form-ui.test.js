@@ -17,6 +17,23 @@ function fixture(){
  const stroke=key=>{const e={button:0,pointerId:1,clientX:10,clientY:10,preventDefault(){}};pads[key].onpointerdown(e);pads[key].onpointermove({...e,clientX:80});pads[key].onpointerup(e);};
  return {run,dialog,status,stroke,sandbox};
 }
+test('une nouvelle fiche utilise la révision publiée et laisse chaque point non observé',()=>{
+ const f=fixture();
+ const guide={id:'v2',kind:'guide',data:{documentId:'pdf-v2',title:'Fiche corrigée fictive',version:'Révision 2',criteria:[
+  {id:'1',task:'Utilisation',text:'Contrôle fictif à vérifier',reference:'p. 2'},
+  {id:'2',task:'Nettoyage',text:'Autre tâche',reference:'p. 1'}]}};
+ Object.assign(f.sandbox.options,{guide,guides:[guide],procedures:[guide]});
+ f.run('openTrainingForm(options)');
+ assert.equal(f.run('model.guideRevision'),'v2');
+ assert.equal(f.run('model.points.length'),1);
+ assert.equal(f.run('model.points[0].result'),'unobserved');
+ assert.match(f.run('paper(false)'),/Fiche corrigée fictive/);
+ assert.match(f.run('paper(false)'),/pdf-v2/);
+ const old={id:'original',data:{...emptyTrainingForm(),employeeKeys:['test'],tasks:['Utilisation'],reference:'Ancienne fiche',status:'completed'}};
+ f.sandbox.options.prior=old;f.run('openTrainingForm(options)');
+ assert.equal(f.run('model.reference'),'Ancienne fiche');
+ assert.doesNotMatch(f.run('paper(false)'),/Contrôle fictif à vérifier/);
+});
 test('touches, dates et champs inchangés préservent les deux signatures',()=>{
  const f=fixture();f.stroke('employee');f.stroke('trainer');
  assert.equal(f.run('model.signatures.employee.length'),1);assert.equal(f.run('model.signatures.trainer.length'),1);

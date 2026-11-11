@@ -23,7 +23,7 @@ test('resume switches employee, equipment and task before supplying the form con
  const state={equipment:[{id:'one',department_id:1},{id:'two',department_id:2}],employees:[],departments:[{id:2,name:'Charcuterie'}],entries:[prior],actor:{name:'Admin'}};
  const selection={equipment:'one',employee:'a',task:'Utilisation',department:'1'};
  let opened,drawn=false;
- const sandbox={state,selection,canLeave:()=>true,draw:()=>{drawn=true;},equipment:()=>state.equipment.find(e=>e.id===selection.equipment),procedures:()=>[selection.equipment,selection.task],openTrainingForm:options=>{opened=options;},api:()=>{},banner:()=>{}};
+ const sandbox={currentGuide:()=>null,state,selection,canLeave:()=>true,draw:()=>{drawn=true;},equipment:()=>state.equipment.find(e=>e.id===selection.equipment),procedures:()=>[selection.equipment,selection.task],openTrainingForm:options=>{opened=options;},api:()=>{},banner:()=>{}};
  vm.createContext(sandbox);vm.runInContext(source.slice(source.indexOf('function openForm(')),sandbox);sandbox.openForm(prior);
  assert.ok(drawn);assert.equal(opened.equipment.id,'two');assert.equal(opened.employeeKey,'b');assert.equal(opened.task,'Nettoyage');assert.equal(opened.department,'Charcuterie');assert.deepEqual(opened.procedures,['two','Nettoyage']);assert.equal(selection.department,'');
  opened=null;sandbox.canLeave=()=>false;sandbox.openForm(prior);assert.equal(opened,null);

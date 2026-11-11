@@ -14,15 +14,21 @@ export function validateTrainingEntry(body,context){
  const {equipment,employees,entries,documents}=context,kind=body.kind,b=body.data||{};
  if(!Object.hasOwn(entryLabels,kind))fail('Type de saisie inconnu.');
  if(!equipment||equipment.kind!=='equipment'||equipment.archived_at)fail('Choisissez une fiche équipement active.');
- const tasks=strings(b.tasks,'tâches',20),employeeKeys=kind==='procedure'?[]:strings(b.employeeKeys,'employés');
+ const tasks=strings(b.tasks,'tâches',20),employeeKeys=['guide','procedure'].includes(kind)?[]:strings(b.employeeKeys,'employés');
  if(employeeKeys.some(k=>!employees.some(e=>e.key===k)))fail('Employé absent du répertoire partagé.');
  const d={tasks,employeeKeys},enteredBy=text(b.enteredBy,'personne qui saisit',120);
  d.enteredBy=enteredBy;
  const document=id=>{const doc=documents.find(x=>x.id===id&&!x.archived_at);if(!doc)fail('Choisissez un original accessible dans la bibliothèque.');return doc;};
- const procedure=id=>{const p=entries.find(x=>x.id===id&&x.kind==='procedure'&&x.equipment_id===equipment.id);if(!p||tasks.some(t=>!p.data.tasks.includes(t)))fail('Choisissez une procédure approuvée couvrant les tâches de cet équipement.');if(!equipment.fields?.model||p.data.model!==equipment.fields.model)fail('Le modèle de l’équipement diffère de la procédure. Vérifiez la fiche équipement.');return p;};
+ const procedure=id=>{const p=entries.find(x=>x.id===id&&['guide','procedure'].includes(x.kind)&&x.equipment_id===equipment.id);if(!p||tasks.some(t=>!p.data.tasks.includes(t)))fail('Choisissez la fiche de référence ou la procédure couvrant les tâches de cet équipement.');if(!equipment.fields?.model||p.data.model!==equipment.fields.model)fail('Le modèle de l’équipement diffère de la procédure. Vérifiez la fiche équipement.');return p;};
  if(kind==='training_form'){
   if(tasks.length!==1||employeeKeys.length!==1)fail('Un formulaire porte sur une personne et une tâche.');
   if(!['draft','completed'].includes(b.status))fail('État du formulaire invalide.');
+  if(b.guideRevision){
+   const prior=entries.find(e=>e.id===body.supersedes);
+   const guide=entries.find(e=>e.id===b.guideRevision&&e.kind==='guide'&&e.equipment_id===equipment.id&&e.data.tasks.includes(tasks[0]));
+   if(!guide||(!documents.some(d=>d.id===guide.data.documentId&&!d.archived_at)&&prior?.data.guideRevision!==b.guideRevision))fail('La fiche de référence a changé. Actualisez le registre.',409);
+   d.guideRevision=b.guideRevision;
+  }
   const completed=b.status==='completed',signatures=normalizeTrainingSignatures(b.signatures);
   for(const k of ['explained','demonstrated','practiced','questions']){if(typeof b[k]!=='boolean')fail('Cochez les activités réalisées.');d[k]=b[k];}
   Object.assign(d,{status:b.status,date:b.date?past(b.date):'',trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:b.observationDate?past(b.observationDate):'',supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:b.employeeDate?past(b.employeeDate):'',trainerDate:b.trainerDate?past(b.trainerDate):''});
@@ -47,13 +53,13 @@ export function validateTrainingEntry(body,context){
   if(typeof b.active!=='boolean'||typeof b.replacement!=='boolean')fail('Précisez l’affectation et le remplacement.');
   Object.assign(d,{active:b.active,replacement:b.replacement,date:past(b.date),reason:text(b.reason||'','motif',1000,false)});
  }
- if(kind==='procedure'){
+ if(kind==='procedure'||kind==='guide'){
   document(b.documentId);const model=text(b.model,'modèle exact',250);if(model!==equipment.fields?.model)fail('Le modèle doit correspondre à celui de la fiche équipement.');
-  if(b.approved!==true)fail('Confirmez que cette version est approuvée pour ce modèle.');
+  if(kind==='procedure'&&b.approved!==true)fail('Confirmez que cette version est approuvée pour ce modèle.');
   if(!Array.isArray(b.criteria)||!b.criteria.length||b.criteria.length>100)fail('Indiquez les critères tirés de la procédure.');
   const criteria=b.criteria.map((c,i)=>({id:String(i+1),task:text(c.task,'tâche du critère',180),text:text(c.text,'critère',1000),reference:text(c.reference,'page / section',180)}));
   if(criteria.some(c=>!tasks.includes(c.task))||tasks.some(t=>!criteria.some(c=>c.task===t)))fail('Chaque tâche doit posséder ses propres critères.');
-  Object.assign(d,{documentId:b.documentId,model,title:text(b.title,'titre',180),version:text(b.version,'version',100),approvedBy:text(b.approvedBy,'approbateur',120),date:past(b.date),criteria,approved:true});
+  Object.assign(d,{documentId:b.documentId,model,title:text(b.title,'titre',180),version:text(b.version,'version',100),date:past(b.date),criteria,approved:kind==='procedure',...(kind==='procedure'?{approvedBy:text(b.approvedBy,'approbateur',120)}:{})});
  }
  if(kind==='evidence'){
   document(b.documentId);const date=day(b.date,false);if(date)past(date);
@@ -100,25 +106,54 @@ export async function installEquipmentTraining(app,pool,service){
  data JSONB NOT NULL,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
  supersedes UUID UNIQUE REFERENCES sst_training_entries(id),correction_reason TEXT NOT NULL DEFAULT '');
  CREATE INDEX IF NOT EXISTS sst_training_equipment ON sst_training_entries(equipment_id,created_at);
+ CREATE TABLE IF NOT EXISTS sst_removed_training_entries(
+ entry_id UUID PRIMARY KEY REFERENCES sst_training_entries(id),removed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+ CREATE OR REPLACE VIEW sst_visible_training_entries AS SELECT e.* FROM sst_training_entries e
+ WHERE NOT EXISTS (SELECT 1 FROM sst_removed_training_entries r WHERE r.entry_id=e.id);
  CREATE OR REPLACE FUNCTION sst_training_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Training history is append-only'; END $$;
  DROP TRIGGER IF EXISTS sst_training_immutable_trigger ON sst_training_entries;
  CREATE TRIGGER sst_training_immutable_trigger BEFORE UPDATE OR DELETE ON sst_training_entries FOR EACH ROW EXECUTE FUNCTION sst_training_immutable();`);
- const read=async(db=pool)=>JSON.parse(JSON.stringify((await db.query('SELECT * FROM sst_training_entries ORDER BY created_at,id')).rows));
- const docs=async(db=pool)=>(await db.query('SELECT id,record_id,name,mime,size,sha256,created_at,archived_at FROM sst_documents ORDER BY created_at')).rows;
+ const read=async(db=pool)=>JSON.parse(JSON.stringify((await db.query('SELECT * FROM sst_visible_training_entries ORDER BY created_at,id')).rows));
+ const docs=async(db=pool)=>(await db.query('SELECT id,record_id,name,mime,size,sha256,version,created_at,archived_at FROM sst_visible_documents ORDER BY created_at')).rows;
  app.get('/api/sst/equipment-training',admin,route(async(req,res)=>{
   const [dir,records,entries,documents]=await Promise.all([directory(),pool.query("SELECT * FROM sst_records WHERE kind='equipment' ORDER BY title"),read(),docs()]);
   res.json({...dir,equipment:records.rows,entries,documents,actor:req.sstIdentity||{kind:'admin',name:req.sstActor}});
+ }));
+ app.post('/api/sst/equipment-training/entries/:id/delete',admin,origin,route(async(req,res)=>{
+  const id=req.params.id;
+  if(!uuid(id))fail('Formation introuvable.',404);
+  const db=await pool.connect();
+  try{
+   await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835107)');
+   const {rows:[entry]}=await db.query('SELECT id,kind,equipment_id FROM sst_training_entries WHERE id=$1',[id]);
+   if(!entry||!['training_form','preparation','session','evidence'].includes(entry.kind))fail('Formation ou pièce introuvable.',404);
+   const removed=await db.query('SELECT 1 FROM sst_removed_training_entries WHERE entry_id=$1',[id]);
+   if(!removed.rowCount){
+    if((await db.query('SELECT 1 FROM sst_visible_training_entries WHERE supersedes=$1',[id])).rowCount)fail('Une nouvelle version existe. Actualisez le registre.',409);
+    // Retire the whole revision chain so an earlier draft cannot become current again.
+    await db.query(`WITH RECURSIVE versions AS (
+     SELECT id,supersedes FROM sst_training_entries WHERE id=$1
+     UNION ALL SELECT e.id,e.supersedes FROM sst_training_entries e JOIN versions v ON e.id=v.supersedes
+    ) INSERT INTO sst_removed_training_entries(entry_id)
+     SELECT id FROM versions UNION SELECT f.id FROM sst_training_entries f
+     JOIN versions v ON f.data->>'observationId'=v.id::text WHERE f.kind='followup'
+     ON CONFLICT DO NOTHING`,[id]);
+    await db.query('INSERT INTO sst_events(record_id,actor,action,after_value) VALUES($1,$2,$3,$4)',[entry.equipment_id,req.sstActor,'equipment_training.deleted',JSON.stringify({id,kind:entry.kind})]);
+   }
+   await db.query('COMMIT');res.json({ok:true});
+  }catch(e){await db.query('ROLLBACK');throw e}finally{db.release();}
  }));
  app.post('/api/sst/equipment-training/entries',admin,origin,route(async(req,res)=>{
   const b=req.body;if(!b||!uuid(b.id)||!uuid(b.equipmentId))fail('Identifiant de saisie invalide.');
   const dir=await directory(),db=await pool.connect();
   try{
    await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835107)');
+   if((await db.query('SELECT 1 FROM sst_removed_training_entries WHERE entry_id=$1',[b.id])).rowCount)fail('Cette saisie a été supprimée.',409);
    const entries=await read(db),equipment=(await db.query('SELECT * FROM sst_records WHERE id=$1',[b.equipmentId])).rows[0];
    const v=validateTrainingEntry(b,{equipment,employees:dir.employees,entries,documents:await docs(db)});
    const duplicate=entries.find(e=>e.id===b.id);
    if(duplicate){if(duplicate.kind!==v.kind||duplicate.equipment_id!==b.equipmentId||!isDeepStrictEqual(duplicate.data,v.data)||duplicate.supersedes!==(b.supersedes||null)||duplicate.correction_reason!==(b.correctionReason||'').trim())fail('Identifiant déjà utilisé pour une autre saisie.',409);await db.query('COMMIT');return res.json({entry:duplicate,replayed:true});}
-   let reason='';if(b.supersedes){const prior=entries.find(e=>e.id===b.supersedes);if(!prior||prior.kind!==v.kind||prior.equipment_id!==b.equipmentId)fail('Original introuvable.');if(entries.some(e=>e.supersedes===prior.id))fail('Cette entrée a déjà été corrigée. Rechargez le registre.',409);if(['procedure','confirmation','assignment'].includes(v.kind))fail('Ajoutez une nouvelle version ou une nouvelle affectation.');if(JSON.stringify(prior.data.tasks)!==JSON.stringify(v.data.tasks)||JSON.stringify(prior.data.employeeKeys)!==JSON.stringify(v.data.employeeKeys))fail('Une correction conserve les personnes et tâches originales.');if(v.kind==='training_form'){const clean=x=>Object.fromEntries(Object.entries(x).filter(([k])=>!['signatures','status','enteredBy',...(prior.data.status==='draft'?['date','observationDate','dueDate','employeeDate','trainerDate']:[])].includes(k)));if(!isDeepStrictEqual(clean(prior.data),clean(v.data)))for(const key of ['employee','trainer'])if(v.data.signatures[key].length&&isDeepStrictEqual(v.data.signatures[key],prior.data.signatures[key]))fail('Le contenu a changé : recueillez de nouvelles signatures.');}reason=text(b.correctionReason,'motif de correction',2000);}
+   let reason='';if(b.supersedes){const prior=entries.find(e=>e.id===b.supersedes);if(!prior||prior.kind!==v.kind||prior.equipment_id!==b.equipmentId)fail('Original introuvable.');if(entries.some(e=>e.supersedes===prior.id))fail('Cette entrée a déjà été corrigée. Rechargez le registre.',409);if(['guide','procedure','confirmation','assignment'].includes(v.kind))fail('Ajoutez une nouvelle version ou une nouvelle affectation.');if(JSON.stringify(prior.data.tasks)!==JSON.stringify(v.data.tasks)||JSON.stringify(prior.data.employeeKeys)!==JSON.stringify(v.data.employeeKeys))fail('Une correction conserve les personnes et tâches originales.');if(v.kind==='training_form'){const clean=x=>Object.fromEntries(Object.entries(x).filter(([k])=>!['signatures','status','enteredBy',...(prior.data.status==='draft'?['date','observationDate','dueDate','employeeDate','trainerDate']:[])].includes(k)));if(!isDeepStrictEqual(clean(prior.data),clean(v.data)))for(const key of ['employee','trainer'])if(v.data.signatures[key].length&&isDeepStrictEqual(v.data.signatures[key],prior.data.signatures[key]))fail('Le contenu a changé : recueillez de nouvelles signatures.');}reason=text(b.correctionReason,'motif de correction',2000);}
    const actor=req.sstIdentity||{kind:'admin',name:req.sstActor};
    const entry=(await db.query('INSERT INTO sst_training_entries(id,equipment_id,kind,data,actor,supersedes,correction_reason) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[b.id,b.equipmentId,v.kind,JSON.stringify(v.data),JSON.stringify(actor),b.supersedes||null,reason])).rows[0];
    await db.query('INSERT INTO sst_events(record_id,actor,action,before_value,after_value) VALUES($1,$2,$3,$4,$5)',[b.equipmentId,req.sstActor,b.supersedes?'equipment_training.corrected':'equipment_training.'+v.kind,b.supersedes?JSON.stringify(entries.find(e=>e.id===b.supersedes)):null,JSON.stringify(entry)]);

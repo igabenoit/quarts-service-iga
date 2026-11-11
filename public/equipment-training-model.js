@@ -1,5 +1,5 @@
 // Pure projections shared by the API, browser and isolated tests. No inferred qualification.
-export const entryLabels={training_form:'Formulaire de formation',preparation:'Fiche de formation à préparer',assignment:'Affectation',procedure:'Procédure approuvée',evidence:'Pièce existante',testimony:'Témoignage',session:'Formation donnée',observation:'Observation pratique',confirmation:'Confirmation du déclarant',followup:'Suivi réalisé'};
+export const entryLabels={training_form:'Formulaire de formation',preparation:'Fiche de formation à préparer',assignment:'Affectation',procedure:'Procédure approuvée',guide:'Fiche de référence',evidence:'Pièce existante',testimony:'Témoignage',session:'Formation donnée',observation:'Observation pratique',confirmation:'Confirmation du déclarant',followup:'Suivi réalisé'};
 export const iso=v=>v?String(v).slice(0,10):'';
 export const localDay=v=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v));
 export function effective(entries,cutoff='9999-12-31'){
@@ -25,7 +25,7 @@ export function buildTrainingReport(entries,documents,{equipmentId='',employeeKe
  const matches=e=>(!equipmentId||e.equipment_id===equipmentId)&&(!employeeKey||e.data.employeeKeys?.includes(employeeKey));
  const matched=entries.filter(matches),procedureIds=new Set(matched.map(e=>e.data.procedureId).filter(Boolean));
  const scoped=entries.filter(e=>matches(e)||procedureIds.has(e.id)),before=scoped.filter(e=>localDay(e.created_at)<=cutoff),since=scoped.filter(e=>localDay(e.created_at)>cutoff);
- const docIds=new Set(scoped.filter(e=>e.kind==='evidence'||e.kind==='procedure').map(e=>e.data.documentId));
+ const docIds=new Set(scoped.filter(e=>e.kind==='evidence'||e.kind==='procedure'||e.kind==='guide').map(e=>e.data.documentId));
  const current=registerRows(entries).filter(r=>(!equipmentId||r.equipmentId===equipmentId)&&(!employeeKey||r.employeeKey===employeeKey));
  return {cutoff,generatedAt:new Date().toISOString(),scope:{equipmentId,employeeKey},beforeState:registerRows(entries,cutoff).filter(r=>(!equipmentId||r.equipmentId===equipmentId)&&(!employeeKey||r.employeeKey===employeeKey)),current,
   before,statementsSince:since.filter(e=>e.kind==='testimony'||e.kind==='confirmation'),interventionsSince:since.filter(e=>!['testimony','confirmation','evidence'].includes(e.kind)),documentsSince:since.filter(e=>e.kind==='evidence'),

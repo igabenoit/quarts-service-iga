@@ -95,5 +95,24 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   });
   const backup=await call('GET','export');assert.equal(backup.status,200,JSON.stringify(backup.body));assert.equal(backup.body.equipmentTrainingEntries.length,(await call('GET','equipment-training')).body.entries.length);assert.equal(backup.body.documents.find(d=>d.id===documentId).sha256,createHash('sha256').update(binary).digest('hex'));
   await f.stop();await f.start();assert.equal((await call('GET','equipment-training')).body.entries.length,backup.body.equipmentTrainingEntries.length);
+  await t.test('supprimer une formation, ses versions et un fichier avec contrôle de concurrence',async()=>{
+   const regs=()=>call('GET','equipment-training').then(r=>r.body.entries);
+   const active=(await regs()).filter(e=>e.kind==='training_form');
+   const finished=active.find(e=>e.supersedes&&e.data.status==='completed');
+   const unfinished=active.find(e=>e.data.status==='draft'&&!active.some(x=>x.supersedes===e.id));
+   const remove=id=>call('POST','equipment-training/entries/'+id+'/delete',{});
+   assert.equal((await remove(finished.supersedes)).status,409);
+   assert.equal((await f.call('POST','/api/sst/equipment-training/entries/'+finished.id+'/delete',{body:{}})).status,401);
+   for(const id of [finished.id,unfinished.id,finished.id])assert.equal((await remove(id)).status,200);
+   const visible=await regs();
+   for(const id of [finished.id,finished.supersedes,unfinished.id])assert.ok(!visible.some(e=>e.id===id));
+   const report=await call('GET',`equipment-training/report?equipmentId=${equipmentId}&cutoff=${now}`);
+   assert.ok(!report.body.entries.some(e=>e.id===finished.id));
+   assert.equal((await call('POST','documents/'+documentId+'/delete',{version:99})).status,409);
+   assert.equal((await call('POST','documents/'+documentId+'/delete',{version:1})).status,200);
+   assert.equal((await call('GET','documents/'+documentId)).status,404);
+   assert.ok(!(await call('GET','state')).body.documents.some(d=>d.id===documentId));
+   assert.ok(!(await call('GET','equipment-training')).body.documents.some(d=>d.id===documentId));
+  });
  }finally{await f.close();}
 });

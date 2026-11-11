@@ -15,5 +15,5 @@ test('printed training report retains training facts and excludes administrative
   assert.ok(!printed.includes(marker),marker+' excluded from print');
  }
  for(const fact of ['2026-08-15','Formateur témoin','Employé témoin','Utiliser le poussoir','Suivis ouverts'])assert.ok(printed.includes(fact),fact+' retained');
- assert.ok(source.includes('innerHTML=reportHTML(report,true);window.print()'));
+ assert.match(source,/innerHTML=reportHTML\(report,true\);if\(d.emailPrint\)emailPaper\('Rapport de formation'\);else window.print\(\)/);
 });
