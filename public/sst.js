@@ -50,7 +50,7 @@ function employeesView(){const q=$('search').value.toLocaleLowerCase('fr-CA'),de
 function documentEmailLink(id) {
  return `<button type="button" class="button secondary" data-email-original="${esc(id)}">Envoyer en pièce jointe</button>`;
 }
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
  const button = event.target.closest('[data-email-original]');
  if (!button) return;
  const file = state.documents.find(item => item.id === button.dataset.emailOriginal);
@@ -60,8 +60,44 @@ document.addEventListener('click', event => {
  $('mailSstResult').textContent = '';
  $('mailSstForm').dataset.file = file.id;
  $('mailSstForm').dataset.request = crypto.randomUUID();
+ const request = $('mailSstForm').dataset.request;
+ const select = $('mailSstTo');
+ select.replaceChildren(new Option('Choisir une adresse', ''));
+ $('mailSstAdd').open = false;
+ $('mailSstFields').disabled = true;
  $('mailSstDialog').showModal();
+ try {
+  const {addresses} = await api('mail-recipients');
+  if ($('mailSstForm').dataset.request !== request) return;
+  for (const email of addresses) select.add(new Option(email,email));
+  if (!addresses.length) $('mailSstAdd').open = true;
+ } catch (error) {
+  $('mailSstResult').textContent = error.message;
+ } finally {
+  if ($('mailSstForm').dataset.request === request) $('mailSstFields').disabled = false;
+ }
 });
+$('mailSstApprove').onclick = async () => {
+ const input = $('mailSstNew'), select = $('mailSstTo');
+ if (!input.value.trim() || !input.checkValidity()) {
+  $('mailSstResult').textContent = 'Indiquez une adresse courriel valide.';
+  input.focus();
+  return;
+ }
+ $('mailSstFields').disabled = true;
+ try {
+  const {email} = await api('mail-recipients', {email:input.value});
+  if (!Array.from(select.options).some(option => option.value === email)) select.add(new Option(email,email));
+  select.value = email;
+  input.value = '';
+  $('mailSstAdd').open = false;
+  $('mailSstResult').textContent = 'Adresse autorisée et sélectionnée.';
+ } catch (error) {
+  $('mailSstResult').textContent = error.message;
+ } finally {
+  $('mailSstFields').disabled = false;
+ }
+};
 $('mailSstForm').onsubmit = async event => {
  event.preventDefault();
  const form = event.currentTarget;

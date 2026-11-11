@@ -65,6 +65,7 @@ export async function installSST(app,pool,{identity}){
   sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
  CREATE UNIQUE INDEX IF NOT EXISTS sst_document_unique ON sst_documents(sha256,COALESCE(record_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE archived_at IS NULL;
  CREATE TABLE IF NOT EXISTS sst_events(id BIGSERIAL PRIMARY KEY,record_id UUID REFERENCES sst_records(id),document_id UUID REFERENCES sst_documents(id),actor TEXT NOT NULL,action TEXT NOT NULL,before_value JSONB,after_value JSONB,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+ CREATE TABLE IF NOT EXISTS sst_mail_recipients(email TEXT PRIMARY KEY);
  CREATE TABLE IF NOT EXISTS sst_imports(id UUID PRIMARY KEY,digest TEXT NOT NULL,label TEXT NOT NULL,record_count INTEGER NOT NULL,document_count INTEGER NOT NULL,report_id UUID REFERENCES sst_records(id),imported_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
  CREATE INDEX IF NOT EXISTS sst_records_kind ON sst_records(kind,archived_at);CREATE INDEX IF NOT EXISTS sst_events_record ON sst_events(record_id,id);`);await schemaDb.query('COMMIT')}catch(error){await schemaDb.query('ROLLBACK');throw error}finally{schemaDb.release()}
  const admin=async(req,res,next)=>{try{const who=await identity(req);if(!who)return res.status(401).json({error:'Connectez-vous avec le compte administrateur de Quarts Service.'});if(who.kind!=='admin')return res.status(403).json({error:'Cet espace SST est réservé à l’administration.'});req.sstActor=who.name||'Administration';req.sstIdentity={kind:who.kind,name:who.name||'Administration',...(who.id?{id:who.id}:{})};res.set('Cache-Control','no-store');next()}catch{res.status(503).json({error:'Accès SST temporairement indisponible.'})}};
@@ -139,11 +140,26 @@ export async function installSST(app,pool,{identity}){
    const id=randomUUID();await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,name,mime,bytes.length,sha,bytes]);await audit(db,req,'document.added',null,{id,name,mime,size:bytes.length,sha256:sha},recordId,id);return id});res.status(201).json({id});
  }));
  app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=(await pool.query('SELECT * FROM sst_documents WHERE id=$1',[req.params.id])).rows[0]||(employeeFiles?await employeeFiles.read(req.params.id):null);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});res.send(Buffer.from(r.data))}));
+ const configuredRecipients=()=>(process.env.SST_MAIL_RECIPIENTS||'').split(',').map(normalizeEmail).filter(Boolean);
+ app.get('/api/sst/mail-recipients',admin,route(async(req,res)=>{
+  const {rows}=await pool.query('SELECT email FROM sst_mail_recipients ORDER BY email');
+  res.json({addresses:[...new Set([...configuredRecipients(),...rows.map(r=>r.email)])].sort()});
+ }));
+ app.post('/api/sst/mail-recipients',admin,origin,route(async(req,res)=>{
+  const who=await identity(req);
+  if(who?.kind!=='admin'||who.authentication!=='passkey'||!who.personId)fail('Connectez-vous avec votre clé de direction pour autoriser une adresse.',403);
+  const email=normalizeEmail(req.body?.email);
+  if(!email)fail('Indiquez une adresse courriel valide.');
+  await tx(async db=>{
+   const added=await db.query('INSERT INTO sst_mail_recipients(email) VALUES($1) ON CONFLICT DO NOTHING RETURNING email',[email]);
+   if(added.rowCount)await audit(db,req,'mail.recipient.approved',null,{email,personId:who.personId});
+  });
+  res.json({email});
+ }));
  app.post('/api/sst/documents/:id/email',admin,origin,route(async(req,res)=>{
   const id=req.params.id, to=normalizeEmail(req.body?.to), requestId=req.body?.requestId;
   if(!uuid(id)||!uuid(requestId)||!to)fail('Vérifiez le document et l’adresse courriel.');
-  const approved=(process.env.SST_MAIL_RECIPIENTS||'').split(',').map(normalizeEmail).filter(Boolean);
-  if(!approved.includes(to))fail('Cette adresse ne figure pas dans la liste des destinataires SST autorisés.',403);
+  if(!configuredRecipients().includes(to)&&!(await pool.query('SELECT 1 FROM sst_mail_recipients WHERE email=$1',[to])).rowCount)fail('Cette adresse ne figure pas dans la liste des destinataires SST autorisés.',403);
   if(!process.env.RESEND_API_KEY)fail('Le service courriel du magasin est indisponible.',503);
   const file=(await pool.query('SELECT name,data FROM sst_documents WHERE id=$1',[id])).rows[0]||(employeeFiles?await employeeFiles.read(id):null);
   if(!file)fail('Document introuvable.',404);
