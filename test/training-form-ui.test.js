@@ -17,6 +17,13 @@ function fixture(){
  const stroke=key=>{const e={button:0,pointerId:1,clientX:10,clientY:10,preventDefault(){}};pads[key].onpointerdown(e);pads[key].onpointermove({...e,clientX:80});pads[key].onpointerup(e);};
  return {run,dialog,status,stroke,sandbox};
 }
+test('une date de formation future se conserve à la réouverture et sur la fiche imprimable',async()=>{
+ const f=fixture();f.run("model.date='2099-04-23';dirty=true");await f.run("save('draft')");
+ f.run('openTrainingForm({...options,prior})');
+ const print=f.run('paper(false)');
+ assert.equal(f.run('model.date'),'2099-04-23');assert.match(print,/Formation planifiée/);assert.match(print,/2099-04-23/);
+ assert.doesNotMatch(print,/Formation consignée et signée/);
+});
 test('une nouvelle fiche utilise la révision publiée et laisse chaque point non observé',()=>{
  const f=fixture();
  const guide={id:'v2',kind:'guide',data:{documentId:'pdf-v2',title:'Fiche corrigée fictive',version:'Révision 2',criteria:[

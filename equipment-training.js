@@ -31,7 +31,8 @@ export function validateTrainingEntry(body,context){
   }
   const completed=b.status==='completed',signatures=normalizeTrainingSignatures(b.signatures);
   for(const k of ['explained','demonstrated','practiced','questions']){if(typeof b[k]!=='boolean')fail('Cochez les activités réalisées.');d[k]=b[k];}
-  Object.assign(d,{status:b.status,date:b.date?past(b.date):'',trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:b.observationDate?past(b.observationDate):'',supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:b.employeeDate?past(b.employeeDate):'',trainerDate:b.trainerDate?past(b.trainerDate):''});
+  Object.assign(d,{status:b.status,date:day(b.date,false),trainer:text(b.trainer||'','formateur',120,completed),content:text(b.content||'','contenu réellement enseigné',6000,completed),reference:text(b.reference||'','document ou méthode utilisé',1000,completed),version:text(b.version||'','version',100,false),procedureId:'',observationDate:b.observationDate?past(b.observationDate):'',supervisor:text(b.supervisor||'','superviseur',120,false),points:[],note:text(b.note||'','notes',3000,false),immediate:text(b.immediate||'','mesure immédiate',3000,false),owner:text(b.owner||'','responsable',120,false),dueDate:day(b.dueDate,false),signatures,employeeDate:b.employeeDate?past(b.employeeDate):'',trainerDate:b.trainerDate?past(b.trainerDate):''});
+  if(completed&&d.date>localDay(new Date()))fail('Cette formation est prévue dans le futur. Enregistrez le brouillon et finalisez-le après la formation.');
   if(completed&&!d.date)fail('Indiquez la date réelle de formation.');
   for(const [key,date] of [['employee',d.employeeDate],['trainer',d.trainerDate]]){
    if(completed&&!signatures[key].length)fail('Les deux signatures sont requises pour finaliser.');
@@ -47,7 +48,7 @@ export function validateTrainingEntry(body,context){
  }
  if(kind==='preparation'){
   if(employeeKeys.length!==1||tasks.length!==1)fail('Une fiche porte sur une personne et une tâche.');
-  Object.assign(d,{date:'',trainer:text(b.trainer||'','formateur prévu',120,false),content:text(b.content||'','préparation',6000,false),reference:text(b.reference||'','référence à obtenir ou à vérifier',1000,false)});
+  Object.assign(d,{date:day(b.date,false),trainer:text(b.trainer||'','formateur prévu',120,false),content:text(b.content||'','préparation',6000,false),reference:text(b.reference||'','référence à obtenir ou à vérifier',1000,false)});
  }
  if(kind==='assignment'){
   if(typeof b.active!=='boolean'||typeof b.replacement!=='boolean')fail('Précisez l’affectation et le remplacement.');

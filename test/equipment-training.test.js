@@ -74,6 +74,13 @@ test('parcours HTTP réel isolé : employés partagés, pièces, témoignage, gr
   const final=(await call('GET',`equipment-training/report?employeeKey=${person.key}&cutoff=${cutoff}`)).body;assert.equal(final.open.length,0);assert.ok(final.entries.some(e=>e.id===obs.body.entry.id));assert.ok(final.entries.some(e=>e.supersedes===obs.body.entry.id));
   await t.test('formulaire signé : brouillon, signatures, correction et pratique séparée',async()=>{
    const form={...emptyTrainingForm(),date:now,trainer:'Formateur fictif',content:'Explications réellement données en test',reference:'Méthode fictive décrite',employeeDate:now,trainerDate:now,signatures:{employee:[[[100,100],[200,200]]],trainer:[[[300,300],[400,400]]]}};
+   const planned={...emptyTrainingForm(),status:'draft',date:'2099-04-23',trainer:'Formateur fictif'};
+   const scheduled=await entry('training_form',planned);assert.equal(scheduled.status,201,JSON.stringify(scheduled.body));
+   const reopened=(await call('GET','equipment-training')).body.entries.find(e=>e.id===scheduled.body.entry.id);
+   assert.equal(reopened.data.date,planned.date);assert.equal(reopened.data.status,'draft');
+   assert.equal((await entry('training_form',{...form,status:'completed',date:planned.date})).status,400);
+   const preparation=await entry('preparation',{date:planned.date,trainer:planned.trainer});
+   assert.equal(preparation.status,201);assert.equal(preparation.body.entry.data.date,planned.date);
    const signedDraft=await entry('training_form',{...form,status:'draft'});assert.equal(signedDraft.status,201);
    const finalized=await entry('training_form',{...signedDraft.body.entry.data,status:'completed'},{supersedes:signedDraft.body.entry.id,correctionReason:'Finalisation du brouillon'});assert.equal(finalized.status,201,JSON.stringify(finalized.body));
    const persisted=(await call('GET','equipment-training')).body.entries.find(e=>e.id===finalized.body.entry.id);assert.equal(persisted.data.status,'completed');assert.deepEqual(persisted.data.signatures,form.signatures);
