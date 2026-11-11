@@ -17,7 +17,7 @@ try{
   assert.match(await page.locator('#resolvedShift').innerText(),/8 h en Cuisine/);
   await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
   await page.getByRole('button',{name:'Test Cuisine, Mardi, +',exact:true}).click();
-  await page.locator('#cellPost').selectOption('bbq');
+  await page.locator('#cellPost').selectOption({label:'Pizza +BBQ'});
   await page.locator('#cellStart').fill('7');await page.locator('#cellEnd').fill('4');
   assert.match(await page.locator('#resolvedShift').innerText(),/comptées en Prêt-à-manger/);
   await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
@@ -25,6 +25,7 @@ try{
   await page.locator('#saveDraft').click();assert.equal((await saved).status(),200);
   const read=(await f.call('GET',`/api/departments/${cuisine.id}/weeks/2026-10-26`,{cookie})).body;
   assert.equal(read.draft.rows[0].cells[0].kind,'kitchen');assert.equal(read.draft.rows[0].cells[1].workDepartment,'pam');
+  assert.equal(read.draft.rows[0].cells[1].post,'pizza_bbq');
   const received=(await f.call('GET',`/api/departments/${pam.id}/weeks/2026-10-26`,{cookie})).body;
   assert.equal(received.incoming.length,1);assert.deepEqual(errors,[]);
   console.log('Cuisine UI passed: default cuisine, PAM post routing, persistence and incoming projection.');

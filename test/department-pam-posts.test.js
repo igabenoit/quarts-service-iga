@@ -4,11 +4,12 @@ import {departmentFixture} from './department-fixture.js';
 import {PAM_POSTS,normalizeCell,validateAssignment,totalMinutes,trainingMinutes,kitchenMinutes,grandMinutes,cellDetail,sheetHTML,mergeIncoming} from '../public/departments-core.js';
 import {validateCandidate,photoSchema} from '../department-photo.js';
 const shift={kind:'shift',start:420,end:900,breakMinutes:30,note:''};
-const cells=()=>[...Object.keys(PAM_POSTS).map(post=>normalizeCell({...shift,post})),normalizeCell({...shift,kind:'kitchen'}),normalizeCell({...shift,kind:'training'})];
+const cells=(pizzaPost='pizza_bbq')=>[...['sandwiches','bbq','rs_ss','cooked_meals',pizzaPost].map(post=>normalizeCell({...shift,post})),normalizeCell({...shift,kind:'kitchen'}),normalizeCell({...shift,kind:'training'})];
 test('PAM: regular posts and kitchen/formation hours remain separate without double counting',()=>{
   const row={cells:cells()};
   assert.equal(totalMinutes(row),2250);assert.equal(kitchenMinutes(row),450);assert.equal(trainingMinutes(row),450);assert.equal(grandMinutes(row),3150);
   for(const cell of row.cells){assert.doesNotThrow(()=>validateAssignment(cell,'pam'));if(cell.kind!=='training')assert.throws(()=>validateAssignment(cell,'viande'));}
+  assert.equal(PAM_POSTS.pizza_bbq,'Pizza +BBQ');
   for(const [post,label] of Object.entries(PAM_POSTS))assert.equal(cellDetail({...shift,post}),label);
   assert.equal(cellDetail({kind:'kitchen'}),'Cuisine');
   assert.throws(()=>validateAssignment({...shift,kind:'kitchen',post:'bbq'},'pam'));
@@ -19,10 +20,11 @@ test('PAM: regular posts and kitchen/formation hours remain separate without dou
 test('PAM: print labels beneath shifts, kitchen totals and photo schema',()=>{
   const row={personId:1,cells:cells()},people=[{id:1,name:'Test PAM',group:'regular',availability:{}}];
   const html=sheetHTML({department:{key:'pam',name:'Prêt-à-manger'},weekStart:'2026-10-12',people,draft:{rows:[row],notes:''}});
-  for(const label of Object.values(PAM_POSTS))assert.ok(html.includes(`<small class="assignment-label">${label}</small>`));
+  const otherWeek=sheetHTML({department:{key:'pam',name:'Prêt-à-manger'},weekStart:'2026-10-19',people,draft:{rows:[{...row,cells:cells('pizza_sandwiches')}],notes:''}});
+  for(const label of Object.values(PAM_POSTS))assert.ok((html+otherWeek).includes(`<small class="assignment-label">${label}</small>`));
   assert.match(html,/Régulier : 37,5 h/);assert.match(html,/Cuisine : 7,5 h/);assert.match(html,/Formation : 7,5 h/);assert.match(html,/Grand total : 52,5 h/);
   const blank=sheetHTML({department:{key:'pam',name:'Prêt-à-manger'},weekStart:'2026-10-12',people,draft:{rows:[row],notes:''},blank:true});assert.doesNotMatch(blank,/assignment-label|Cuisine : 7,5/);
-  const candidate=validateCandidate({weekText:'12 octobre',departmentText:'PAM',warnings:[],rows:[{name:'Test PAM',writtenTotal:'',days:cells()}]});assert.equal(candidate.rows[0].days[5].kind,'kitchen');assert.equal(candidate.rows[0].days[4].post,'pizza_sandwiches');
+  const candidate=validateCandidate({weekText:'12 octobre',departmentText:'PAM',warnings:[],rows:[{name:'Test PAM',writtenTotal:'',days:cells()}]});assert.equal(candidate.rows[0].days[5].kind,'kitchen');assert.equal(candidate.rows[0].days[4].post,'pizza_bbq');
   const schema=photoSchema.properties.rows.items.properties.days.items.properties;assert.ok(schema.kind.enum.includes('kitchen'));for(const post of Object.keys(PAM_POSTS))assert.ok(schema.post.enum.includes(post));
 });
 test('PAM: save, reload, copy and publish preserve all new assignments',async()=>{

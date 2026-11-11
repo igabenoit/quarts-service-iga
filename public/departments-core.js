@@ -77,7 +77,7 @@ export function normalizeAvailability(value={}){
   return out;
 }
 export const blankCell=()=>({kind:'blank',start:null,end:null,breakMinutes:0,note:''});
-export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Commandes Sandwich',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs'});
+export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Commandes Sandwich',cooked_meals:'Mets Cuisinés',pizza_sandwiches:'Pizza + Sandwichs',pizza_bbq:'Pizza +BBQ'});
 export const KITCHEN_POSTS=Object.freeze({kitchen_salads:'Cuisine Salades'});
 export const BAKERY_POSTS=Object.freeze({bakery_oven:'Four',bakery_cakes:'Gâteaux',bakery_production:'Production',bakery_floor:'Plancher'});
 export const COMMON_POSTS=Object.freeze({night:'Nuit'});

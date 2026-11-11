@@ -229,7 +229,7 @@ Validation : tests HTTP avec PostgreSQL embarqué couvrant administration, mots 
 
 ### Postes du prêt-à-manger
 
-Le PAM propose Cuisine, Sandwichs, BBQ, RS-SS, Mets Cuisinés et Pizza + Sandwichs. Cuisine utilise une catégorie horaire distincte, comme Formation : ses heures nettes sont exclues du régulier, affichées séparément et incluses au grand total. Les cinq autres postes restent des heures régulières. Le libellé figure sous les heures dans la cellule, sur la feuille PDF et au portail. Les copies, transferts vers le PAM, publications et propositions de transcription conservent ces affectations.
+Le PAM propose Cuisine, Sandwichs, BBQ, RS-SS, Mets Cuisinés, Pizza + Sandwichs et Pizza +BBQ. Cuisine utilise une catégorie horaire distincte, comme Formation : ses heures nettes sont exclues du régulier, affichées séparément et incluses au grand total. Les cinq autres postes restent des heures régulières. Le libellé figure sous les heures dans la cellule, sur la feuille PDF et au portail. Les copies, transferts vers le PAM, publications et propositions de transcription conservent ces affectations.
 
 
 ### Commandes saisonnières de chandails
@@ -256,7 +256,7 @@ Le lien `/horaire-famille` affiche les horaires publiés des seules personnes ra
 
 ### Département Cuisine (à compter du 26 octobre 2026)
 
-Cuisine possède sa feuille, son master et ses totaux. Les postes Cuisine et Cuisine Salades sont imputés à Cuisine; les postes Sandwichs, BBQ, Commandes Sandwich, Mets Cuisinés, Pizza + Sandwichs et Buffet restent au PAM. Le sélecteur de postes reste disponible dans les deux départements, avec un aperçu du département imputé. Les quarts reçus sont projetés une seule fois et se modifient à leur source.
+Cuisine possède sa feuille, son master et ses totaux. Les postes Cuisine et Cuisine Salades sont imputés à Cuisine; les postes Sandwichs, BBQ, Commandes Sandwich, Mets Cuisinés, Pizza + Sandwichs, Pizza +BBQ et Buffet restent au PAM. Le sélecteur de postes reste disponible dans les deux départements, avec un aperçu du département imputé. Les quarts reçus sont projetés une seule fois et se modifient à leur source.
 
 La migration transactionnelle transfère les trois fiches PAM vérifiées vers Cuisine sans modifier leurs codes, disponibilités ou ancienneté. Elle conserve les rattachements historiques pour les semaines antérieures au 26 octobre, archive les semaines remplacées et déplace séparément brouillons et publications futures (sans publier un brouillon). Une marque persistante empêche de rejouer le transfert. Les accès gestionnaires et les destinataires courriel restent configurables par l’administration.
 
