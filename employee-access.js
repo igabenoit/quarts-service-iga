@@ -1,5 +1,7 @@
 // These aliases are internal constants, never request input.
-export const activePersonSQL=(p='p',e='e')=>`((${p}.service_employee_id IS NULL AND ${p}.active) OR (${e}.active AND ${e}.departed_at IS NULL))`;
+export const storeDateSQL="(CURRENT_TIMESTAMP AT TIME ZONE 'America/Toronto')::date";
+export const beforeDepartureSQL=(p='p')=>`(${p}.employment_ended_on IS NULL OR ${p}.employment_ended_on > ${storeDateSQL})`;
+export const activePersonSQL=(p='p',e='e')=>`(${beforeDepartureSQL(p)} AND ((${p}.service_employee_id IS NULL AND ${p}.active) OR (${e}.active AND ${e}.departed_at IS NULL)))`;
 export const activeManagerSQL=(a='a')=>`EXISTS(SELECT 1 FROM schedule_store_people access_person
   LEFT JOIN schedule_employees access_employee ON access_employee.id=access_person.service_employee_id
   WHERE access_person.id=${a}.person_id AND access_person.portal_person_id IS NULL

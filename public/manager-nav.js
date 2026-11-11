@@ -5,7 +5,7 @@ const params=new URLSearchParams(location.search);
 const staffPages=['/conges','/disponibilites','/chandails','/horaire'];
 const employeeContext=staffPages.includes(path)
   ||path==='/discussion'&&params.get('mode')!=='manager'
-  ||path==='/horaires-departements'&&params.get('vue')!=='magasin'
+  ||path==='/horaires-departements'&&!['magasin','gerant'].includes(params.get('vue'))
   ||path==='/dossiers-employes'&&params.get('vue')==='employe';
 const css=document.createElement('link');
 css.rel='stylesheet';css.href='/manager-nav.css';document.head.append(css);
@@ -52,6 +52,7 @@ if(path==='/horaire-famille'){
   const admin=user.kind==='admin';
   const items=[['Dossiers d’employés','/dossiers-employes'],['Horaires des départements','/departements'],
    ['Gestion des congés','/conges-gestion'],['Gestion des disponibilités','/disponibilites-gestion']];
+  if(!admin)items.push(['Horaires de mon département','/horaires-departements?vue=gerant']);
   if(admin)items.push(['Commande de numéraire','/numeraire'],['Santé et sécurité','/sst'],['Horaires du magasin','/horaires-departements?vue=magasin'],
    ['Commandes de chandails','/chandails-gestion'],['Gestion des accès','/acces'],['Clés des employés','/cles-employes'],
    ['Accès familiaux','/acces-famille'],['Courriels des employés','/courriels']);

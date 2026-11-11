@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {activePersonSQL,installEmployeeRevocation} from './employee-access.js';
+import {activePersonSQL,beforeDepartureSQL,installEmployeeRevocation} from './employee-access.js';
 import {installEmployeePasskeys} from './employee-passkeys.js';
 
 export function employeeCode(value){
@@ -7,8 +7,12 @@ export function employeeCode(value){
   if(typeof value!=='string'||value&&!/^\d{6}$/.test(value))throw Error('Le code employé doit contenir exactement six chiffres. Conservez les zéros au début.');
   return value||null;
 }
-export async function saveEmployeeCode(client,personId,value){
-  const code=employeeCode(value);if(code===undefined)return;
+export async function saveEmployeeCode(client,personId,value,{initialOnly=false}={}){
+  const code=employeeCode(value);if(code===undefined||initialOnly&&!code)return;
+  if(initialOnly){
+    const person=(await client.query('SELECT employee_code FROM schedule_store_people WHERE id=$1 FOR UPDATE',[personId])).rows[0];
+    if(person?.employee_code)throw Object.assign(Error('Un matricule est déjà inscrit. La direction peut le modifier.'),{status:403});
+  }
   if(code&&(await client.query('SELECT portal_person_id FROM schedule_store_people WHERE id=$1',[personId])).rows[0]?.portal_person_id)throw Error('Cette fiche utilise déjà un accès personnel partagé. Détachez cet accès avant d’attribuer un autre code.');
   if(code&&(await client.query('SELECT id FROM schedule_store_people WHERE employee_code=$1 AND id<>$2',[code,personId])).rows.length)throw Error('Ce code est déjà attribué à une autre fiche. Vérifiez la correspondance avant de poursuivre.');
   await client.query('UPDATE schedule_store_people SET employee_code=$1 WHERE id=$2',[code,personId]);
@@ -28,7 +32,7 @@ export async function installEmployeePortal(app,pool,{sameOrigin,requireManager}
   async function identity(req){
     const keyIdentity=await passkeys.sessionIdentity(req);
     if(keyIdentity){
-      const linked=(await pool.query('SELECT id FROM schedule_store_people WHERE portal_person_id=$1 AND active AND service_employee_id IS NULL AND employee_code IS NULL',[keyIdentity.id])).rows;
+      const linked=(await pool.query(`SELECT id FROM schedule_store_people p WHERE portal_person_id=$1 AND active AND ${beforeDepartureSQL()} AND service_employee_id IS NULL AND employee_code IS NULL`,[keyIdentity.id])).rows;
       return {...keyIdentity,portalPersonIds:[Number(keyIdentity.id),...linked.map(p=>Number(p.id))]};
     }
     const cookie=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('employee_portal='))?.slice(16)||'';
@@ -39,7 +43,7 @@ export async function installEmployeePortal(app,pool,{sameOrigin,requireManager}
     // Pre-migration personal sessions remain valid only until the first revocation.
     if(!equal(sig,sign(`${payload}:${row.access_version}`))&&!(row.access_version===1&&equal(sig,sign(payload))))return null;
     // Resolve explicitly linked records on every request, including existing sessions.
-    const linked=(await pool.query('SELECT id FROM schedule_store_people WHERE portal_person_id=$1 AND active AND service_employee_id IS NULL AND employee_code IS NULL',[row.id])).rows;
+    const linked=(await pool.query(`SELECT id FROM schedule_store_people p WHERE portal_person_id=$1 AND active AND ${beforeDepartureSQL()} AND service_employee_id IS NULL AND employee_code IS NULL`,[row.id])).rows;
     return {...row,portalPersonIds:[Number(row.id),...linked.map(p=>Number(p.id))]};
   }
   const requireEmployee=async(req,res,next)=>{try{req.employee=await identity(req);if(!req.employee)return res.status(401).json({error:'Connecte-toi à ton portail personnel.'});res.set('Cache-Control','no-store');next();}catch{res.status(500).json({error:'Accès temporairement indisponible.'});}};

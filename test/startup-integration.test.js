@@ -56,8 +56,7 @@ test('complete startup, signed sessions for every department, publication and pe
       if(department.id===bakery.id)bakeryCookie=cookie;
     }
     assert.equal((await call('/api/departments/meta')).status,401);
-    assert.equal((await call('/api/departments/people',bakeryCookie,{name:'Interdit',employeeCode:'009876',departments:[Number(bakery.id)],availability:{},active:true,group:'regular'})).status,403);
-    const person=await call('/api/departments/people',admin,{name:'Employé fictif audit',group:'regular',active:true,departments:[Number(bakery.id)],availability:{},email:'',employeeCode:'009876'});
+    const person=await call('/api/departments/people',bakeryCookie,{name:'Employé fictif audit',group:'regular',active:true,departments:[Number(bakery.id)],availability:{},email:'',employeeCode:'009876'});
     assert.equal(person.status,200,JSON.stringify(person.body));
     const employee=(await call('/api/employee-portal/access','',{code:'009876'})).cookie;assert.ok(employee);
     assert.equal((await call('/api/manager-accounts',employee)).status,401);
@@ -69,6 +68,11 @@ test('complete startup, signed sessions for every department, publication and pe
     assert.equal((await call(path,bakeryCookie,{revision:initial.body.revision,draft},'PUT')).status,409,'stale writer cannot overwrite the schedule');
     const before=await call(published,employee);assert.equal(before.body.schedule??null,null,'draft stays private');
     assert.equal((await call(path+'/publish',bakeryCookie,{revision:saved.body.revision,verified:true,warningsReviewed:true})).status,200);
+    const listing=await call('/api/store-portal',bakeryCookie);
+    assert.equal(listing.status,200);assert.deepEqual(listing.body.departments.map(d=>d.id),[Number(bakery.id)]);
+    const team=await call('/api/store-portal/weeks/2026-10-19',bakeryCookie);
+    assert.equal(team.status,200);assert.equal(team.body.employees.find(e=>e.id===person.body.id).days[0].entries[0].start,480);
+    assert.equal((await call('/api/store-portal',employee)).status,401);
     const visible=await call(published,employee);assert.equal(visible.status,200);assert.equal(visible.body.schedule.rows[0].cells[0].start,480);
     await stop();await start();
     assert.equal((await call(path,bakeryCookie)).status,200,'real signed manager session survives restart');

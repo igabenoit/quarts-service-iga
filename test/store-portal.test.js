@@ -14,7 +14,7 @@ import {scrollToToday} from '../public/portal-current-day.js';
 const week='2026-10-19',cells=(values={})=>Array.from({length:7},(_,i)=>values[i]||core.blankCell());
 const shift=(extra={})=>({kind:'shift',start:420,end:960,breakMinutes:60,note:'',...extra});
 
-test('store portal: existing admin only, published Service and departments, shared identities, no consultations or secrets',async()=>{
+test('store portal: manager department scope, published Service and departments, shared identities, no consultations or secrets',async()=>{
   const f=await departmentFixture(),app=express();app.use(express.json());
   const access=await installManagerAccess(app,f.pool,{readSession:req=>JSON.parse(req.headers['x-test-session']||'null'),issueSession:JSON.stringify,sameOrigin:(_q,_s,next)=>next(),production:false,credentialSecret:'test-only-store-access'});
   const guard=async(req,res,next)=>{try{await access.authorize(req);next();}catch(error){res.status(error.status||500).json({error:error.message});}};
@@ -32,7 +32,7 @@ test('store portal: existing admin only, published Service and departments, shar
     async function publish(key,rows,published=true){const value=JSON.stringify({rows,notes:'Team-private-note'});await f.pool.query('INSERT INTO schedule_department_weeks(department_id,week_start,draft,published,published_at) VALUES($1,$2,$3,$4,clock_timestamp())',[dept(key).id,week,value,published?value:null]);}
     const buffet={personId:jo,name:'Johanne Exemple',cells:cells(Object.fromEntries([0,1,2,3,4].map(i=>[i,shift({kind:'buffet'})])))};
     await publish('pam',[buffet]);await publish('charcuterie',[buffet]);
-    await publish('fruits',[{personId:alias,name:'Camille fiche Fruits',cells:cells({0:shift({workDepartment:'pam'})})}]);
+    await publish('fruits',[{personId:alias,name:'Camille fiche Fruits',cells:cells({0:shift({workDepartment:'pam'}),3:shift()})}]);
     await publish('epicerie',[{personId:night,name:'Employé Nuit',cells:cells({6:shift({start:1320,end:1830,breakMinutes:30,post:'night'})})}]);
     await publish('viande',[{personId:privatePerson,name:'Brouillon uniquement',cells:cells({0:shift()})}],false);
     await f.pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1)',[week]);
@@ -44,7 +44,17 @@ test('store portal: existing admin only, published Service and departments, shar
     const a=(await account.json()).accounts[0];
     for(const path of ['/api/store-portal','/api/store-portal/weeks/'+week]){
       assert.equal((await call(path,null)).status,401);
-      assert.equal((await call(path,{role:'manager',accountId:a.id,accountVersion:a.version,personVersion:1})).status,403);
+      const scoped=await call(path,{role:'manager',accountId:a.id,accountVersion:a.version,personVersion:1});
+      assert.equal(scoped.status,200,JSON.stringify(scoped.body));
+      if(scoped.body.departments){
+        assert.deepEqual(scoped.body.departments.map(d=>d.key),['fruits']);
+        assert.deepEqual(scoped.body.weeks,[week]);
+      }else{
+        assert.deepEqual(scoped.body.publications.map(p=>p.key),['fruits']);
+        assert.deepEqual(scoped.body.employees.map(p=>p.id),[owner.id]);
+        assert.deepEqual(scoped.body.employees[0].days.flatMap(d=>d.entries).map(e=>e.departmentKeys),[['fruits']]);
+        assert.ok(!JSON.stringify(scoped.body).includes('Johanne Exemple'));
+      }
     }
     const listing=await call('/api/store-portal');assert.equal(listing.status,200);assert.equal(listing.cache,'no-store');assert.equal(listing.body.departments.length,10);assert.ok(listing.body.departments.some(d=>d.key==='administration'));assert.deepEqual(listing.body.weeks,[week]);
     const before=(await f.pool.query('SELECT * FROM schedule_department_weeks ORDER BY department_id')).rows;

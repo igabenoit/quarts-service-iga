@@ -1,3 +1,4 @@
+import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
 import {installCuisineMigration,membershipsAt} from './cuisine-migration.js';
 import {cuisineDraft,CUISINE_START} from './public/cuisine-routing.js';
@@ -51,6 +52,21 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       ALTER TABLE schedule_availability_requests ADD CONSTRAINT availability_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
     END IF;
   END $$;`);
+  await pool.query(`CREATE OR REPLACE FUNCTION schedule_guard_departure_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE cutoff date; shift_date date;
+    BEGIN
+      IF TG_TABLE_NAME='schedule_assignments' THEN
+        SELECT employment_ended_on INTO cutoff FROM schedule_store_people WHERE service_employee_id=NEW.employee_id;
+        SELECT week_start+day_index::int INTO shift_date FROM schedule_shifts WHERE id=NEW.shift_id;
+      ELSE
+        SELECT p.employment_ended_on INTO cutoff FROM schedule_assignments a JOIN schedule_store_people p ON p.service_employee_id=a.employee_id WHERE a.shift_id=NEW.id;
+        shift_date:=NEW.week_start+NEW.day_index::int;
+      END IF;
+      IF shift_date >= cutoff THEN RAISE EXCEPTION 'Ce quart tombe après la fin d’emploi. Choisissez un autre employé.'; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE OR REPLACE TRIGGER schedule_guard_departure_assignment BEFORE INSERT OR UPDATE OF shift_id,employee_id ON schedule_assignments FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();
+    CREATE OR REPLACE TRIGGER schedule_guard_departure_shift BEFORE UPDATE OF week_start,day_index ON schedule_shifts FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();`);
   await installServicePublications(pool);
   const employeePortal=await installEmployeePortal(app,pool,{sameOrigin,requireManager});
   const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
@@ -80,7 +96,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const people=records.map(r=>{
       const service=!!r.service_employee_id;
       const a=service?employeeAvailability({availability:r.service_availability,availability_history:r.availability_history,target_minutes:r.target_minutes},weekStart).availability:null;
-      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,employmentEndedOn:iso(r.employment_ended_on)||iso(r.departed_at),name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',buffetPamPriority:r.buffet_pam_priority===true,seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',portalPersonId:r.portal_person_id?Number(r.portal_person_id):null,email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active,sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
+      return {id:Number(r.id),serviceEmployeeId:r.service_employee_id?Number(r.service_employee_id):null,employmentEndedOn:iso(r.employment_ended_on)||iso(r.departed_at),name:service?(r.service_name||r.name):r.name,jobTitle:r.job_title||'',specification:r.specification||'',buffetPamPriority:r.buffet_pam_priority===true,seniorityDate:service?(!r.service_seniority||r.service_seniority==='9999-12-31'?'':r.service_seniority):iso(r.seniority_date),birthday:iso(r.birthday),employeeCode:r.employee_code||'',hasEmployeeCode:!!r.employee_code,portalPersonId:r.portal_person_id?Number(r.portal_person_id):null,email:service?contacts.employees.find(e=>e.id===Number(r.service_employee_id))?.email||r.email:r.email,group:r.employment_group,availability:service?Object.fromEntries(Array.from({length:7},(_,d)=>[d,(a[d]||[]).length?a[d].map(([s,e])=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}-${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`).join(', '):'0'])):normalizeAvailability(r.availability),active:(!r.employment_ended_on||iso(r.employment_ended_on)>today())&&(service?Boolean(r.service_name&&r.service_active&&!r.departed_at):r.active),sourceNote:r.source_note,verifiedAt:r.verified_at,version:r.version,displayPriorities:Object.fromEntries(memberships.filter(m=>Number(m.person_id)===Number(r.id)&&m.display_order!==null).map(m=>[m.department_id,Number(m.display_order)])),departments:memberships.filter(m=>Number(m.person_id)===Number(r.id)).map(m=>Number(m.department_id))};
     });
     // Compact the visible ranks, including changes inherited from Service.
     for(const departmentId of new Set(memberships.map(m=>Number(m.department_id))))for(const group of ['regular','part_time']){
@@ -109,9 +125,17 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const incoming=incomingFor(weeks,d.key),guestIds=new Set(incoming.map(i=>i.personId)),people=[...members];
     if(guestIds.size)for(const p of await directory(client,start))if(guestIds.has(p.id)&&!people.some(m=>m.id===p.id))people.push({...p,visiting:true});
     const related=relatedFor(weeks,d.key,await directory(client,start),people);
-    return {department:d,weekStart:start,people,incoming,related,draft:row?.draft||emptyDraft(members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
+    return {department:d,weekStart:start,people,incoming,related,draft:row?.draft||applyDepartures(emptyDraft(members),start,members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
   }
   async function transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
+  async function finishDueDepartures(client){
+    const due=`p.employment_ended_on <= ${storeDateSQL}`;
+    await client.query(`UPDATE schedule_employees e SET active=false,departed_at=p.employment_ended_on::timestamp AT TIME ZONE 'America/Toronto'
+      FROM schedule_store_people p WHERE e.id=p.service_employee_id AND e.departed_at IS NULL AND ${due}`);
+    await client.query(`UPDATE schedule_store_memberships m SET display_order=NULL FROM schedule_store_people p
+      WHERE p.id=m.person_id AND m.display_order IS NOT NULL AND ${due}`);
+    await client.query(`UPDATE schedule_store_people p SET active=false,version=version+1,updated_at=clock_timestamp() WHERE p.active AND ${due}`);
+  }
   async function saveWeek(client,current,draft,action,published=current.published){
     const departures=await directory(client,current.weekStart);
     draft=applyDepartures(draft,current.weekStart,departures);published=applyDepartures(published,current.weekStart,departures);
@@ -214,19 +238,36 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }));
   app.put('/api/departments/people/:id',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,integer(req.params.id),req))));
   app.post('/api/departments/people/:id/departure',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await transaction(async client=>{
-    const id=integer(req.params.id),person=(await directory(client)).find(p=>p.id===id);
+    const id=integer(req.params.id),roster=await directory(client),person=roster.find(p=>p.id===id);
     if(!person)fail('Employé introuvable.',404);
-    if(!person.departments.length||!person.departments.every(d=>ownsDepartment(req,d)))fail('La direction doit terminer une fiche partagée avec un autre département.',403);
-    if(person.serviceEmployeeId)fail('Enregistrez le départ depuis la fiche Service.');
-    if(person.portalPersonId||(await client.query('SELECT 1 FROM schedule_store_people WHERE portal_person_id=$1',[id])).rows.length)fail('La direction doit d’abord vérifier les fiches partageant cet accès personnel.');
-    if(person.employmentEndedOn)fail('La fin d’emploi est déjà enregistrée.',409);
+    const owner=person.portalPersonId||id,group=roster.filter(p=>(p.portalPersonId||p.id)===owner);
+    if(isScoped(req)&&group.some(p=>!p.departments.length||p.departments.some(d=>!ownsDepartment(req,d))))fail('La direction doit terminer une fiche partagée avec un autre département.',403);
+    if(person.employmentEndedOn&&person.employmentEndedOn<=today())fail('La fin d’emploi est déjà en vigueur.',409);
     if(req.body.version!==person.version)fail('La fiche a changé. Rechargez le répertoire.',409);
     const date=req.body.effectiveOn;
-    if(!isDate(date)||date>today()||date<'1900-01-01')fail('Choisissez une date réelle, aujourd’hui ou dans le passé.');
+    if(!isDate(date)||date.startsWith('0000'))fail('Choisissez une date valide pour le premier jour sans emploi.');
     if(req.body.confirmed!==true)fail('Confirmez la fin d’emploi et le retrait des quarts.');
-    await client.query('INSERT INTO schedule_store_departures(person_id,effective_on,actor) VALUES($1,$2,$3)',[id,date,JSON.stringify({kind:req.manager?.kind||'admin',id:req.manager?.id||null,name:req.manager?.name||'Administration'})]);
-    await client.query('UPDATE schedule_store_people SET active=FALSE,employment_ended_on=$2,version=version+1,updated_at=clock_timestamp() WHERE id=$1',[id,date]);
-    await client.query('UPDATE schedule_store_memberships SET display_order=NULL WHERE person_id=$1',[id]);
+    const ids=group.filter(p=>!p.employmentEndedOn||p.employmentEndedOn>today()).map(p=>p.id);
+    const actor=JSON.stringify({kind:req.manager?.kind||'admin',id:req.manager?.id||null,name:req.manager?.name||'Administration'});
+    await client.query('INSERT INTO schedule_store_departures(person_id,effective_on,actor) SELECT unnest($1::bigint[]),$2,$3',[ids,date,actor]);
+    await client.query('UPDATE schedule_store_people SET employment_ended_on=$2,version=version+1,updated_at=clock_timestamp() WHERE id=ANY($1::bigint[])',[ids,date]);
+    await client.query(`DELETE FROM schedule_assignments a USING schedule_shifts s,schedule_store_people p
+      WHERE a.shift_id=s.id AND a.employee_id=p.service_employee_id AND p.id=ANY($1::bigint[]) AND s.week_start+s.day_index::int >= $2::date`,[ids,date]);
+    const serviceIds=new Set(group.filter(p=>ids.includes(p.id)&&p.serviceEmployeeId).map(p=>p.serviceEmployeeId));
+    if(serviceIds.size){
+      const publications=(await client.query('SELECT week_start,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
+      for(const {week_start,snapshot} of publications){
+        const start=iso(week_start);
+        const employees=snapshot.employees.filter(e=>start<date||!serviceIds.has(Number(e.id)));
+        let changed=employees.length!==snapshot.employees.length;
+        const shifts=snapshot.shifts.map(shift=>{
+          if(!serviceIds.has(Number(shift.employee_id))||addDays(start,Number(shift.day_index))<date)return shift;
+          changed=true;return {...shift,employee_id:null};
+        });
+        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1',[start,JSON.stringify({...snapshot,employees,shifts})]);
+      }
+    }
+    await finishDueDepartures(client);
     const people=await directory(client);
     const weeks=(await client.query('SELECT * FROM schedule_department_weeks WHERE week_start >= $1',[monday(date)])).rows;
     for(const w of weeks){
@@ -238,11 +279,9 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     return {ok:true,id,effectiveOn:date};
   }))));
   async function savePerson(body,id,req){return transaction(async client=>{
-    if(isScoped(req)&&Object.hasOwn(body,'employeeCode')&&body.employeeCode)fail('La direction gère les matricules et les accès personnels.',403);
-    if(isScoped(req))delete body.employeeCode;
     const list=await directory(client),previous=id?list.find(p=>p.id===id):null;
     if(id&&!previous)fail('Employé introuvable.',404);
-    if(previous?.employmentEndedOn)fail('Cette fiche est terminée. Son historique est conservé; elle ne peut pas être réactivée par ce formulaire.',409);
+    if(previous?.employmentEndedOn&&previous.employmentEndedOn<=today())fail('Cette fiche est terminée. Son historique est conservé; elle ne peut pas être réactivée par ce formulaire.',409);
     if(isScoped(req)){
       for(const departmentId of body.departments||[])assertDepartment(req,departmentId);
       if(previous&&!previous.departments.every(departmentId=>ownsDepartment(req,departmentId)))fail('Cette fiche est commune à plusieurs départements. L’administration doit modifier les renseignements partagés; vous pouvez gérer ses quarts dans votre département.',403);
@@ -274,7 +313,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     let saved;
     if(id)saved=(await client.query('UPDATE schedule_store_people SET name=$1,seniority_date=$2,birthday=$3,email=$4,employment_group=$5,availability=$6,active=$7,source_note=$8,verified_at=$9,job_title=$10,specification=$11,buffet_pam_priority=$12,version=version+1,updated_at=clock_timestamp() WHERE id=$13 RETURNING id',[...args,id])).rows[0];
     else{if(list.some(p=>nameKey(p.name)===nameKey(name))&&body.distinctPerson!==true)fail('Un nom identique existe déjà. Utilisez sa fiche pour ajouter un département, ou confirmez qu’il s’agit d’une autre personne.',409);saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification,buffet_pam_priority,onboarding_new) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING id',args)).rows[0];}
-    await saveEmployeeCode(client,saved.id,body.employeeCode);
+    await saveEmployeeCode(client,saved.id,body.employeeCode,{initialOnly:isScoped(req)});
     if(previous?.serviceEmployeeId&&!(await client.query('SELECT 1 FROM schedule_employees WHERE id=$1',[previous.serviceEmployeeId])).rows.length)fail('La fiche Service a été annulée. Réactualisez le répertoire.',409);
     if(previous?.serviceEmployeeId)await client.query('INSERT INTO schedule_employee_contacts(employee_id,email) VALUES($1,$2) ON CONFLICT(employee_id) DO UPDATE SET email=EXCLUDED.email,updated_at=clock_timestamp()',[previous.serviceEmployeeId,email]);
     const priorities=body.displayPriorities??{};
@@ -444,6 +483,6 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek});
   const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
   const serviceRelated=async(start,client=pool)=>departmentPortionsForService(await transferWeeks(start,client),await directory(client,start));
-  return {directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
+  return {finishDueDepartures:()=>transaction(finishDueDepartures),directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
 }
 

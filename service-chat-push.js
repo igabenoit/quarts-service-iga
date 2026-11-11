@@ -1,3 +1,4 @@
+import {activePersonSQL} from './employee-access.js';
 import {errorCode,logEvent} from './runtime-diagnostics.js';
 import crypto from 'node:crypto';
 import {activeManagerSQL} from './employee-access.js';
@@ -101,7 +102,7 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
     const row=(await pool.query(`SELECT p.employee_code,p.access_version FROM schedule_store_people p
       LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
       WHERE p.id=$1 AND p.employee_code IS NOT NULL AND
-      ((p.service_employee_id IS NULL AND p.active) OR (e.active AND e.departed_at IS NULL))
+      ${activePersonSQL()}
       AND (($2::boolean AND EXISTS(SELECT 1 FROM schedule_service_chat_guests g WHERE g.person_id=p.id AND g.expires_at>clock_timestamp()))
       OR EXISTS(SELECT 1 FROM schedule_store_people m LEFT JOIN schedule_employees se ON se.id=m.service_employee_id
         WHERE (m.id=p.id OR (m.portal_person_id=p.id AND m.active AND m.service_employee_id IS NULL AND m.employee_code IS NULL))

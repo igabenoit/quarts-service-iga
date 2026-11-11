@@ -11,7 +11,9 @@ $('#adminSignInForm').onsubmit=async event=>{
 };
 let user=null;
 try{const response=await fetch('/api/session',{cache:'no-store'});if(response.ok)user=(await response.json()).user;}catch{}
-if(user?.kind==='admin'&&view!=='employe')await startStorePortal();
+if(user?.kind==='account'&&!view)location.replace('/horaires-departements?vue=gerant');
+else if((user?.kind==='admin'||user?.kind==='account')&&view!=='employe')await startStorePortal(user);
+else if(view==='gerant')location.replace('/connexion?retour=horaires');
 else if(view==='magasin'){
   $('#adminSignIn').hidden=false;$('#status').hidden=true;$('#adminPortalLink').hidden=true;
 }else{

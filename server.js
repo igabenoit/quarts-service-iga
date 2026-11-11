@@ -229,10 +229,6 @@ async function requireManager(request, response, next) {
   try {
     await managerAccess.authorize(request);
     if(request.manager?.kind==='account') {
-      if(request.body&&/^\/api\/employees(?:\/|$)/.test(request.path)) {
-        if(request.body.employeeCode)return response.status(403).json({error:'La direction gère les matricules et les accès personnels.'});
-        delete request.body.employeeCode;
-      }
       if(!response.employeeSecretsRedacted){
         response.employeeSecretsRedacted=true;
         const send=response.json.bind(response);
@@ -349,13 +345,13 @@ async function reorderEmployees(client, role, column, movedId, requestedRank) {
     await client.query(`UPDATE schedule_employees SET ${column}=$1 WHERE id=$2`, [i + 1, ids[i]]);
   }
 }
-async function saveServicePersonal(client,id,body){
+async function saveServicePersonal(client,id,body,initialOnly){
   if(body.employeeCode===undefined&&body.birthday===undefined)return;
   const birthday=body.birthday;
   if(birthday!==undefined&&(typeof birthday!=='string'||birthday&&(!validDate(birthday)||birthday>new Date().toISOString().slice(0,10)||birthday<'1900-01-01')))throw Error('Date de naissance invalide.');
   await client.query('INSERT INTO schedule_store_people(service_employee_id,name) SELECT id,name FROM schedule_employees WHERE id=$1 ON CONFLICT(service_employee_id) DO NOTHING',[id]);
   const person=(await client.query('SELECT id FROM schedule_store_people WHERE service_employee_id=$1',[id])).rows[0];
-  await saveEmployeeCode(client,person.id,body.employeeCode);
+  await saveEmployeeCode(client,person.id,body.employeeCode,{initialOnly});
   if(birthday!==undefined)await client.query('UPDATE schedule_store_people SET birthday=$1,version=version+1 WHERE id=$2',[birthday||null,person.id]);
 }
 function mapEmployee(row,weekStart=null) {
@@ -417,7 +413,7 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count));
-    await saveServicePersonal(client,id,request.body);
+    await saveServicePersonal(client,id,request.body,request.manager?.kind==='account');
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await commitServiceTransaction(client,request);
     response.status(201).json({ employee: mapEmployee(saved.rows[0]) });
@@ -453,7 +449,7 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     const fallbackAssignment = old.role===e.role ? old.assignment_rank : count.rows[0].count;
     await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,fallbackDisplay));
     await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment));
-    await saveServicePersonal(client,id,request.body);
+    await saveServicePersonal(client,id,request.body,request.manager?.kind==='account');
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await commitServiceTransaction(client,request);
     response.json({ employee: mapEmployee(saved.rows[0]) });
@@ -590,7 +586,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     for(const e of employees) e.leavePeriods=approved.filter(r=>Number(r.employee_id)===e.id).flatMap(r=>r.periods);
     const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart])).rows;
     for (const e of employees) e.allowSixOrSevenDays = exceptions.some(x => Number(x.employee_id) === e.id);
-    const leaves = (await client.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1", [request.params.weekStart])).rows;
+    const leaves = (await client.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1 UNION SELECT p.service_employee_id, day FROM schedule_store_people p CROSS JOIN generate_series(0,6) day WHERE p.service_employee_id IS NOT NULL AND p.employment_ended_on <= $1::date+day", [request.params.weekStart])).rows;
     for (const leave of leaves) {
       const employee=employees.find(e=>e.id===Number(leave.employee_id));
       if (employee) employee.availability={...employee.availability,[leave.day_index]:[]};
@@ -625,6 +621,8 @@ startupPhase('schema_leave');
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,employeeIdentity:req=>employeePortal.identity(req)});
 startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
+await departmentService.finishDueDepartures();
+setInterval(()=>departmentService.finishDueDepartures().catch(error=>console.error('Fin d’emploi planifiée',error.message)),60000).unref();
 const employeePortal=departmentService.employeePortal;
 await managerAccess.installEmployeeLinks();
 startupPhase('schema_sst');

@@ -18,7 +18,7 @@ export function selectedWeek(previous,list,previousToday,reset=false){
   return [current,addDays(current,7),...availableWeeks(list)].includes(previous)?previous:current;
 }
 // Incoming transfers are another view of their source shift, not a second shift.
-export function personalDays(week,results){
+export function personalDays(week,results,allowedDepartments=null){
   const days=DAY_NAMES.map((name,index)=>({name,date:addDays(week,index),entries:[]}));
   const seenBuffet=new Set();
   const origins=new Set(results.filter(r=>r.kind==='department').map(r=>r.data.department.key));
@@ -35,8 +35,11 @@ export function personalDays(week,results){
         if(c.buffetAllocation){if(seenBuffet.has(c.buffetAllocation.key))return;seenBuffet.add(c.buffetAllocation.key);}
         const timed=isTimedCell(c);
         const department=c.buffetAllocation?[c.buffetAllocation.pam&&'Prêt-à-manger',c.buffetAllocation.charcuterie&&'Charcuterie'].filter(Boolean).join(' / '):departmentLabel(c.workDepartment||data.department.key);
-        const departmentKeys=c.buffetAllocation?[c.buffetAllocation.pam&&'pam',c.buffetAllocation.charcuterie&&'charcuterie'].filter(Boolean):[c.workDepartment||data.department.key];
-        days[index].entries.push({department,departmentKeys,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:timed?cellMinutes(c):null,birthday:row.birthdayMonthDay,start:c.start,end:c.end});
+        const workKeys=c.buffetAllocation?[c.buffetAllocation.pam&&'pam',c.buffetAllocation.charcuterie&&'charcuterie'].filter(Boolean):[c.workDepartment||data.department.key];
+        const departmentKeys=allowedDepartments?workKeys.filter(key=>allowedDepartments.has(key)):workKeys;
+        if(!departmentKeys.length)return;
+        const visibleMinutes=c.buffetAllocation&&allowedDepartments?departmentKeys.reduce((sum,key)=>sum+c.buffetAllocation[key],0):timed?cellMinutes(c):null;
+        days[index].entries.push({department:allowedDepartments?departmentKeys.map(departmentLabel).join(' / '):department,departmentKeys,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:visibleMinutes,birthday:row.birthdayMonthDay,start:c.start,end:c.end});
       });
     }
   }

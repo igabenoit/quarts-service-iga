@@ -4,6 +4,7 @@ import {storeSelection} from './store-portal-core.js';
 import {scrollToToday} from './portal-current-day.js';
 
 const $=s=>document.querySelector(s);
+let scoped=false;
 let listing,week,data,sequence=0,loading=false,personId=null;
 async function api(path,options={}){
   const response=await fetch(path,{cache:'no-store',...options}),body=await response.json();
@@ -12,7 +13,7 @@ async function api(path,options={}){
 }
 function message(text){$('#status').textContent=text;$('#status').hidden=!text;}
 function clear(){data=null;$('#storeSchedule').innerHTML='';$('#storeSummary').textContent='';$('#storePublications').innerHTML='';$('#storeMatches').innerHTML='';}
-function failed(error){clear();message(error.message);if(error.unauthorized){$('#storeContent').hidden=true;$('#adminSignIn').hidden=false;}}
+function failed(error){clear();message(error.message);if(error.unauthorized&&scoped){location.assign('/connexion?retour=horaires');return;}if(error.unauthorized){$('#storeContent').hidden=true;$('#adminSignIn').hidden=false;}}
 function navigation(){
   const current=monday(listing.today),next=addDays(current,7);
   for(const [id,value] of [['storeCurrent',current],['storeNext',next]]){
@@ -25,7 +26,7 @@ function navigation(){
   $('#storeOther').innerHTML='<option value="">Autres semaines publiées…</option>'+others.map(w=>`<option value="${e(w)}">${weekInfo(w,listing.today).title} · ${weekRange(w)}</option>`).join('');
   $('#storeOther').value=others.includes(week)?week:'';
   const info=weekInfo(week,listing.today),banner=$('#storeWeekBanner');banner.hidden=false;banner.className='week-banner '+info.kind;
-  banner.innerHTML=`<p>VOUS CONSULTEZ · TOUT LE MAGASIN</p><h2>${info.title}</h2><strong>${info.range}</strong><p>${info.note}</p>`;
+  banner.innerHTML=`<p>VOUS CONSULTEZ · ${scoped?'MES DÉPARTEMENTS':'TOUT LE MAGASIN'}</p><h2>${info.title}</h2><strong>${info.range}</strong><p>${info.note}</p>`;
   $('#storeReturnCurrent').hidden=week===current;
 }
 function shiftHTML(c){
@@ -40,8 +41,8 @@ function render(){
   if(!data)return;
   const department=$('#storeDepartment').value,search=$('#storeSearch').value,result=storeSelection(data,{department,search,personId});
   $('#storeBack').hidden=!result.selected;$('#storeFilters').hidden=!!result.selected;
-  $('#storeHeading').textContent=result.selected?result.selected.name:department?listing.departments.find(d=>d.key===department)?.name:'Tous les départements';
-  $('#storeSummary').textContent=`${result.peopleCount} employé${result.peopleCount===1?'':'s'} planifié${result.peopleCount===1?'':'s'} · ${result.count} quart${result.count===1?'':'s'} · ${hoursLabel(result.minutes)} h affichées${result.selected?' · Semaine complète, tous départements':''}`;
+  $('#storeHeading').textContent=result.selected?result.selected.name:department?listing.departments.find(d=>d.key===department)?.name:scoped?'Mes départements':'Tous les départements';
+  $('#storeSummary').textContent=`${result.peopleCount} employé${result.peopleCount===1?'':'s'} planifié${result.peopleCount===1?'':'s'} · ${result.count} quart${result.count===1?'':'s'} · ${hoursLabel(result.minutes)} h affichées${result.selected?' · Semaine affichée':''}`;
   $('#storePublications').innerHTML=data.publications.map(p=>`<span class="publication-tag theme-${e(p.key)}${p.published?'':' unpublished'}">${e(p.name)} · ${p.published?'publié':'non publié'}</span>`).join('');
   $('#storeMatches').innerHTML=!result.selected&&search.trim()?`<p>${result.matches.length} employé${result.matches.length===1?'':'s'} trouvé${result.matches.length===1?'':'s'}. Choisis un nom pour voir sa semaine complète.</p><div class="store-person-choices">${result.matches.map(p=>`<button class="quiet" data-store-person="${p.id}">${e(p.name)}</button>`).join('')}</div>`:'';
   const anyPublished=data.publications.some(p=>p.published),personalUnpublished=result.selected&&!result.selected.published;
@@ -64,27 +65,29 @@ async function load({reset=false}={}){
     if(reset||!week||!listing||monday(listing.today)!==current||!allowed.includes(week))week=current;
     listing=next;
     const chosenDepartment=$('#storeDepartment').value;
-    $('#storeDepartment').innerHTML='<option value="">Tout le magasin</option>'+listing.departments.map(d=>`<option value="${e(d.key)}">${e(d.name)}</option>`).join('');
+    $('#storeDepartment').innerHTML='<option value="">'+(scoped?'Mes départements':'Tout le magasin')+'</option>'+listing.departments.map(d=>`<option value="${e(d.key)}">${e(d.name)}</option>`).join('');
     $('#storeDepartment').value=listing.departments.some(d=>d.key===chosenDepartment)?chosenDepartment:'';
     navigation();await loadWeek({showToday});
   }catch(error){if(request===sequence)failed(error);}
   finally{loading=false;$('#storeWeekControls').inert=false;}
 }
-export function startStorePortal(){
-  document.title='Tout le magasin · IGA Famille Benoit';
+export function startStorePortal(user){
+  scoped=user?.kind==='account';
+  const title=scoped?'Horaires de mon équipe':'Tout le magasin';
+  document.title=title+' · IGA Famille Benoit';
   document.querySelector('.employee-portal').classList.add('store-portal');
-  document.querySelector('.portal-header h1').textContent='Tout le magasin';
-  document.querySelector('.portal-header .eyebrow').textContent='PORTAIL EMPLOYÉS · ADMINISTRATION';
-  document.querySelector('.portal-header p:last-child').textContent='Les horaires publiés du Service et des sept départements.';
+  document.querySelector('.portal-header h1').textContent=title;
+  document.querySelector('.portal-header .eyebrow').textContent=scoped?'PORTAIL EMPLOYÉS · GESTION':'PORTAIL EMPLOYÉS · ADMINISTRATION';
+  document.querySelector('.portal-header p:last-child').textContent=scoped?'Les horaires publiés de tes départements.':'Les horaires publiés du magasin.';
   $('#accessForm').hidden=true;$('#staffContent').hidden=true;$('#adminSignIn').hidden=true;$('#adminPortalLink').hidden=true;$('#storeContent').hidden=false;
-  $('#storeContent').innerHTML=`<div class="store-admin-note"><div><strong>Vue administrateur</strong><p>Tu consultes les horaires sans modifier le suivi des consultations des employés.</p></div><a class="button quiet" href="/departements">Gestion des horaires</a></div>
+  $('#storeContent').innerHTML=`<div class="store-admin-note"><div><strong>${scoped?'Vue gérant':'Vue administrateur'}</strong><p>Tu consultes les horaires sans modifier le suivi des consultations des employés.</p></div><a class="button quiet" href="/departements">Gestion des horaires</a></div>
   <div id="storeWeekControls"><div class="week-choices"><button id="storeCurrent" class="week-choice current"></button><button id="storeNext" class="week-choice next"></button></div><label id="storeOtherLabel">Historique et autres semaines<select id="storeOther"></select></label><button id="storeReturnCurrent" class="quiet" hidden>Revenir à cette semaine</button></div>
   <section id="storeWeekBanner" class="week-banner" aria-label="Semaine consultée"></section>
   <div class="store-filters" id="storeFilters"><label>Département<select id="storeDepartment"></select></label><label>Rechercher un employé<input type="search" id="storeSearch" placeholder="Nom ou prénom" autocomplete="off"></label></div>
-  <div id="storeMatches"></div><div class="store-heading"><div><h2 id="storeHeading"></h2><p id="storeSummary"></p></div><div class="actions"><button id="storeBack" class="quiet" hidden>Retour au magasin</button><button id="storeRefresh" class="quiet">Actualiser</button></div></div>
+  <div id="storeMatches"></div><div class="store-heading"><div><h2 id="storeHeading"></h2><p id="storeSummary"></p></div><div class="actions"><button id="storeBack" class="quiet" hidden>Retour aux horaires</button><button id="storeRefresh" class="quiet">Actualiser</button></div></div>
   <details class="store-publications"><summary>Horaires publiés pour cette semaine</summary><div id="storePublications"></div></details><div id="storeSchedule"></div>
   <p class="muted">Les heures affichées correspondent aux quarts visibles, repas non payés déduits. +1 indique une fin le lendemain. Les brouillons ne sont pas affichés.</p>
-  <div class="portal-links"><a class="button quiet" href="/horaires-departements?vue=employe">Ouvrir le portail personnel</a><button id="storeLogout" class="quiet">Déconnecter mon accès administrateur</button></div>`;
+  <div class="portal-links"><a class="button quiet" href="/horaires-departements?vue=employe">Ouvrir le portail personnel</a><button id="storeLogout" class="quiet">Me déconnecter</button></div>`;
   $('#storeDepartment').onchange=render;$('#storeSearch').oninput=render;
   $('#storeBack').onclick=()=>{personId=null;render();};$('#storeRefresh').onclick=()=>load();
   $('#storeOther').onchange=event=>{if(event.target.value)chooseWeek(event.target.value);};

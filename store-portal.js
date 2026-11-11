@@ -8,9 +8,9 @@ const iso=value=>value instanceof Date?value.toISOString().slice(0,10):String(va
 const identity=person=>Number(person.portalPersonId||person.id);
 
 // Build exactly the published personal view, grouping only explicitly linked records.
-export function storePeople(weekStart,people,departments,results){
+export function storePeople(weekStart,people,departments,results,allowed=null){
   const groups=new Map();
-  for(const person of people.filter(p=>p.active)){
+  for(const person of people.filter(p=>p.employmentEndedOn?p.employmentEndedOn>weekStart:p.active)){
     const id=identity(person),owner=people.find(p=>p.id===id)||person;
     if(!groups.has(id))groups.set(id,{id,name:owner.name,departmentKeys:[],results:[]});
     const group=groups.get(id);
@@ -29,7 +29,7 @@ export function storePeople(weekStart,people,departments,results){
     }
     for(const [id,rows] of perPerson)groups.get(id).results.push({kind:result.kind,data:{...result.data,...(result.kind==='service'?{employees:rows}:{schedule:{rows,notes:''}})}});
   }
-  return [...groups.values()].map(({results,...person})=>({...person,published:results.length>0,days:personalDays(weekStart,results)})).sort((a,b)=>a.name.localeCompare(b.name,'fr-CA'));
+  return [...groups.values()].map(({results,...person})=>({...person,published:results.length>0,days:personalDays(weekStart,results,allowed)})).sort((a,b)=>a.name.localeCompare(b.name,'fr-CA'));
 }
 
 export function installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek}){
@@ -65,19 +65,22 @@ export function installStorePortal(app,pool,{requireManager,directory,listDepart
   });
   const endpoint=fn=>async(req,res)=>{
     res.set('Cache-Control','no-store');
-    // Do not accept employee sessions, scoped managers, or an invented employee ID.
-    if(req.manager?.kind!=='admin')return res.status(req.manager?403:401).json({error:'Cette vue est réservée à l’administrateur du magasin.'});
+    if(!['admin','account'].includes(req.manager?.kind))return res.status(req.manager?403:401).json({error:'Une connexion de gestion est requise.'});
     try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'Impossible de charger les horaires du magasin. Réessayez.'});}
   };
-  app.get('/api/store-portal',requireManager,endpoint(async(_req,res)=>{
-    const departments=(await listDepartments(pool)).filter(d=>d.active).map(({id,name,key})=>({id,name,key}));
-    const weeks=(await pool.query(`SELECT week_start FROM schedule_department_weeks WHERE published IS NOT NULL UNION SELECT week_start FROM schedule_public_links ORDER BY week_start DESC`)).rows.map(r=>iso(r.week_start));
+  const visibleDepartments=async req=>(await listDepartments(pool)).filter(d=>d.active&&(req.manager.kind==='admin'||req.manager.departments.includes(d.id)));
+  app.get('/api/store-portal',requireManager,endpoint(async(req,res)=>{
+    const departments=(await visibleDepartments(req)).map(({id,name,key})=>({id,name,key}));
+    const weeks=(await pool.query(`SELECT week_start FROM schedule_department_weeks WHERE published IS NOT NULL AND (department_id=ANY($1::bigint[])
+      OR EXISTS(SELECT 1 FROM jsonb_array_elements(published->'rows') r,jsonb_array_elements(r->'cells') c WHERE c->>'workDepartment'=ANY($2::text[])))
+      UNION SELECT week_start FROM schedule_public_links WHERE $3::boolean
+      ORDER BY week_start DESC`,[departments.map(d=>d.id),departments.map(d=>d.key),departments.some(d=>d.key==='service')])).rows.map(r=>iso(r.week_start));
     res.json({today:today(),departments,weeks});
   }));
   app.get('/api/store-portal/weeks/:week',requireManager,endpoint(async(req,res)=>{
     const start=req.params.week;
     if(!isDate(start)||monday(start)!==start)return res.status(400).json({error:'Choisissez le lundi de la semaine.'});
-    const departments=(await listDepartments(pool)).filter(d=>d.active),people=await directory(pool,start),results=[],publications=[];
+    const departments=await visibleDepartments(req),people=await directory(pool,start),results=[],publications=[];
     // The callback shares the employee portal projection, without recording views.
     const published=await readPublishedWeek(start,people);
     for(const department of departments.filter(d=>d.key!=='service')){
@@ -85,11 +88,14 @@ export function installStorePortal(app,pool,{requireManager,directory,listDepart
       publications.push({key:department.key,name:department.name,published:!!data});
       if(data)results.push({kind:'department',data});
     }
-    const servicePublished=(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[start])).rows.length>0;
-    publications.push({key:'service',name:'Service',published:servicePublished});
-    if(servicePublished){
-      const publishedService=await publishedServiceResult(pool,start);if(publishedService)results.push(publishedService);
+    if(departments.some(d=>d.key==='service')){
+      const service=await publishedServiceResult(pool,start);
+      publications.push({key:'service',name:'Service',published:!!service});
+      if(service)results.push(service);
     }
-    res.json({today:today(),weekStart:start,publications,employees:storePeople(start,people,departments,results)});
+    const scoped=req.manager.kind==='account',allowed=scoped?new Set(departments.map(d=>d.key)):null;
+    const employees=storePeople(start,people,departments,results,allowed)
+      .filter(p=>!scoped||p.departmentKeys.length||p.days.some(day=>day.entries.length));
+    res.json({today:today(),weekStart:start,publications,employees});
   }));
 }

@@ -219,13 +219,15 @@ $('#existingPersonForm').onsubmit=async event=>{
   finally{attachingPerson=false;$('#existingPersonDialog').inert=false;}});
 };
 function renderPeople(){
-  const query=nameKey($('#personSearch').value),people=meta.people.filter(p=>$('#showTerminated').checked||!p.employmentEndedOn).filter(p=>query?nameKey(p.name+' '+(p.jobTitle||'')+' '+(p.specification||'')+' '+p.email).includes(query):p.departments.includes(selectedDepartment)).sort((a,b)=>comparePeople(a,b,selectedDepartment));
-  $('#peopleList').innerHTML=people.map(p=>`<article class="person-card"><h3>${e(p.name)}</h3>${p.jobTitle?`<p class="person-job-title">${e(p.jobTitle)}</p>`:''}${p.specification?`<p class="person-specification">${e(p.specification)}</p>`:''}<p>${p.portalPersonId?'Accès personnel partagé avec '+e(meta.people.find(owner=>owner.id===p.portalPersonId)?.name||'la fiche principale'):p.employeeCode?'Code personnel renseigné':'Code personnel à compléter'}</p><p>${p.employmentEndedOn?'Terminé depuis le '+e(dateLabel(p.employmentEndedOn)):p.active?'Actif':'Inactif — absence prolongée'} · ${p.group==='regular'?'Régulier':'Temps partiel'}</p><p>Priorité : ${p.displayPriorities?.[selectedDepartment]??'—'}</p><p>Ancienneté : <strong>${e(tenure(p.seniorityDate))}</strong><br>${e(dateLabel(p.seniorityDate))}</p><p>Anniversaire : ${p.birthday?e(dateLabel(p.birthday)):'À compléter'}</p><p>${e(p.email||'Courriel à compléter')}</p><p>${e(p.departments.map(id=>meta.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · '))}</p><button data-person="${p.id}" class="button quiet">Ouvrir la fiche</button></article>`).join('')||'<p class="notice">Aucune fiche pour ce département. Ajoutez les employés progressivement; les renseignements inconnus peuvent rester vides.</p>';
+  const query=nameKey($('#personSearch').value),people=meta.people.filter(p=>$('#showTerminated').checked||!p.employmentEndedOn||p.employmentEndedOn>today()).filter(p=>query?nameKey(p.name+' '+(p.jobTitle||'')+' '+(p.specification||'')+' '+p.email).includes(query):p.departments.includes(selectedDepartment)).sort((a,b)=>comparePeople(a,b,selectedDepartment));
+  $('#peopleList').innerHTML=people.map(p=>`<article class="person-card"><h3>${e(p.name)}</h3>${p.jobTitle?`<p class="person-job-title">${e(p.jobTitle)}</p>`:''}${p.specification?`<p class="person-specification">${e(p.specification)}</p>`:''}<p>${p.portalPersonId?'Accès personnel partagé avec '+e(meta.people.find(owner=>owner.id===p.portalPersonId)?.name||'la fiche principale'):p.hasEmployeeCode?'Matricule inscrit':'Code personnel à compléter'}</p><p>${p.employmentEndedOn?(p.employmentEndedOn>today()?'Fin d’emploi prévue le ':'Emploi terminé le ')+e(dateLabel(p.employmentEndedOn)):p.active?'Actif':'Inactif — absence prolongée'} · ${p.group==='regular'?'Régulier':'Temps partiel'}</p><p>Priorité : ${p.displayPriorities?.[selectedDepartment]??'—'}</p><p>Ancienneté : <strong>${e(tenure(p.seniorityDate))}</strong><br>${e(dateLabel(p.seniorityDate))}</p><p>Anniversaire : ${p.birthday?e(dateLabel(p.birthday)):'À compléter'}</p><p>${e(p.email||'Courriel à compléter')}</p><p>${e(p.departments.map(id=>meta.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · '))}</p><button data-person="${p.id}" class="button quiet">Ouvrir la fiche</button></article>`).join('')||'<p class="notice">Aucune fiche pour ce département. Ajoutez les employés progressivement; les renseignements inconnus peuvent rester vides.</p>';
   $('#peopleList').querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>openPerson(meta.people.find(p=>p.id===Number(b.dataset.person))));
 }
 function renderPersonalAccess(person){
   $('#personPortalLinkSection').hidden=!person||!!person.serviceEmployeeId||!!person.employeeCode||meta.account?.kind==='account';
-  $('#personEmployeeCode').readOnly=!!person?.portalPersonId;
+  const assigned=meta.account?.kind==='account'&&person?.hasEmployeeCode;
+  $('#personEmployeeCode').readOnly=!!person?.portalPersonId||!!assigned;
+  $('#personEmployeeCode').placeholder=assigned?'Matricule déjà inscrit':'6 chiffres';
   const targets=meta.people.filter(p=>person&&p.id!==person.id&&p.employeeCode&&!p.portalPersonId&&(p.active||p.id===person.portalPersonId)&&nameKey(p.name)===nameKey(person.name));
   $('#personPortalLink').innerHTML='<option value="">Aucun rattachement</option>'+targets.map(p=>'<option value="'+p.id+'">'+e(p.name)+' · '+e(p.departments.map(id=>meta.departments.find(d=>d.id===id)?.name).filter(Boolean).join(' · '))+'</option>').join('');
   $('#personPortalLink').value=String(person?.portalPersonId||'');
@@ -235,11 +237,11 @@ function renderPersonalAccess(person){
   $('#personPortalLinkStatus').textContent=person?.portalPersonId?'Accès rattaché à '+(owner?.name||'la fiche principale')+'.':'Cette fiche utilise son propre accès.';
 }
 function openPerson(person){
-  if(person?.employmentEndedOn){message('Emploi terminé à partir du '+dateLabel(person.employmentEndedOn)+'. Les horaires antérieurs et l’historique sont conservés.');return;}
+  if(person?.employmentEndedOn&&person.employmentEndedOn<=today()){message('Emploi terminé à partir du '+dateLabel(person.employmentEndedOn)+'. Les horaires antérieurs et l’historique sont conservés.');return;}
   if(person&&meta.account?.kind==='account'&&person.departments.some(id=>!meta.departments.some(d=>d.id===id))){message('Cette fiche est partagée avec un autre département. Demandez à l’administration de modifier les renseignements communs. Vous pouvez gérer les quarts dans votre horaire.');return;}
   editingPerson=person||null;$('#personForm').reset();$('#personError').textContent='';$('#personTitle').textContent=person?'Modifier la fiche':'Ajouter un employé';
   $('#personName').value=person?.name||'';$('#personJobTitle').value=person?.jobTitle||'';$('#personSpecification').value=person?.specification||'';$('#personSeniority').value=person?.seniorityDate||'';$('#personBirthday').value=person?.birthday||'';$('#personEmployeeCode').value=person?.employeeCode||'';$('#personEmail').value=person?.email||'';$('#personGroup').value=person?.group||'regular';$('#personSource').value=person?.sourceNote||'';$('#personVerified').checked=!!person?.verifiedAt;$('#personActive').checked=person?.active??true;$('#personBuffetPriority').checked=person?.buffetPamPriority===true;
-  $('#departureSection').hidden=!person||!!person.serviceEmployeeId||meta.account?.kind==='account';$('#departureDate').value=today();$('#departureDate').max=today();$('#departureStatus').textContent='';
+  $('#departureSection').hidden=!person;$('#departureDate').value=person?.employmentEndedOn||today();$('#departureStatus').textContent='';
   renderPersonalAccess(person);
   const linked=!!person?.serviceEmployeeId;$('#serviceSource').hidden=!linked;$('#personName').readOnly=linked;$('#personSeniority').readOnly=linked;$('#personActive').disabled=linked;$('#availabilityEditor').disabled=linked;
   $('#personDepartments').innerHTML=meta.departments.map(d=>`<label class="check"><input type="checkbox" value="${d.id}" ${person?.departments.includes(d.id)||!person&&d.id===selectedDepartment?'checked':''} ${d.key==='service'?'disabled':''}> ${e(d.name)}</label>`).join('');
@@ -286,12 +288,12 @@ $('#terminatePerson').onclick=async()=>{
   if(personSaving||!editingPerson)return;
   if(dirty){$('#departureStatus').textContent='Enregistrez d’abord le brouillon de l’horaire avant de terminer l’emploi.';return;}
   const person=editingPerson,date=$('#departureDate').value;
-  if(!date||date>today()){$('#departureStatus').textContent='Choisissez une date, aujourd’hui ou dans le passé.';return;}
-  if(!confirm('Terminer l’emploi de '+person.name+' à partir du '+dateLabel(date)+' ? Ses quarts à compter de cette date seront retirés de tous ses horaires, même publiés. Ses accès seront bloqués; les journées antérieures et l’historique seront conservés.'))return;
+  if(!date){$('#departureStatus').textContent='Choisissez le premier jour sans emploi.';return;}
+  if(!confirm('Terminer l’emploi de '+person.name+' à partir du '+dateLabel(date)+' ? Ses quarts à compter de cette date seront retirés de tous ses horaires, même publiés. Ses accès personnels prendront fin à la date choisie. Les journées antérieures et l’historique seront conservés.'))return;
   personSaving=true;$('#personDialog').inert=true;let saved=false;
   await withWeekLock(async()=>{try{
     await post('/api/departments/people/'+person.id+'/departure',{version:person.version,effectiveOn:date,confirmed:true});saved=true;
-    $('#personDialog').close();await loadMeta();await loadWeek();renderPeople();
+    $('#personDialog').close();if(initialSelection.has('departService'))return;await loadMeta();await loadWeek();renderPeople();
     message('Fin d’emploi enregistrée. Les quarts ont été retirés à partir du '+dateLabel(date)+', y compris dans les horaires publiés.');
   }catch(error){if(saved)message('Fin d’emploi enregistrée. Actualisez la page pour voir les horaires à jour.');else $('#departureStatus').textContent=error.message;}
   finally{personSaving=false;$('#personDialog').inert=false;}});
@@ -304,7 +306,7 @@ $('#personForm').onsubmit=async event=>{
     b.displayPriorities=Object.fromEntries([...$('#personPriorities').querySelectorAll('input:not(:disabled)')].filter(i=>i.value!==''&&(b.group!==person?.group||Number(i.value)!==person?.displayPriorities?.[i.dataset.priority])).map(i=>[i.dataset.priority,Number(i.value)]));b.availability=normalizeAvailability(b.availability);
     const result=await api('/api/departments/people'+(person?'/'+person.id:''),{method:person?'PUT':'POST',body:JSON.stringify(b)});saved=true;
     if(creationAccueil&&!person){location.replace('/dossiers-employes#accueil/store:'+result.id);return;}
-    $('#personDialog').close();
+    $('#personDialog').close();if(initialSelection.has('departService'))return;
     await loadMeta();const fresh=await api(route());current.people=fresh.people;current.incoming=fresh.incoming;current.related=fresh.related;current.warnings=fresh.warnings;renderPeople();renderSchedule();renderPrint();renderWarnings();
     message(person?'Fiche enregistrée.'+(current.publishedAt?' Publiez à nouveau l’horaire pour actualiser les renseignements affichés aux employés.':''):'Fiche enregistrée. Dans l’horaire, utilisez « Actualiser la liste d’employés » pour l’ajouter à la feuille.');
   }catch(err){if(saved)message('La fiche est enregistrée, mais son actualisation a échoué. Réessayez « Actualiser » sans recréer la fiche. '+err.message);else $('#personError').textContent=err.message;}
@@ -545,6 +547,16 @@ for(const id of ['saveDraft','copyWeek','syncRoster','publishWeek','unpublishWee
 const creationAccueil=initialSelection.get('creation')==='accueil';
 async function initializeDepartmentPage(){
   await loadMeta();
+  const serviceEmployee=Number(initialSelection.get('departService'));
+  if(serviceEmployee){
+    const person=meta.people.find(p=>p.serviceEmployeeId===serviceEmployee);
+    if(!person){message('Cette fiche est inaccessible.');return;}
+    $('#personDialog').addEventListener('close',()=>location.replace('/'),{once:true});
+    openPerson(person);
+    if($('#personDialog').open)$('#departureDate').focus();
+    return;
+  }
+  if(!selectedDepartment&&meta.departments.some(d=>d.key==='service')){location.replace('/');return;}
   if(creationAccueil){
     $('#personDialog').addEventListener('close',()=>location.replace('/dossiers-employes'),{once:true});
     openPerson();
