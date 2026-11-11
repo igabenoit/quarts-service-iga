@@ -96,7 +96,7 @@ export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start
 export const departmentLabel=key=>key==='service'?'Service':DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
-export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',c.kind==='training'&&c.trainingMention?c.note:'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
+export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',c.trainingMention||c.mentionHours?c.note:'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
 export const shiftAssignment=(c,key)=>c.buffetAllocation?[c.buffetAllocation.pam&&`PAM${c.buffetAllocation.charcuterie?' '+hoursLabel(c.buffetAllocation.pam)+' h':''}`,c.buffetAllocation.charcuterie&&`Charcuterie${c.buffetAllocation.pam?' '+hoursLabel(c.buffetAllocation.charcuterie)+' h':''}`].filter(Boolean).join(' / ')+' · Buffet':[c.workDepartment==='pam'||!c.workDepartment&&key==='pam'?'PAM':departmentLabel(c.workDepartment||key),c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
@@ -108,6 +108,7 @@ export function normalizeCell(value){
   const c=value||{},kind=String(c.kind||'blank');
   if(!['blank','shift','training','buffet','kitchen','off','vacation','mobile','requested','sick','note','review'].includes(kind))throw Error('Type de case invalide.');
   const note=String(c.note||'').trim();if(note.length>100)throw Error('Le texte d’une case est limité à 100 caractères.');
+  if(c.mentionHours!==undefined&&(kind!=='shift'||!['regular','separate'].includes(c.mentionHours)||!note||c.post))throw Error('Choisissez un total pour les heures et inscrivez le texte de la mention.');
   if(c.trainingMention===true&&(kind!=='training'||!note))throw Error('Ajoutez la mention et les heures de formation.');
   if(isTimedCell({kind})){
     const end=Number.isInteger(c.end)&&c.end>=0&&c.end<c.start?c.end+1440:c.end;
@@ -118,7 +119,7 @@ export function normalizeCell(value){
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post)&&!Object.hasOwn(BAKERY_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,...(c.trainingMention===true?{trainingMention:true}:{}),start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    return {kind,...(c.mentionHours?{mentionHours:c.mentionHours}:{}),...(c.trainingMention===true?{trainingMention:true}:{}),start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};
@@ -135,12 +136,22 @@ export function normalizeDraft(value,people){
   if(notes.length>400||manager.length>100)throw Error('Note ou nom du responsable trop long.');
   return {rows,notes,manager};
 }
-const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((n,c)=>n+(c.kind===kind?(c.departmentMinutes??(!isOutgoing(c)?cellMinutes(c):0)):0),0);
+export const hourCategory=c=>c.mentionHours==='separate'?'mention':c.kind;
+const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((n,c)=>n+(hourCategory(c)===kind?(c.departmentMinutes??(!isOutgoing(c)?cellMinutes(c):0)):0),0);
 export const totalMinutes=row=>minutesOfKind(row,'shift');
 export const trainingMinutes=row=>minutesOfKind(row,'training');
 export const buffetMinutes=row=>minutesOfKind(row,'buffet');
 export const kitchenMinutes=row=>minutesOfKind(row,'kitchen');
-export const grandMinutes=row=>totalMinutes(row)+trainingMinutes(row)+buffetMinutes(row)+kitchenMinutes(row);
+export const mentionMinutes=row=>minutesOfKind(row,'mention');
+export function separateMentionTotals(rows){
+  const totals=new Map();
+  for(const row of rows)for(const cell of [...row.cells,...row.accountingCells||[]]){
+    if(hourCategory(cell)!=='mention'||isOutgoing(cell))continue;
+    totals.set(cell.note,(totals.get(cell.note)||0)+(cell.departmentMinutes??cellMinutes(cell)));
+  }
+  return totals;
+}
+export const grandMinutes=row=>mentionMinutes(row)+totalMinutes(row)+trainingMinutes(row)+buffetMinutes(row)+kitchenMinutes(row);
 export function validateAssignment(c,departmentKey){
   const target=c.workDepartment||departmentKey;
   if(c.workDepartment===departmentKey)throw Error('Choisissez un autre département pour une affectation interdépartements.');
@@ -211,11 +222,13 @@ export function sheetHTML({department,weekStart,people,draft,blank=false,related
   const regularSlots=count?Math.max(regularCount,Math.min(Math.round(capacity*regularCount/count),capacity-partTimeCount)):nightCount?0:7;
   const slots={regular:regularSlots,part_time:nightCount&&!count?0:Math.max(partTimeCount,capacity-regularSlots),night:nightCount};
   const groups=[['regular','Réguliers'],['part_time','Temps partiel'],['night','Équipe de nuit']];let sum=0,trainingSum=0,buffetSum=0,kitchenSum=0;
-  const totals=(regular,training,empty=false,buffet=0,kitchen=0)=>`<span class="regular-hours">${empty?'':hoursLabel(regular)}</span>${!empty&&training>0?`<small class="training-hours">Form. ${hoursLabel(training)}</small>`:''}${!empty&&buffet>0?`<small class="buffet-hours">Buffet ${hoursLabel(buffet)}</small>`:''}${!empty&&kitchen>0?`<small class="kitchen-hours">Cuisine ${hoursLabel(kitchen)}</small>`:''}`;
+  const mentions=separateMentionTotals(rows),mentionSum=[...mentions.values()].reduce((n,v)=>n+v,0);
+  const printedMentions=mentions.size>2?[['Mentions séparées',mentionSum]]:[...mentions];
+  const totals=(regular,training,empty=false,buffet=0,kitchen=0,mention=0)=>`<span class="regular-hours">${empty?'':hoursLabel(regular)}</span>${!empty&&training>0?`<small class="training-hours">Form. ${hoursLabel(training)}</small>`:''}${!empty&&buffet>0?`<small class="buffet-hours">Buffet ${hoursLabel(buffet)}</small>`:''}${!empty&&mention>0?`<small class="mention-hours">Ment. ${hoursLabel(mention)}</small>`:''}${!empty&&kitchen>0?`<small class="kitchen-hours">Cuisine ${hoursLabel(kitchen)}</small>`:''}`;
   const table=groups.filter(([key])=>slots[key]>0).map(([key,label])=>{const selected=rows.filter(r=>r.scheduleGroup===key);while(selected.length<slots[key])selected.push({person:{name:'',seniorityDate:'',group:key,availability:{}},cells:Array.from({length:7},blankCell)});const subtotal=selected.reduce((n,r)=>n+totalMinutes(r),0),trainingSubtotal=selected.reduce((n,r)=>n+trainingMinutes(r),0);sum+=subtotal;trainingSum+=trainingSubtotal;buffetSum+=selected.reduce((n,r)=>n+buffetMinutes(r),0);kitchenSum+=selected.reduce((n,r)=>n+kitchenMinutes(r),0);
-    return `<tbody data-group="${key}"><tr class="sheet-group"><th colspan="10">${label}</th></tr>${selected.map(r=>`<tr class="sheet-person${r.printUnits>1?' multi-shift-row':''}"><th class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}${r.person.jobTitle?`<small class="sheet-job-title">${e(r.person.jobTitle)}</small>`:''}${r.person.specification?`<small class="sheet-specification">${e(r.person.specification)}</small>`:''}</div></th><td class="sheet-seniority">${r.person.name?e(r.person.seniorityDate?dateLabel(r.person.seniorityDate):'À compléter'):''}</td>${r.cells.map((c,d)=>printDay(r,c,d)).join('')}<td class="sheet-total">${totals(totalMinutes(r),trainingMinutes(r),blank||!r.person.name,buffetMinutes(r),kitchenMinutes(r))}${!blank&&r.shared?`<small class="all-posts-total">Sem. ${hoursLabel(r.allMinutes)} h</small>`:''}</td></tr>`).join('')}<tr class="sheet-subtotal"><td colspan="9">Sous-total ${label.toLowerCase()}</td><td>${totals(subtotal,0,blank)}</td></tr></tbody>`;
+    return `<tbody data-group="${key}"><tr class="sheet-group"><th colspan="10">${label}</th></tr>${selected.map(r=>`<tr class="sheet-person${r.printUnits>1?' multi-shift-row':''}"><th class="sheet-name"><div class="sheet-person-label">${e(r.person.name)}${r.person.jobTitle?`<small class="sheet-job-title">${e(r.person.jobTitle)}</small>`:''}${r.person.specification?`<small class="sheet-specification">${e(r.person.specification)}</small>`:''}</div></th><td class="sheet-seniority">${r.person.name?e(r.person.seniorityDate?dateLabel(r.person.seniorityDate):'À compléter'):''}</td>${r.cells.map((c,d)=>printDay(r,c,d)).join('')}<td class="sheet-total">${totals(totalMinutes(r),trainingMinutes(r),blank||!r.person.name,buffetMinutes(r),kitchenMinutes(r),mentionMinutes(r))}${!blank&&r.shared?`<small class="all-posts-total">Sem. ${hoursLabel(r.allMinutes)} h</small>`:''}</td></tr>`).join('')}<tr class="sheet-subtotal"><td colspan="9">Sous-total ${label.toLowerCase()}</td><td>${totals(subtotal,0,blank,0,0,selected.reduce((n,r)=>n+mentionMinutes(r),0))}</td></tr></tbody>`;
   }).join('');
-  return `<article class="department-sheet theme-${e(style.key)} standard-fourteen${units>PRINT_ROW_CAPACITY||nightCount?' compact-sheet':''}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>régulier</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-department-totals"><strong>Régulier : ${blank?'________':hoursLabel(sum)} h</strong>${!blank&&trainingSum>0?`<strong class="department-training-total">Formation : ${hoursLabel(trainingSum)} h</strong>`:''}${!blank&&buffetSum>0?`<strong class="department-buffet-total">Buffet : ${hoursLabel(buffetSum)} h</strong>`:''}${!blank&&kitchenSum>0?`<strong class="department-kitchen-total">Cuisine : ${hoursLabel(kitchenSum)} h</strong>`:''}<strong class="grand-total">Grand total : ${blank?'________':hoursLabel(sum+trainingSum+buffetSum+kitchenSum)} h</strong></div></div></article>`;
+  return `<article class="department-sheet theme-${e(style.key)} standard-fourteen${units>PRINT_ROW_CAPACITY||nightCount?' compact-sheet':''}"><header class="sheet-header"><img src="/logo-famille-benoit.svg" alt="IGA extra Famille Benoit"><div><h1>${e(department.name)}</h1><p>HORAIRE HEBDOMADAIRE</p><strong>Du ${dateLabel(weekStart)} au ${dateLabel(addDays(weekStart,6))}</strong></div></header><table class="sheet-table"><colgroup><col class="col-name"><col class="col-seniority">${'<col class="col-day">'.repeat(7)}<col class="col-total"></colgroup><thead><tr><th>Employé</th><th>Ancienneté</th>${DAY_NAMES.map((d,i)=>`<th>${d.slice(0,3)}.<br><small>${addDays(weekStart,i).slice(8)}</small></th>`).join('')}<th>Total<br><small>régulier</small></th></tr></thead>${table}</table><div class="sheet-bottom"><div class="sheet-department-totals"><strong>Régulier : ${blank?'________':hoursLabel(sum)} h</strong>${!blank&&trainingSum>0?`<strong class="department-training-total">Formation : ${hoursLabel(trainingSum)} h</strong>`:''}${!blank&&buffetSum>0?`<strong class="department-buffet-total">Buffet : ${hoursLabel(buffetSum)} h</strong>`:''}${!blank&&kitchenSum>0?`<strong class="department-kitchen-total">Cuisine : ${hoursLabel(kitchenSum)} h</strong>`:''}${blank?'':printedMentions.map(([name,minutes])=>`<strong>${e(name)} : ${hoursLabel(minutes)} h</strong>`).join('')}<strong class="grand-total">Grand total : ${blank?'________':hoursLabel(sum+trainingSum+buffetSum+kitchenSum+mentionSum)} h</strong></div></div></article>`;
 }
 
 // Ranks belong to a department and employment group; missing ranks follow members.

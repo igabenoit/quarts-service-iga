@@ -8,7 +8,7 @@ export function cuisineCell(cell,source,week){
   let target=c.workDepartment||source;
   if((c.kind==='kitchen'||Object.hasOwn(KITCHEN_POSTS,c.post))&&target==='pam')target='cuisine';
   if(target==='cuisine'&&(Object.hasOwn(PAM_POSTS,c.post)||c.kind==='buffet'))target='pam';
-  if(target==='cuisine'&&c.kind==='shift')c.kind='kitchen';
+  if(target==='cuisine'&&c.kind==='shift'&&!c.mentionHours)c.kind='kitchen';
   if(target===source)delete c.workDepartment;else c.workDepartment=target;
   return c;
 }

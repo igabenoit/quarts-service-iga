@@ -14,10 +14,10 @@ try{
   await page.goto(f.base+`/departements?department=${cuisine.id}&week=2026-10-26`);
   await page.getByRole('button',{name:'Test Cuisine, Lundi, +',exact:true}).click();
   await page.locator('#cellKind').selectOption('note');
-  assert.equal(await page.locator('#trainingChoice').isVisible(),true);
+  assert.equal(await page.locator('#mentionHoursChoice').isVisible(),true);
   assert.equal(await page.locator('#shiftFields').isVisible(),false);
   await page.locator('#cellNote').fill('Accueil et sécurité');
-  await page.locator('#cellTraining').check();
+  await page.locator('#mentionHours').selectOption('training');
   assert.equal(await page.locator('#shiftFields').isVisible(),true);
   await page.locator('#cellStart').fill('7');await page.locator('#cellEnd').fill('4');
   assert.match(await page.locator('#resolvedShift').innerText(),/8 h de formation/);
@@ -30,9 +30,9 @@ try{
   assert.equal(read.draft.rows[0].cells[0].note,'Accueil et sécurité');
   await page.getByRole('button',{name:/Test Cuisine, Lundi,/}).click();
   assert.equal(await page.locator('#cellKind').inputValue(),'note');
-  assert.equal(await page.locator('#cellTraining').isChecked(),true);
+  assert.equal(await page.locator('#mentionHours').inputValue(),'training');
   assert.equal(await page.locator('#cellNote').inputValue(),'Accueil et sécurité');
-  await page.locator('#cellTraining').uncheck();
+  await page.locator('#mentionHours').selectOption('none');
   assert.equal(await page.locator('#shiftFields').isVisible(),false);
   await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
   saved=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().includes('/weeks/'));
@@ -40,5 +40,29 @@ try{
   read=(await f.call('GET',`/api/departments/${cuisine.id}/weeks/2026-10-26`,{cookie})).body;
   assert.equal(read.draft.rows[0].cells[0].kind,'note');
   assert.equal(read.draft.rows[0].cells[0].start,null);assert.deepEqual(errors,[]);
-  console.log('Training mention UI passed: entry, calculation, persistence, reopening and removal.');
+  for(const mode of ['regular','separate']){
+    await page.getByRole('button',{name:/Test Cuisine, Lundi,/}).click();
+    await page.locator('#mentionHours').selectOption(mode);
+    await page.locator('#cellNote').fill('Inventaire');
+    await page.locator('#cellStart').fill('08:00');await page.locator('#cellEnd').fill('12:00');
+    await page.getByRole('button',{name:'Enregistrer cette journée',exact:true}).click();
+    const totals=await page.locator('.department-hours').innerText();
+    assert.match(totals,/Grand total : 4 h/);
+    assert.match(totals,mode==='regular'?/Régulier : 4 h/:/Inventaire : 4 h/);
+    const saving=page.waitForResponse(r=>r.request().method()==='PUT'&&r.url().includes('/weeks/'));
+    await page.locator('#saveDraft').click();assert.equal((await saving).status(),200);
+    await page.reload();await page.getByRole('button',{name:/Test Cuisine, Lundi, Inventaire/}).click();
+    assert.equal(await page.locator('#mentionHours').inputValue(),mode);
+    assert.equal(await page.locator('#cellNote').inputValue(),'Inventaire');
+    await page.locator('#cellDialog button[data-close]').click();
+  }
+  assert.deepEqual(errors,[]);
+  await page.locator('[data-view="print"]').click();
+  await page.locator('#printKind').selectOption('filled');
+  assert.match(await page.locator('#printPreview').innerText(),/Inventaire : 4 h/i);
+  await page.locator('#printSheet').click();
+  await page.locator('#downloadPdf').waitFor({state:'visible'});
+  assert.match(await page.locator('#pdfStatus').innerText(),/1 page\(s\) légale/);
+  console.log('PDF légal produit sur une page avec le sous-total Inventaire.');
+  console.log('Mentions vérifiées dans le navigateur : sans heures, formation, régulier et séparé.');
 }finally{await browser?.close();await f.close();}
