@@ -1,3 +1,4 @@
+import {emailPaper} from './sst-email-paper.js';
 import {sections, items, actions, ratings} from './supervision-schema.js';
 
 export function mount(container, saved) {
@@ -40,7 +41,7 @@ export function summary(grid, escape) {
     }).join('') + '</ul>').join('') + '<h4>Actions prises</h4><p>' +
     actions.filter((_,i) => grid.actions[i]).join('<br>') + '</p><p>' + escape(grid.other) + '</p>';
 }
-export function printBlank(target){
+export function printBlank(target,email=false){
   const box='<span class="sv-box" aria-hidden="true"></span>';
   const table=section=>'<table><colgroup><col><col class="sv-rating" span="3"></colgroup><thead><tr><th>'+section.title+'</th>'+ratings.map(r=>'<th>'+r+'</th>').join('')+'</tr></thead><tbody>'+
     section.rows.map(row=>'<tr><td><strong>'+row.label+'</strong>'+row.tasks.map(task=>'<div>'+box+' '+task+'</div>').join('')+'</td>'+ratings.map(()=>'<td>'+box+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
@@ -50,5 +51,5 @@ export function printBlank(target){
     indices.map(index=>table(sections[index])).join('')+
     (i===2?'<h2>Actions prises à la suite de l’observation</h2><div class="sv-actions">'+actions.map(a=>'<div>'+box+' '+a+'</div>').join('')+'</div><p>Autre __________________________________________________________________________</p>':'')+
     '<h2>Observations et commentaires</h2><div class="sv-lines"></div></div>').join('')+'</div>';
-  window.print();
+  if(email)emailPaper('Grille de supervision vierge');else window.print();
 }

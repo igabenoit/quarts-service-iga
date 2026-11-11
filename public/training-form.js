@@ -1,3 +1,4 @@
+import {emailPaper} from './sst-email-paper.js';
 import {emptyTrainingForm,FORM_SIGNERS} from './training-form-schema.js';
 import {trainingTasks,topics} from './equipment-training-sheet.js';
 for(const href of ['/incident-report.css','/training-form.css']){if(!document.querySelector('link[href="'+href+'"]')){const l=document.createElement('link');l.rel='stylesheet';l.href=href;document.head.append(l);}}
@@ -34,7 +35,7 @@ export function openTrainingForm(options){
  render();dialog.showModal();
 }
 function render(){
- dialog.innerHTML=`<div class="ir-toolbar"><strong>Formation à un équipement</strong>${editing?'<button type="button" class="button primary" data-tf-save="draft">Enregistrer le brouillon</button><button type="button" class="button primary" data-tf-save="completed">Finaliser et conserver les signatures</button>':'<button type="button" class="button secondary" data-tf-correct>Corriger cette fiche</button>'}<button type="button" class="button secondary" data-tf-print>Imprimer / PDF</button>${prior?'<button type="button" class="button secondary" data-tf-new>Nouvelle formation</button>':''}<button type="button" class="quiet" data-tf-close>Fermer</button></div><p data-tf-message role="status">${prior?'Fiche enregistrée. Une correction conserve la version précédente.':'Nouveau formulaire — remplir, puis faire signer.'}</p>${prior&&editing?'<label class="ir-correction">Motif de la correction<input data-tf="correctionReason" maxlength="1000" value="'+esc(model.correctionReason||'')+'"></label>':''}${paper(editing)}`;
+ dialog.innerHTML=`<div class="ir-toolbar"><strong>Formation à un équipement</strong>${editing?'<button type="button" class="button primary" data-tf-save="draft">Enregistrer le brouillon</button><button type="button" class="button primary" data-tf-save="completed">Finaliser et conserver les signatures</button>':'<button type="button" class="button secondary" data-tf-correct>Corriger cette fiche</button>'}<button type="button" class="button primary" data-tf-email>Envoyer par courriel</button><button type="button" class="button secondary" data-tf-print>Imprimer / PDF</button>${prior?'<button type="button" class="button secondary" data-tf-new>Nouvelle formation</button>':''}<button type="button" class="quiet" data-tf-close>Fermer</button></div><p data-tf-message role="status">${prior?'Fiche enregistrée. Une correction conserve la version précédente.':'Nouveau formulaire — remplir, puis faire signer.'}</p>${prior&&editing?'<label class="ir-correction">Motif de la correction<input data-tf="correctionReason" maxlength="1000" value="'+esc(model.correctionReason||'')+'"></label>':''}${paper(editing)}`;
  dialog.oninput=e=>{const el=e.target,key=el.dataset.tf;
   if(!key&&!el.hasAttribute('data-tf-person')&&!el.hasAttribute('data-tf-point'))return;
   if(key==='correctionReason'){model.correctionReason=el.value;dirty=true;return;}
@@ -63,7 +64,7 @@ function render(){
   if('tfNew'in d){if(canLeaveForm()){const options={...ctx,prior:null,employeeKey:model.employeeKey};clearForm();openTrainingForm(options);}return;}
   if('tfClose'in d){if(canLeaveForm())clearForm();}
   if(d.tfClear){model.signatures[d.tfClear]=[];dirty=true;redraw();}
-  if('tfPrint'in d){document.getElementById('sstPrint').innerHTML=(dirty||!prior?'<p class="ir-print-warning">Brouillon / modifications non enregistrées</p>':'')+paper(false);window.print();}
+  if('tfPrint'in d||'tfEmail'in d){document.getElementById('sstPrint').innerHTML=(dirty||!prior?'<p class="ir-print-warning">Brouillon / modifications non enregistrées</p>':'')+paper(false);if('tfEmail'in d)emailPaper('Formation à un équipement');else window.print();}
   if(d.tfSave)await save(d.tfSave);
  };
  setupPads();
