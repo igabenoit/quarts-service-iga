@@ -1,3 +1,4 @@
+import {normalizeEmail} from './employee-contacts.js';
 import {normalizeSupervision} from './public/supervision-schema.js';
 import {normalizeWelcome,welcomeContent,validateWelcomeCompletion} from './public/welcome-form-schema.js';
 import express from 'express';
@@ -138,6 +139,30 @@ export async function installSST(app,pool,{identity}){
    const id=randomUUID();await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,name,mime,bytes.length,sha,bytes]);await audit(db,req,'document.added',null,{id,name,mime,size:bytes.length,sha256:sha},recordId,id);return id});res.status(201).json({id});
  }));
  app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=(await pool.query('SELECT * FROM sst_documents WHERE id=$1',[req.params.id])).rows[0]||(employeeFiles?await employeeFiles.read(req.params.id):null);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});res.send(Buffer.from(r.data))}));
+ app.post('/api/sst/documents/:id/email',admin,origin,route(async(req,res)=>{
+  const id=req.params.id, to=normalizeEmail(req.body?.to), requestId=req.body?.requestId;
+  if(!uuid(id)||!uuid(requestId)||!to)fail('Vérifiez le document et l’adresse courriel.');
+  const approved=(process.env.SST_MAIL_RECIPIENTS||'').split(',').map(normalizeEmail).filter(Boolean);
+  if(!approved.includes(to))fail('Cette adresse ne figure pas dans la liste des destinataires SST autorisés.',403);
+  if(!process.env.RESEND_API_KEY)fail('Le service courriel du magasin est indisponible.',503);
+  const file=(await pool.query('SELECT name,data FROM sst_documents WHERE id=$1',[id])).rows[0]||(employeeFiles?await employeeFiles.read(id):null);
+  if(!file)fail('Document introuvable.',404);
+  const payload={
+   from:process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'Quarts Service <onboarding@resend.dev>',
+   to:[to], subject:'Document SST · IGA Extra Famille Benoit',
+   text:'Bonjour, vous trouverez en pièce jointe le document transmis par le magasin IGA Extra Famille Benoit.',
+   attachments:[{filename:file.name,content:Buffer.from(file.data).toString('base64')}]
+  };
+  await audit(pool,req,'document.email.requested',null,{id,to,requestId});
+  try {
+   const response=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(20000),
+    headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'sst-'+requestId+'-'+createHash('sha256').update(id+to).digest('hex')},
+    body:JSON.stringify(payload)});
+   if(!response.ok||!(await response.json()).id)throw Error('mail');
+  } catch {fail('Envoi non confirmé par le service courriel. Vérifiez l’adresse puis réessayez.',502);}
+  await audit(pool,req,'document.email.accepted',null,{id,to,requestId});
+  res.json({ok:true});
+ }));
  app.post('/api/sst/documents/:id/move',admin,origin,route(async(req,res)=>{if(!uuid(req.params.id)||!uuid(req.body?.recordId))fail('Dossier invalide.');await tx(async db=>{const before=(await db.query('SELECT id,record_id,name,sha256,version,archived_at FROM sst_documents WHERE id=$1',[req.params.id])).rows[0];if(!before)fail('Document introuvable.',404);if(before.version!==req.body.version)fail('Ce document a changé. Actualisez.',409);const target=(await db.query('SELECT id FROM sst_records WHERE id=$1 AND archived_at IS NULL',[req.body.recordId])).rows[0];if(!target)fail('Dossier introuvable.',404);if(before.record_id===target.id)return;const duplicate=(await db.query('SELECT id FROM sst_documents WHERE record_id=$1 AND sha256=$2 AND archived_at IS NULL AND id<>$3',[target.id,before.sha256,before.id])).rows[0];if(duplicate)fail('Cette preuve existe déjà dans ce dossier.',409);const after=(await db.query('UPDATE sst_documents SET record_id=$2,version=version+1 WHERE id=$1 RETURNING id,record_id,name,sha256,version,archived_at',[before.id,target.id])).rows[0];await audit(db,req,'document.moved',before,after,before.record_id,before.id);await audit(db,req,'document.moved',before,after,target.id,before.id)});res.json({ok:true})}));
  app.post('/api/sst/documents/:id/archive',admin,origin,route(async(req,res)=>{if(!uuid(req.params.id)||typeof req.body?.archived!=='boolean')fail('Document invalide.');await tx(async db=>{const before=(await db.query('SELECT id,record_id,name,sha256,version,archived_at FROM sst_documents WHERE id=$1',[req.params.id])).rows[0];if(!before)fail('Document introuvable.',404);if(before.version!==req.body.version)fail('Ce document a changé. Actualisez.',409);if(!req.body.archived){const other=(await db.query('SELECT id FROM sst_documents WHERE sha256=$1 AND record_id IS NOT DISTINCT FROM $2::uuid AND archived_at IS NULL AND id<>$3',[before.sha256,before.record_id,before.id])).rows[0];if(other)fail('Une copie active existe déjà pour ce dossier.',409)}await db.query('UPDATE sst_documents SET archived_at=CASE WHEN $1 THEN clock_timestamp() ELSE NULL END,version=version+1 WHERE id=$2',[req.body.archived,before.id]);await audit(db,req,req.body.archived?'document.archived':'document.restored',before,{...before,archived:req.body.archived},before.record_id,before.id)});res.json({ok:true})}));
  // Separate administrative export: no original file contents, no changes to records.
