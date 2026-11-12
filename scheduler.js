@@ -8,7 +8,7 @@ export function assignmentConflict(employee, shift, shifts, assigned = []) {
   if (conflictsWithLeave(shift,employee.leavePeriods)) return "Un congé approuvé chevauche ce quart.";
   if (!employee.active) return "Cet employé est inactif.";
   if (shift.role === "support") return "Ce quart est réservé à l’aide d’un autre département.";
-  if (shift.role !== "training" && ![employee.role,...(employee.roles||[])].includes(defaultServiceRole(shift.role,employee.role))) return "Ce poste ne fait pas partie des fonctions de cet employé.";
+  if (![employee.role,...(employee.roles||[])].includes(defaultServiceRole(shift.role,employee.role))) return "Ce poste ne fait pas partie des fonctions de cet employé.";
   const windows = employee.availability?.[shift.dayIndex] || [];
   if (!windows.some(([start, end]) => start <= shift.startMinute && end >= shift.endMinute))
     return `Les disponibilités de cet employé ne couvrent pas le quart complet de ${hoursText(shift.startMinute)} à ${hoursText(shift.endMinute)}.`;

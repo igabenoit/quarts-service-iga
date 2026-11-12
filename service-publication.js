@@ -4,7 +4,7 @@ import {serviceShiftTiming} from './public/service-rules.js';
 // personal credentials, email addresses, internal notes or availability here.
 export async function serviceSnapshot(client,week){
   const employees=(await client.query('SELECT id,name,role,display_rank FROM schedule_employees WHERE active AND departed_at IS NULL ORDER BY id')).rows;
-  const shifts=(await client.query(`SELECT s.id,s.week_start,s.area,s.role,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.absence,s.source_department,a.employee_id
+  const shifts=(await client.query(`SELECT s.id,s.week_start,s.area,s.role,s.training,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.absence,s.source_department,a.employee_id
     FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.week_start=$1 ORDER BY s.id`,[week])).rows;
   return {employees,shifts};
 }
@@ -40,6 +40,6 @@ export async function publishedServiceResult(client,week){
   const active=new Set((await client.query(`SELECT e.id FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE (e.active AND e.departed_at IS NULL AND p.employment_ended_on IS NULL) OR p.employment_ended_on>$1::date`,[week])).rows.map(r=>Number(r.id)));
   return {kind:'service',data:{weekStart:week,employees:publication.snapshot.employees.filter(e=>active.has(Number(e.id))).map(e=>({
     id:Number(e.id),name:e.name,role:e.role,rank:e.display_rank,
-    shifts:publication.snapshot.shifts.filter(s=>Number(s.employee_id)===Number(e.id)).map(s=>({dayIndex:Number(s.day_index),startMinute:Number(s.start_minute),endMinute:Number(s.end_minute),role:s.role,...serviceShiftTiming(Number(s.start_minute),Number(s.end_minute),s.absence)}))
+    shifts:publication.snapshot.shifts.filter(s=>Number(s.employee_id)===Number(e.id)).map(s=>({dayIndex:Number(s.day_index),startMinute:Number(s.start_minute),endMinute:Number(s.end_minute),role:s.role,training:!!s.training,...serviceShiftTiming(Number(s.start_minute),Number(s.end_minute),s.absence)}))
   }))}};
 }

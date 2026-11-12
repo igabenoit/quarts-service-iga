@@ -15,6 +15,10 @@ test('Service publication remains frozen for employee, family and store until ex
     const shift=await manage('POST',`/api/weeks/${week}/shifts`,{role:'cashier',days:[0],startMinute:480,endMinute:960,breakMinutes:60});assert.equal(shift.status,201);
     const id=shift.body.shifts[0].id;
     const assignment=await manage('PUT',`/api/shifts/${id}/assignment`,{employeeId:employee.body.employee.id});assert.equal(assignment.status,200,JSON.stringify(assignment.body));
+    const trained=await manage('PUT',`/api/shifts/${id}`,{role:'cashier',training:true,dayIndex:0,startMinute:480,endMinute:960});
+    assert.equal(trained.status,200,JSON.stringify(trained.body));
+    assert.equal(trained.body.shift.training,true);
+    assert.equal(trained.body.shift.role,'cashier');
     const invalidRole=await manage('PUT',`/api/shifts/${id}`,{role:'packer',dayIndex:0,startMinute:480,endMinute:960});assert.equal(invalidRole.status,400);assert.match(invalidRole.body.error,/fonctions/);
     const second=await manage('POST',`/api/weeks/${week}/shifts`,{role:'cashier',days:[1],startMinute:480,endMinute:960});
     assert.equal((await manage('PUT',`/api/shifts/${second.body.shifts[0].id}/assignment`,{employeeId:employee.body.employee.id})).status,200);
@@ -27,6 +31,7 @@ test('Service publication remains frozen for employee, family and store until ex
     const published=await manage('PUT',`/api/weeks/${week}/share-link`,{});assert.equal(published.status,200);const token=published.body.path.split('/').pop();
     const personal=()=>f.call('GET','/api/public-schedules/'+token,{cookie:employeeCookie});
     assert.equal((await personal()).body.employees[0].shifts[0].startMinute,480);
+    assert.equal((await personal()).body.employees[0].shifts[0].training,true);
     const changed=await manage('PUT',`/api/shifts/${id}`,{role:'cashier',dayIndex:0,startMinute:600,endMinute:1020,breakMinutes:0});assert.equal(changed.status,200,JSON.stringify(changed.body));
     assert.equal((await personal()).body.employees[0].shifts[0].startMinute,480,'an unpublished edit must not reach the employee');
     const familyView=await f.call('GET',`/api/family-portal/weeks/${week}`,{cookie:familyCookie});assert.equal(familyView.body.people[0].days[0].entries[0].start,480);

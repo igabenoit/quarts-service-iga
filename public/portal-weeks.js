@@ -28,7 +28,7 @@ export function personalDays(week,results,allowedDepartments=null){
     if(data.weekStart!==week)throw Error('La semaine reçue ne correspond pas à la semaine choisie. Actualise le portail.');
     for(const person of result.kind==='service'?data.employees:data.schedule.rows)for(const day of days)if(person.birthdayMonthDay===day.date.slice(5))day.birthday=true;
     if(result.kind==='service'){
-      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',departmentKeys:['service'],hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:[roles[s.role]||s.role,absenceLabel(s.absence)].filter(Boolean).join(' · '),minutes:serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes,start:s.startMinute,end:s.endMinute,birthday:person.birthdayMonthDay});
+      for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',departmentKeys:['service'],hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:[roles[s.role]||s.role,s.training?"Formation":"",absenceLabel(s.absence)].filter(Boolean).join(' · '),minutes:serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes,start:s.startMinute,end:s.endMinute,birthday:person.birthdayMonthDay});
     }else{
       for(const row of data.schedule.rows)row.cells.forEach((c,index)=>{
         if(c.sourceDepartment&&origins.has(c.sourceDepartment)||c.kind==='blank')return;

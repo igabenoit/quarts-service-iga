@@ -109,9 +109,14 @@ await pool.query(`
   );
 `);
 await pool.query(`
+  ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS training BOOLEAN NOT NULL DEFAULT FALSE;
+  UPDATE schedule_shifts s SET training=TRUE, role=COALESCE((
+    SELECT e.role FROM schedule_assignments a JOIN schedule_employees e ON e.id=a.employee_id WHERE a.shift_id=s.id
+  ),'cashier') WHERE s.role='training';
+  UPDATE schedule_shifts SET area='packer' WHERE training AND role='packer' AND area<>'packer';
   ALTER TABLE schedule_shifts DROP CONSTRAINT IF EXISTS schedule_shifts_role_check;
   ALTER TABLE schedule_shifts ADD CONSTRAINT schedule_shifts_role_check
-    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager','training'));
+    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager'));
   ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
   ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
     CHECK (role IN ('cashier','supervisor','packer','orders','manager'));
@@ -267,7 +272,7 @@ function parseMinutes(value, name, min, max) {
 }
 function normalizeShift(body) {
   const role = String(body.role || "");
-  if (!["cashier", "supervisor", "support", "packer", "orders", "manager", "training"].includes(role)) throw new Error("Fonction invalide.");
+  if (!["cashier", "supervisor", "support", "packer", "orders", "manager"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
   const {breakMinutes,absence} = serviceShiftTiming(startMinute,endMinute,body.absence);
@@ -277,6 +282,7 @@ function normalizeShift(body) {
     startMinute,
     endMinute,
     breakMinutes, absence:absence||null,
+    training: body.training === true,
     sourceDepartment: String(body.sourceDepartment || "").trim().slice(0, 80),
     notes: String(body.notes || "").trim().slice(0, 300),
   };
@@ -298,7 +304,7 @@ function mapShift(row) {
     dayIndex: Number(row.day_index), startMinute: Number(row.start_minute), endMinute: Number(row.end_minute),
     ...serviceShiftTiming(Number(row.start_minute),Number(row.end_minute),row.absence),
     ...(row.absence?.approvedLeave?{approvedLeaveAbsence:row.absence.approvedLeave}:{}),
-    sourceDepartment: row.source_department, notes: row.notes,
+    training: row.training === true, sourceDepartment: row.source_department, notes: row.notes,
   };
 }
 
@@ -832,7 +838,7 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
     await ensureWeek(weekStart, client);
     const created = [];
     for (const dayIndex of days) {
-      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence]);
+      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence, training) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence, shift.training]);
       created.push(mapShift(result.rows[0]));
     }
     await commitServiceTransaction(client,request);
@@ -868,7 +874,7 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
       const conflict=assignmentConflict(employee,{...shift,...serviceShiftTiming(shift.startMinute,shift.endMinute,shift.absence),id,dayIndex},all,assigned);
       if(conflict)throw Error(conflict+' Réattribuez le quart d’abord.');
     }
-    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, storedShiftAbsence(shift)]);
+    const result = await client.query(`UPDATE schedule_shifts SET area=$1, role=$2, day_index=$3, start_minute=$4, end_minute=$5, break_minutes=$6, source_department=$7, notes=$8, absence=$10, training=COALESCE($11,training), updated_at=NOW() WHERE id=$9 RETURNING *`, [shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, id, storedShiftAbsence(shift), request.body.training === undefined ? null : shift.training]);
     if (!result.rowCount) throw new Error("Quart introuvable.");
     await commitServiceTransaction(client,request);
     response.json({ shift: mapShift(result.rows[0]) });
