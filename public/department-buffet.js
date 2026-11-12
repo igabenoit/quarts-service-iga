@@ -3,6 +3,13 @@ import {blankCell,cellMinutes} from './departments-core.js';
 export const buffetKey=(personId,day,c)=>JSON.stringify([personId,day,c.start,c.end,cellMinutes(c)]);
 export const usesBuffetRule=(person,c,key)=>person?.buffetPamPriority&&c.kind==='buffet'&&['pam','charcuterie'].includes(c.workDepartment||key);
 
+function allocatedCell(cell,allocation,key){
+  const minutes=allocation[key]||0;
+  const training=cell.trainingMinutes||0;
+  const localTraining=key==='charcuterie'?Math.max(0,training-allocation.pam):training;
+  return {...cell,buffetAllocation:allocation,departmentMinutes:minutes,departmentTrainingMinutes:Math.min(minutes,localTraining)};
+}
+
 // This is a display/accounting projection. Source shifts stay editable in their own sheets.
 export function prepareSharedDraft(draft,related=[],people=[],key){
   const rows=draft.rows.map(r=>({...r,cells:r.cells.map(c=>({...c})),accountingCells:[]}));
@@ -17,14 +24,14 @@ export function prepareSharedDraft(draft,related=[],people=[],key){
       const minutes=cellMinutes(item.cell),pam=Math.min(remaining,minutes);remaining-=pam;
       plan.set(id,{key:id,pam,charcuterie:minutes-pam});
     }
-    row.cells=row.cells.map((c,day)=>usesBuffetRule(person,c,key)?{...c,buffetAllocation:plan.get(buffetKey(row.personId,day,c)),departmentMinutes:plan.get(buffetKey(row.personId,day,c))[key]||0}:c);
+    row.cells=row.cells.map((c,day)=>usesBuffetRule(person,c,key)?allocatedCell(c,plan.get(buffetKey(row.personId,day,c)),key):c);
   }
   const ownKeys=new Set(rows.flatMap(r=>r.cells.filter(c=>c.buffetAllocation).map(c=>c.buffetAllocation.key))),seen=new Set(),projected=[];
   for(const item of related){
     const person=people.find(p=>p.id===item.personId),allocation=usesBuffetRule(person,item.cell,item.sourceDepartment)?plan.get(buffetKey(item.personId,item.day,item.cell)):null;
     if(allocation&&(ownKeys.has(allocation.key)||seen.has(allocation.key)))continue;
     if(allocation)seen.add(allocation.key);
-    const cell=allocation?{...item.cell,buffetAllocation:allocation,departmentMinutes:allocation[key]||0}:item.cell;
+    const cell=allocation?allocatedCell(item.cell,allocation,key):item.cell;
     projected.push({...item,cell});
     if(allocation)rows.find(r=>r.personId===item.personId).accountingCells.push(cell);
   }

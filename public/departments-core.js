@@ -96,7 +96,7 @@ export const cellMinutes=c=>isTimedCell(c)?c.paidMinutesOverride??(c.end-c.start
 export const departmentLabel=key=>key==='service'?'Service':DEPARTMENT_STYLES.find(d=>d.key===key)?.name||key;
 export const isOutgoing=c=>Boolean(c.workDepartment&&!c.sourceDepartment);
 export const transferLabel=c=>isOutgoing(c)?'À '+({poissonnerie:'Poisson',pam:'PAM',fruits:'Fruits'}[c.workDepartment]||departmentLabel(c.workDepartment)):'';
-export const cellDetail=c=>[c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',c.trainingMention||c.mentionHours?c.note:'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
+export const cellDetail=c=>[c.trainingMinutes?'Formation '+hoursLabel(c.trainingMinutes)+' h':'',c.kind==='training'?'Formation':c.kind==='buffet'?'Buffet':c.kind==='kitchen'&&!KITCHEN_POSTS[assignmentPost(c)]?'Cuisine':'',COMMON_POSTS[assignmentPost(c)]||PAM_POSTS[assignmentPost(c)]||KITCHEN_POSTS[assignmentPost(c)]||BAKERY_POSTS[assignmentPost(c)]||'',c.trainingMention||c.mentionHours?c.note:'',transferLabel(c),absenceLabel(c.absence)].filter(Boolean).join(' · ');
 export const shiftAssignment=(c,key)=>c.buffetAllocation?[c.buffetAllocation.pam&&`PAM${c.buffetAllocation.charcuterie?' '+hoursLabel(c.buffetAllocation.pam)+' h':''}`,c.buffetAllocation.charcuterie&&`Charcuterie${c.buffetAllocation.pam?' '+hoursLabel(c.buffetAllocation.charcuterie)+' h':''}`].filter(Boolean).join(' / ')+' · Buffet':[c.workDepartment==='pam'||!c.workDepartment&&key==='pam'?'PAM':departmentLabel(c.workDepartment||key),c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})].filter(Boolean).join(' · ');
 export const cellLabel=c=>({off:'CH',vacation:'Vacances',mobile:'Congé mobile',requested:'Congé demandé',sick:'Maladie',training:'Formation',review:'À vérifier'}[c.kind]||c.note||'');
 export function cellTone(c){
@@ -119,7 +119,8 @@ export function normalizeCell(value){
     const post=assignmentPost(c);
     if(post&&post!=='cut_fruit'&&!Object.hasOwn(COMMON_POSTS,post)&&!Object.hasOwn(PAM_POSTS,post)&&!Object.hasOwn(KITCHEN_POSTS,post)&&!Object.hasOwn(BAKERY_POSTS,post))throw Error('Poste invalide.');
     if(c.workDepartment&&!DEPARTMENT_STYLES.some(d=>d.key===c.workDepartment))throw Error('Département d’accueil invalide.');
-    return {kind,...(c.mentionHours?{mentionHours:c.mentionHours}:{}),...(c.trainingMention===true?{trainingMention:true}:{}),start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
+    if(c.trainingMinutes!=null && (!['shift','buffet','kitchen'].includes(kind)||!Number.isInteger(c.trainingMinutes)||c.trainingMinutes<=0||c.trainingMinutes>cellMinutes({...c,end,absence})))throw Error('La durée de formation doit être positive et comprise dans les heures payées du quart.');
+    return {kind,...(c.trainingMinutes?{trainingMinutes:c.trainingMinutes}:{}),...(c.mentionHours?{mentionHours:c.mentionHours}:{}),...(c.trainingMention===true?{trainingMention:true}:{}),start:c.start,end,...(absence?{absence}:{}),...(c.paidMinutesOverride!==undefined?{paidMinutesOverride:c.paidMinutesOverride}:{}),breakMinutes:cellBreakMinutes({...c,end}),...(c.breakOverride===true?{breakOverride:true}:{}),note,...(post?{post}:{}),...(c.workDepartment?{workDepartment:c.workDepartment}:{})};
   }
   if(['note','review'].includes(kind)&&!note)throw Error('Ajoutez le texte de la case.');
   return {kind,start:null,end:null,breakMinutes:0,note};
@@ -139,9 +140,9 @@ export function normalizeDraft(value,people){
 export const hourCategory=c=>c.mentionHours==='separate'?'mention':c.kind;
 const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((sum,cell)=>{
   const category=hourCategory(cell);
-  if(category!==kind && !(kind==='training' && category==='shift' && cell.trainingMinutes))return sum;
+  if(category!==kind && !(kind==='training' && cell.trainingMinutes))return sum;
   const paid=cell.departmentMinutes??(!isOutgoing(cell)?cellMinutes(cell):0);
-  const partial=category==='shift'?Math.min(cell.trainingMinutes??0,paid):0;
+  const partial=Math.min(cell.departmentTrainingMinutes??cell.trainingMinutes??0,paid);
   return sum+(category===kind?paid-partial:partial);
 },0);
 export const totalMinutes=row=>minutesOfKind(row,'shift');

@@ -13,7 +13,7 @@ export function controlReport(data){
     if(!person)throw Error('Une fiche employé est manquante. Actualisez la liste avant de préparer le contrôle.');
     const days=row.cells.map((cell,day)=>{
       const entries=[cell,...prepared.related.filter(item=>item.personId===row.personId&&item.day===day&&row.accountingCells.includes(item.cell)).map(item=>item.cell)];
-      const totals=zero();for(const c of entries)if(isTimedCell(c))totals[hourCategory(c)]+=charged(c);
+      const totals=zero();for(const c of entries)if(isTimedCell(c)){const paid=charged(c),partial=Math.min(c.departmentTrainingMinutes??c.trainingMinutes??0,paid);totals[hourCategory(c)]+=paid-partial;totals.training+=partial;}
       return {entries,totals,total:Object.values(totals).reduce((a,b)=>a+b,0)};
     });
     const totals=zero();for(const day of days)for(const [kind] of kinds)totals[kind]+=day.totals[kind];
