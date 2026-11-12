@@ -17,9 +17,9 @@ export async function applyServiceRoleDefault(client,shift,employee){
 // shifts occupied by a manager become manager needs in the destination week.
 export async function copyServiceShifts(client,weekStart,previous){
   await client.query(`INSERT INTO schedule_shifts
-    (week_start,area,role,day_index,start_minute,end_minute,break_minutes,source_department,notes,sort_order,training)
+    (week_start,area,role,day_index,start_minute,end_minute,break_minutes,source_department,notes,sort_order,training,training_minutes)
     SELECT $1,s.area,CASE WHEN e.role='manager' AND s.role='supervisor' THEN 'manager' ELSE s.role END,
-      s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.source_department,s.notes,s.sort_order,s.training
+      s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.source_department,s.notes,s.sort_order,s.training,s.training_minutes
     FROM schedule_shifts s
     LEFT JOIN schedule_assignments a ON a.shift_id=s.id
     LEFT JOIN schedule_employees e ON e.id=a.employee_id

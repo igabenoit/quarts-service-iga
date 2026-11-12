@@ -105,6 +105,7 @@
           <input id="shiftId" type="hidden">
           <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
           <label><input type="checkbox" id="shiftTraining"> Quart en formation</label>
+          <label id="trainingHoursWrap" hidden>Heures de formation<input id="trainingHours" type="number" min="0.01" step="any" placeholder="Quart complet"><small>Laisser vide pour le quart complet.</small></label>
           <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
           <label>Début<input id="startTime" type="time" value="08:00" required></label>
           <label>Fin<input id="endTime" type="time" value="16:00" required></label>

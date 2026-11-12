@@ -15,9 +15,10 @@ test('Service publication remains frozen for employee, family and store until ex
     const shift=await manage('POST',`/api/weeks/${week}/shifts`,{role:'cashier',days:[0],startMinute:480,endMinute:960,breakMinutes:60});assert.equal(shift.status,201);
     const id=shift.body.shifts[0].id;
     const assignment=await manage('PUT',`/api/shifts/${id}/assignment`,{employeeId:employee.body.employee.id});assert.equal(assignment.status,200,JSON.stringify(assignment.body));
-    const trained=await manage('PUT',`/api/shifts/${id}`,{role:'cashier',training:true,dayIndex:0,startMinute:480,endMinute:960});
+    const trained=await manage('PUT',`/api/shifts/${id}`,{role:'cashier',training:true,trainingMinutes:120,dayIndex:0,startMinute:480,endMinute:960});
     assert.equal(trained.status,200,JSON.stringify(trained.body));
     assert.equal(trained.body.shift.training,true);
+    assert.equal(trained.body.shift.trainingMinutes,120);
     assert.equal(trained.body.shift.role,'cashier');
     const invalidRole=await manage('PUT',`/api/shifts/${id}`,{role:'packer',dayIndex:0,startMinute:480,endMinute:960});assert.equal(invalidRole.status,400);assert.match(invalidRole.body.error,/fonctions/);
     const second=await manage('POST',`/api/weeks/${week}/shifts`,{role:'cashier',days:[1],startMinute:480,endMinute:960});

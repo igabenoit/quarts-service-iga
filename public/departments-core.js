@@ -137,7 +137,13 @@ export function normalizeDraft(value,people){
   return {rows,notes,manager};
 }
 export const hourCategory=c=>c.mentionHours==='separate'?'mention':c.kind;
-const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((n,c)=>n+(hourCategory(c)===kind?(c.departmentMinutes??(!isOutgoing(c)?cellMinutes(c):0)):0),0);
+const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((sum,cell)=>{
+  const category=hourCategory(cell);
+  if(category!==kind && !(kind==='training' && category==='shift' && cell.trainingMinutes))return sum;
+  const paid=cell.departmentMinutes??(!isOutgoing(cell)?cellMinutes(cell):0);
+  const partial=category==='shift'?Math.min(cell.trainingMinutes??0,paid):0;
+  return sum+(category===kind?paid-partial:partial);
+},0);
 export const totalMinutes=row=>minutesOfKind(row,'shift');
 export const trainingMinutes=row=>minutesOfKind(row,'training');
 export const buffetMinutes=row=>minutesOfKind(row,'buffet');
