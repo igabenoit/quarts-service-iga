@@ -1,5 +1,5 @@
 import {serviceShiftTiming} from './service-rules.js';
-const roles={manager:'Gérante',supervisor:'Superviseur',cashier:'Caissière',packer:'Emballeur',orders:'Commandes téléphoniques',support:'Aide autre département'};
+const roles={training:"Formation",manager:'Gérante',supervisor:'Superviseur',cashier:'Caissière',packer:'Emballeur',orders:'Commandes téléphoniques',support:'Aide autre département'};
 const days=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
 const e=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const time=n=>`${String(Math.floor(n/60)).padStart(2,'0')}:${String(n%60).padStart(2,'0')}`;
@@ -15,7 +15,7 @@ export function serviceNeedsReport(data){
  const report=dayRows.map(rows=>[...rows.values()].sort((a,b)=>a.start-b.start||a.end-b.end||Object.keys(roles).indexOf(a.role)-Object.keys(roles).indexOf(b.role)||a.department.localeCompare(b.department,'fr')));
  return {days:report,count:data.shifts.length,totalMinutes:report.flat().reduce((sum,r)=>sum+r.paidMinutes*r.quantity,0)};
 }
-const groups=[{id:'supervision',title:'Gérants et superviseurs',roles:['manager','supervisor']},{id:'cashiers',title:'Caissières',roles:['cashier','support']},{id:'packers',title:'Emballeurs',roles:['packer']},{id:'orders',title:'Commandes téléphoniques',roles:['orders'],optional:true}];
+const groups=[{id:'supervision',title:'Gérants et superviseurs',roles:['manager','supervisor']},{id:'cashiers',title:'Caissières',roles:['cashier','support']},{id:'packers',title:'Emballeurs',roles:['packer']},{id:'orders',title:'Commandes téléphoniques',roles:['orders'],optional:true},{id:'training',title:'Formation',roles:['training'],optional:true}];
 export function serviceNeedsHTML(data){
  const report=serviceNeedsReport(data);
  return groups.flatMap(group=>{

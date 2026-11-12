@@ -111,7 +111,7 @@ await pool.query(`
 await pool.query(`
   ALTER TABLE schedule_shifts DROP CONSTRAINT IF EXISTS schedule_shifts_role_check;
   ALTER TABLE schedule_shifts ADD CONSTRAINT schedule_shifts_role_check
-    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager'));
+    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager','training'));
   ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
   ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
     CHECK (role IN ('cashier','supervisor','packer','orders','manager'));
@@ -267,7 +267,7 @@ function parseMinutes(value, name, min, max) {
 }
 function normalizeShift(body) {
   const role = String(body.role || "");
-  if (!["cashier", "supervisor", "support", "packer", "orders", "manager"].includes(role)) throw new Error("Fonction invalide.");
+  if (!["cashier", "supervisor", "support", "packer", "orders", "manager", "training"].includes(role)) throw new Error("Fonction invalide.");
   const startMinute = parseMinutes(body.startMinute, "Heure de début", 0, 1439);
   const endMinute = parseMinutes(body.endMinute, "Heure de fin", 1, 1440);
   const {breakMinutes,absence} = serviceShiftTiming(startMinute,endMinute,body.absence);
