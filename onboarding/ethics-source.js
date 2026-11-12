@@ -10,7 +10,9 @@ async function source(hash){
 }
 export async function installEthicsSource(app,pool){
  db=pool;
- await pool.query('CREATE SCHEMA IF NOT EXISTS onboarding_private');
+ // Managed PostgreSQL may grant access to a provisioned schema without database-wide CREATE.
+ const schema=await pool.query("SELECT to_regnamespace('onboarding_private') AS existing");
+ if (!schema.rows[0].existing) await pool.query('CREATE SCHEMA IF NOT EXISTS onboarding_private');
  await pool.query('CREATE TABLE IF NOT EXISTS onboarding_private.direction_signature (singleton boolean PRIMARY KEY CHECK(singleton), strokes jsonb NOT NULL, actor jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())');
  await db.query('CREATE TABLE IF NOT EXISTS onboarding_ethics_source(sha256 text PRIMARY KEY,document bytea NOT NULL)');
 }

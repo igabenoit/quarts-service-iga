@@ -3,7 +3,13 @@ import {serviceShiftTiming} from './public/service-rules.js';
 // Published data is independent of the editable Service tables. Never include
 // personal credentials, email addresses, internal notes or availability here.
 export async function serviceSnapshot(client,week){
-  const employees=(await client.query('SELECT id,name,role,display_rank FROM schedule_employees WHERE active AND departed_at IS NULL ORDER BY id')).rows;
+  const employees=(await client.query(`SELECT e.id,e.name,e.role,e.display_rank FROM schedule_employees e
+    JOIN schedule_weeks w ON w.store_id=e.store_id WHERE w.week_start=$1 AND e.active AND e.departed_at IS NULL
+    ORDER BY e.id`,[week])).rows;
+  const mismatch=await client.query(`SELECT 1 FROM schedule_assignments a JOIN schedule_employees e ON e.id=a.employee_id
+    JOIN schedule_shifts s ON s.id=a.shift_id JOIN schedule_weeks w USING(week_start)
+    WHERE w.week_start=$1 AND e.store_id<>w.store_id LIMIT 1`,[week]);
+  if(mismatch.rowCount)throw Object.assign(Error('Un quart est attribué à un employé d’un autre magasin.'),{status:409});
   const shifts=(await client.query(`SELECT s.id,s.week_start,s.area,s.role,s.training,s.training_minutes,s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.absence,s.source_department,a.employee_id
     FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.week_start=$1 ORDER BY s.id`,[week])).rows;
   return {employees,shifts};
@@ -20,6 +26,22 @@ export async function installServicePublications(pool){
   const client=await pool.connect();
   try{
     await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
+    // Existing single-store installations retain their employees and published links.
+    await client.query(`CREATE TABLE IF NOT EXISTS schedule_stores(id text PRIMARY KEY CHECK (length(trim(id))>0));
+      INSERT INTO schedule_stores(id) VALUES ('principal') ON CONFLICT DO NOTHING;
+      ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'principal' REFERENCES schedule_stores(id);
+      ALTER TABLE schedule_weeks ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'principal' REFERENCES schedule_stores(id);
+      CREATE UNIQUE INDEX IF NOT EXISTS schedule_week_store ON schedule_weeks(week_start, store_id);
+      ALTER TABLE schedule_public_links ADD COLUMN IF NOT EXISTS store_id text NOT NULL DEFAULT 'principal';
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT FROM pg_constraint WHERE conrelid='schedule_public_links'::regclass AND conname='publication_week_store') THEN
+          ALTER TABLE schedule_public_links ADD CONSTRAINT publication_week_store
+            FOREIGN KEY(week_start,store_id) REFERENCES schedule_weeks(week_start,store_id) ON DELETE CASCADE;
+        END IF;
+      END $$;
+      CREATE OR REPLACE VIEW schedule_employee_links AS
+        SELECT l.token,l.week_start,e.id AS employee_id FROM schedule_public_links l
+        JOIN schedule_employees e ON e.store_id=l.store_id;`);
     await client.query(`CREATE TABLE IF NOT EXISTS schedule_service_publications(
       week_start DATE PRIMARY KEY REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
       snapshot JSONB NOT NULL,published_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp())`);
@@ -37,7 +59,11 @@ export async function readServicePublication(client,week){
 }
 export async function publishedServiceResult(client,week){
   const publication=await readServicePublication(client,week);if(!publication)return null;
-  const active=new Set((await client.query(`SELECT e.id FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE (e.active AND e.departed_at IS NULL AND p.employment_ended_on IS NULL) OR p.employment_ended_on>$1::date`,[week])).rows.map(r=>Number(r.id)));
+  const active=new Set((await client.query(`SELECT e.id FROM schedule_employees e
+    JOIN schedule_weeks w ON w.store_id=e.store_id
+    LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id
+    WHERE w.week_start=$1 AND ((e.active AND e.departed_at IS NULL AND p.employment_ended_on IS NULL)
+      OR p.employment_ended_on>$1::date)`,[week])).rows.map(r=>Number(r.id)));
   return {kind:'service',data:{weekStart:week,employees:publication.snapshot.employees.filter(e=>active.has(Number(e.id))).map(e=>({
     id:Number(e.id),name:e.name,role:e.role,rank:e.display_rank,
     shifts:publication.snapshot.shifts.filter(s=>Number(s.employee_id)===Number(e.id)).map(s=>({dayIndex:Number(s.day_index),startMinute:Number(s.start_minute),endMinute:Number(s.end_minute),role:s.role,training:!!s.training,trainingMinutes:s.training_minutes??null,...serviceShiftTiming(Number(s.start_minute),Number(s.end_minute),s.absence)}))

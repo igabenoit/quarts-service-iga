@@ -444,7 +444,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       const keys=new Set([r.key,...personalRows.flatMap(row=>row.cells.filter(c=>isTimedCell(c)&&c.workDepartment).map(c=>c.workDepartment))]);
       for(const key of keys){const d=departments.find(d=>d.key===key);if(!d)continue;const k=iso(r.week_start)+':'+d.id,previous=schedules.get(k);if(!previous||new Date(previous.publishedAt)<new Date(r.published_at))schedules.set(k,{departmentId:d.id,name:d.name,key,weekStart:iso(r.week_start),publishedAt:r.published_at});}
     }
-    const service=(await pool.query('SELECT week_start,token FROM schedule_public_links ORDER BY week_start DESC LIMIT 8')).rows;
+    const service=(await pool.query('SELECT week_start,token FROM schedule_employee_links WHERE employee_id=$1 ORDER BY week_start DESC LIMIT 8',[req.employee?.service_employee_id])).rows;
     res.json({today:today(),employeeName:req.employee?.name||'',schedules:[...schedules.values()].sort((a,b)=>b.weekStart.localeCompare(a.weekStart)||a.name.localeCompare(b.name,'fr-CA')),service:(req.employee&&!req.employee.service_employee_id?[]:service).map(r=>({weekStart:iso(r.week_start),path:'/h/'+r.token}))});
   }));
   app.get('/api/leave/department-schedules/:id/:week',employeePortal.requireEmployee,endpoint(async(req,res)=>{

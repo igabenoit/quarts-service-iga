@@ -87,6 +87,8 @@ async function load(){
     document.querySelector("#status").textContent=selectedId===null?"Commence à écrire ton nom, puis sélectionne-le dans la liste.":"Horaire actualisé.";
   }catch(error){
     schedule=null;selectedId=null;card.replaceChildren();hideSuggestions();
+    document.querySelector("#period").textContent="";
+    document.querySelector(".toolbar").hidden=true;
     document.querySelector("#status").textContent=error.message;
   }
 }
