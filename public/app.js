@@ -176,6 +176,45 @@ function sharedServiceDayLabel(shift){
   const parts=employeeId?serviceDayPortions(state,employeeId,shift.dayIndex):[];
   return parts.length?'<small class="shared-workday">'+parts.map(p=>escapeHtml(p.label)+' '+timeText(p.startMinute)+'–'+timeText(p.endMinute)).join(' / ')+' · Service '+timeText(shift.startMinute)+'–'+timeText(shift.endMinute)+' · '+durationText(parts.reduce((n,p)=>n+p.paidMinutes,shift.paidMinutes))+' total</small>':'';
 }
+function shiftTimeInput(value){
+  return String(Math.floor(value/60)%24).padStart(2,"0")+":"+String(value%60).padStart(2,"0");
+}
+function bindScheduleEditors(){
+  for(const form of document.querySelectorAll(".schedule-time-editor")){
+    const id=Number(form.dataset.id);
+    const shift=state.shifts.find(item=>item.id===id);
+    const remove=form.querySelector(".remove-scheduled-shift");
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      const startMinute=minutes(form.elements.start.value);
+      const endMinute=minutes(form.elements.end.value)||1440;
+      const week=state.weekStart;
+      form.querySelector("fieldset").disabled=true;
+      try{
+        const result=await api(`/api/shifts/${id}`,{method:"PUT",body:JSON.stringify({...shift,startMinute,endMinute})});
+        if(state.weekStart!==week)return;
+        state.shifts=state.shifts.map(item=>item.id===id?result.shift:item);
+        if(Number($("#shiftId").value)===id)resetForm();
+        render();toast("Heures du quart enregistrées");
+      }catch(error){showError(error);}
+      finally{form.querySelector("fieldset").disabled=false;}
+    };
+    remove.onclick=async()=>{
+      if(!confirm(`Supprimer le quart de ${dayNames[shift.dayIndex].toLowerCase()} de ${timeText(shift.startMinute)} à ${timeText(shift.endMinute)} ?`))return;
+      const week=state.weekStart;
+      form.querySelector("fieldset").disabled=true;
+      try{
+        await api(`/api/shifts/${id}`,{method:"DELETE"});
+        if(state.weekStart!==week)return;
+        state.shifts=state.shifts.filter(item=>item.id!==id);
+        state.assignments=state.assignments.filter(item=>item.shiftId!==id);
+        if(Number($("#shiftId").value)===id)resetForm();
+        render();toast("Quart supprimé");
+      }catch(error){showError(error);}
+      finally{form.querySelector("fieldset").disabled=false;}
+    };
+  }
+}
 function renderSchedule(){
   const leaveRows=state.employees.flatMap(e=>Array.from({length:7},(_,day)=>approvedForDay(e.id,day).map(p=>`<li>${escapeHtml(e.name)} · ${fmtDate.format(new Date(p.date+'T12:00:00Z'))} · ${p.allDay?'Journée complète':timeText(p.startMinute)+' à '+timeText(p.endMinute)}</li>`)).flat());
   $("#approvedLeaveSummary").innerHTML=leaveRows.length?'<h3>Congés approuvés cette semaine</h3><ul>'+leaveRows.join('')+'</ul>':'';
@@ -185,8 +224,9 @@ function renderSchedule(){
   $("#permanentAvailabilityWarnings").innerHTML=availabilityConflicts.length?"<h3>Disponibilités modifiées — quarts à vérifier</h3><p>Ces affectations sont conservées. Choisissez un autre quart ou un remplaçant.</p><ul>"+availabilityConflicts.map(({employee:e,shift:s})=>`<li>${escapeHtml(e.name)} · ${shortDays[s.dayIndex]} ${timeText(s.startMinute)}–${timeText(s.endMinute)}</li>`).join("")+"</ul>":"";
   const missing=state.shifts.filter(s=>!assignedName(s.id));
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
-  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day">${salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}</h4>${state.employees.filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<label class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><span>${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${s.training?" · Formation"+(s.trainingMinutes!=null?" "+(s.trainingMinutes/60).toLocaleString("fr-CA")+" h":""):""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</span><select data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></label>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
+  $("#scheduleBoard").innerHTML=scheduleGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>`<div class="schedule-day">${salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}</h4>${state.employees.filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${state.shifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<div class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}"><details class="schedule-time-details"><summary title="Modifier ou supprimer ce quart">${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${s.training?" · Formation"+(s.trainingMinutes!=null?" "+(s.trainingMinutes/60).toLocaleString("fr-CA")+" h":""):""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</summary><form class="schedule-time-editor" data-id="${s.id}"><fieldset><label>Début<input type="time" name="start" required value="${shiftTimeInput(s.startMinute)}"></label><label>Fin<input type="time" name="end" required value="${shiftTimeInput(s.endMinute)}"></label><button type="submit">Enregistrer</button><button type="button" class="remove-scheduled-shift">Supprimer le quart</button></fieldset></form></details><select aria-label="Employé affecté au quart" data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></div>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
   $("#employeeTotals").innerHTML="<h3>Heures par employé</h3>"+scheduleGroups.map(group=>`<div class="total-group"><strong>${group.title}</strong>${state.employees.filter(e=>group.roles.includes(e.role)&&state.assignments.some(a=>a.employeeId===e.id)).map(e=>{const paid=state.assignments.filter(a=>a.employeeId===e.id).reduce((sum,a)=>sum+(state.shifts.find(s=>s.id===a.shiftId)?.paidMinutes||0),0);return `<span>${escapeHtml(e.name)} : ${durationText(paid)} / ${durationText(e.targetMinutes)} souhaitées</span>`;}).join("")||"<span>Aucun quart attribué</span>"}</div>`).join("");
+  bindScheduleEditors();
   document.querySelectorAll(".schedule-item select").forEach(select=>select.onchange=protectAction(async()=>{
     const message=$("#assignmentMessage");message.hidden=true;message.textContent="";
     const employee=state.employees.find(e=>e.id===Number(select.value));
