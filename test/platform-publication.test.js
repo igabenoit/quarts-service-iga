@@ -30,6 +30,18 @@ test('Service publication remains frozen for employee, family and store until ex
     const employeeCookie=(await f.call('POST','/api/employee-portal/access',{body:{code:'009876'}})).cookie;
     assert.deepEqual((await f.call('GET','/api/leave/department-schedules',{cookie:employeeCookie})).body.service,[]);
     const published=await manage('PUT',`/api/weeks/${week}/share-link`,{});assert.equal(published.status,200);const token=published.body.path.split('/').pop();
+    // Keep the authenticated session while changing its store, as on a transfer.
+    await f.query("INSERT INTO schedule_stores(id) VALUES ('autre')");
+    await f.query("UPDATE schedule_employees SET store_id='autre' WHERE id=$1",[employee.body.employee.id]);
+    const protectedPath='/api/public-schedules/'+token;
+    const denied=await f.call('GET',protectedPath,{cookie:employeeCookie});
+    assert.equal(denied.status,404);
+    assert.deepEqual(denied.body,{error:'Lien désactivé ou invalide.'});
+    assert.deepEqual((await f.call('GET','/api/leave/department-schedules',{cookie:employeeCookie})).body.service,[]);
+    assert.equal((await f.call('POST',protectedPath+'/views',{cookie:employeeCookie,body:{}})).status,404);
+    assert.equal((await f.call('GET',protectedPath+'/leave-form',{cookie:employeeCookie})).status,404);
+    assert.equal((await manage('PUT',`/api/weeks/${week}/share-link`,{})).status,409);
+    await f.query("UPDATE schedule_employees SET store_id='principal' WHERE id=$1",[employee.body.employee.id]);
     const personal=()=>f.call('GET','/api/public-schedules/'+token,{cookie:employeeCookie});
     assert.equal((await personal()).body.employees[0].shifts[0].startMinute,480);
     assert.equal((await personal()).body.employees[0].shifts[0].training,true);
@@ -40,7 +52,7 @@ test('Service publication remains frozen for employee, family and store until ex
     await f.stop();await f.start();assert.equal((await personal()).body.employees[0].shifts[0].startMinute,480);
     assert.equal((await manage('PUT',`/api/weeks/${week}/share-link`,{})).body.path,published.body.path);
     assert.equal((await personal()).body.employees[0].shifts[0].startMinute,600);
-    assert.equal((await f.call('GET','/h/'+token)).headers.get('location'),'/horaires-departements');
+    assert.equal((await f.call('GET','/h/'+token)).status,200);
     assert.equal((await manage('DELETE',`/api/weeks/${week}/share-link`)).status,200);
     assert.equal((await personal()).status,404);
   }finally{await f.close();}

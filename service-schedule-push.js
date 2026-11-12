@@ -65,7 +65,11 @@ export async function createSchedulePush(pool,{tables,pushTables,credential,send
           const sub=(await pool.query(`SELECT * FROM ${tables.subscriptions} WHERE id=$1`,[job.subscription_id])).rows[0];
           // Active Service managers receive the same notices; temporary guests remain excluded.
           if(!sub||await credential(sub.owner_key,{includeGuests:false})!==sub.credential_hash){await remove();return;}
-          if(!(await pool.query('SELECT 1 FROM schedule_public_links WHERE week_start=$1',[job.week_start])).rows.length){await remove();return;}
+          const link=await pool.query(`SELECT 1 FROM schedule_public_links l WHERE l.week_start=$1
+            AND ($2::text NOT LIKE 'employee:%' OR EXISTS (
+              SELECT 1 FROM schedule_store_people p JOIN schedule_employees e ON e.id=p.service_employee_id
+              WHERE 'employee:'||p.id=$2 AND e.store_id=l.store_id))`,[job.week_start,sub.owner_key]);
+          if(!link.rowCount){await remove();return;}
           const week=typeof job.week_start==='string'?job.week_start.slice(0,10):job.week_start.toISOString().slice(0,10);
           const payload=JSON.stringify({kind:'schedule-'+job.kind,week,tag:'service-schedule-'+job.event_id});
           const age=Math.floor((Date.now()-new Date(job.created_at).getTime())/1000);

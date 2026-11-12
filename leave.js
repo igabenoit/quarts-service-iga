@@ -55,9 +55,9 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   async function staff(request,response,next) {
     try {
       if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({error:'Lien invalide.'});
-      const link = await pool.query('SELECT 1 FROM schedule_public_links WHERE token=$1',[request.params.token]);
+      const link = await pool.query('SELECT 1 FROM schedule_employee_links WHERE token=$1 AND employee_id=$2',[request.params.token,request.employee.service_employee_id]);
       if (!link.rowCount)return response.status(404).json({error:'Lien invalide.'});
-      return requireStoreStaff(request,response,next);
+      return next();
     } catch {response.status(500).json({error:'Impossible de vérifier l’accès.'});}
   }
   const noStore=(_req,res,next)=>{res.set('Cache-Control','no-store');next();};
@@ -71,7 +71,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       res.set('Cache-Control','no-store').json({departments:(await departments.list()).filter(d=>d.active).map(d=>({id:d.id,name:d.name,isService:d.code==='service'})),nameEntry:store?'manual':'list',employees:people,earliest:earliestLeaveDate(clock),isTest:test,timeZone:'America/Toronto'});
     } catch {res.status(500).json({error:'Impossible de charger le formulaire.'});}
   };
-  app.get('/api/public-schedules/:token/leave-form',staff,ownRequest,formInfo(false));
+  app.get('/api/public-schedules/:token/leave-form',requireStoreStaff,staff,ownRequest,formInfo(false));
   app.get('/api/leave/test-form',requireManager,formInfo(true));
   app.get('/api/leave/form',requireLeaveStaff,ownRequest,formInfo(false,true));
   const submit = (isTest,store=false) => async (req,res)=>{
@@ -118,7 +118,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       res.status(500).json({error:'L’envoi n’a pas pu être confirmé. Réessayez sans fermer le formulaire.'});
     } finally {client.release();}
   };
-  app.post('/api/public-schedules/:token/leave-requests',sameOrigin,staff,ownRequest,submit(false));
+  app.post('/api/public-schedules/:token/leave-requests',sameOrigin,requireStoreStaff,staff,ownRequest,submit(false));
   app.post('/api/leave/submit',requireLeaveStaff,sameOrigin,ownRequest,submit(false,true));
   app.post('/api/leave/test-requests',requireManager,sameOrigin,submit(true));
   app.get('/api/leave/requests',requireManager,async(req,res)=>{

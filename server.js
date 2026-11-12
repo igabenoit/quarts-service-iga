@@ -709,7 +709,8 @@ app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (r
     await assertServiceRevision(client,request.params.weekStart,request);
     await ensureWeek(request.params.weekStart,client);
     const token = crypto.randomBytes(32).toString("base64url");
-    const result = await client.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash) VALUES ($1,$2,$3)
+    const result = await client.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash,store_id)
+      SELECT week_start,$2,$3,store_id FROM schedule_weeks WHERE week_start=$1
       ON CONFLICT (week_start) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'']);
     const notification=await publishServiceWeek(client,request.params.weekStart);
     if(notification)await chatPush.enqueueSchedule(client,request.params.weekStart,notification);
@@ -746,7 +747,7 @@ app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, 
 app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
-    const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
+    const link = await pool.query("SELECT week_start FROM schedule_employee_links WHERE token=$1 AND employee_id=$2", [request.params.token,request.employee.service_employee_id]);
     if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
     if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
@@ -760,20 +761,13 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
 app.post("/api/public-schedules/:token/views", sameOrigin, employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
-    const link = await pool.query("SELECT week_start,access_code_hash FROM schedule_public_links WHERE token=$1", [request.params.token]);
-    if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
-    if (!request.employee.service_employee_id)
-      return response.status(401).json({ error: "Code requis." });
-    const employeeId = Number(request.employee.service_employee_id);
-    if (!Number.isSafeInteger(employeeId) || employeeId <= 0) return response.status(400).json({ error: "Employé invalide." });
-    const weekStart = isoDate(link.rows[0].week_start);
-    const employee = await pool.query(`SELECT 1 FROM schedule_employees e WHERE e.id=$1 AND
-      (e.active=TRUE OR EXISTS (SELECT 1 FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-        WHERE a.employee_id=e.id AND s.week_start=$2))`, [employeeId, weekStart]);
-    if (!employee.rowCount) return response.status(404).json({ error: "Employé introuvable." });
-    await pool.query(`INSERT INTO schedule_schedule_views (week_start,employee_id) VALUES ($1,$2)
+    const viewed=await pool.query(`INSERT INTO schedule_schedule_views (week_start,employee_id)
+      SELECT l.week_start,e.id FROM schedule_employee_links l JOIN schedule_employees e ON e.id=l.employee_id
+      WHERE l.token=$1 AND e.id=$2 AND (e.active OR EXISTS (SELECT 1 FROM schedule_assignments a
+        JOIN schedule_shifts s ON s.id=a.shift_id WHERE a.employee_id=e.id AND s.week_start=l.week_start))
       ON CONFLICT (week_start,employee_id) DO UPDATE SET last_viewed_at=NOW(),
-      view_count=schedule_schedule_views.view_count+1`, [weekStart, employeeId]);
+      view_count=schedule_schedule_views.view_count+1 RETURNING employee_id`, [request.params.token,request.employee.service_employee_id]);
+    if(!viewed.rowCount)return response.status(404).json({error:"Lien désactivé ou invalide."});
     response.set("Cache-Control", "no-store").json({ ok:true });
   } catch { response.status(500).json({ error: "Impossible d’enregistrer la consultation." }); }
 });
@@ -781,7 +775,7 @@ app.post("/api/public-schedules/:token/access", sameOrigin, employeePortal.login
 app.get("/h/:token", (request, response) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).send("Lien invalide.");
   response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" });
-  response.redirect(302,"/horaires-departements");
+  response.sendFile("horaire.html",{root:"public"});
 });
 
 installSalesForecasts(app,{requireManager,pool});
