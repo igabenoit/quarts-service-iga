@@ -1,3 +1,4 @@
+import {originalName,installDocumentUploads,installDocumentUploadSchema} from './document-uploads.js';
 import {sendPrivateBytes} from './private-response.js';
 import {saveDirectionSignature} from './onboarding/ethics-source.js';
 import {installSingleTrial} from './onboarding/single-trial.js';
@@ -53,7 +54,8 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  CREATE INDEX IF NOT EXISTS employee_file_employee ON employee_file_assignments(employee_key);
  CREATE OR REPLACE FUNCTION employee_file_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Employee file history is append-only'; END $$;`);
  if(pool && !process.env.VERCEL)for(const table of ['employee_file_originals','employee_file_links','employee_file_events','employee_file_templates','employee_file_privacy','employee_file_campaigns','employee_file_policies','employee_file_acknowledgements','employee_file_privacy_incidents'])await pool.query(`DROP TRIGGER IF EXISTS employee_file_immutable_trigger ON ${table}; CREATE TRIGGER employee_file_immutable_trigger BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION employee_file_immutable();`);
- if(pool && !process.env.VERCEL)await pool.query(`REVOKE ALL ON SCHEMA employee_files_private FROM PUBLIC; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON SCHEMA employee_files_private FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON SCHEMA employee_files_private FROM authenticated; END IF; END $$;`);
+ if(pool && !process.env.VERCEL)await installDocumentUploadSchema(pool);
+ if(pool && !process.env.VERCEL && !storageStatus.synthetic)await pool.query(`REVOKE ALL ON SCHEMA employee_files_private FROM PUBLIC; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON SCHEMA employee_files_private FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON SCHEMA employee_files_private FROM authenticated; END IF; END $$;`);
  // Mount only after schema initialization succeeds, so startup can safely retry
  // in consultation-only mode without leaving a partially initialized router.
  const trialReminders=trialPool ? await installSingleTrial(app,trialPool,{managerAccess,wrap,date}) : undefined;
@@ -141,7 +143,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   await saveDirectionSignature(req.body?.strokes,req.ef.audit);
   res.json({ok:true});
  }));
- const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date});
+ const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,synthetic:storageStatus.synthetic});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));
  app.get(BASE+'/assignments/:id',auth,wrap(async(req,res)=>{const {row}=await assignment(req.ef,req.params.id,await directory());const history=(await pool.query('SELECT action,actor,created_at,data FROM employee_file_events WHERE assignment_id=$1 ORDER BY id',[row.id])).rows;res.json({assignment:row,originals:await originals(row.id),history});}));
@@ -172,9 +174,35 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  app.post(BASE+'/assignments/:id/sign',auth,origin,wrap(async(req,res)=>{const dir=await directory();const result=await transaction(async db=>{const {row,e}=await assignment(req.ef,req.params.id,dir,db);if(req.ef.view!=='employe')fail('La signature doit être confirmée par l’employé connecté.',403);if(!['missing','draft'].includes(row.status)||row.version!==req.body.version)fail('Ce document a changé ou est déjà signé.',409);if(req.body.confirmed!==true||str(req.body.name,180)!==e.name)fail('Confirmez votre texte et saisissez votre nom tel qu’affiché.');const answers=validateAnswers(row.fields,req.body.answers,true),stamp=(await db.query('SELECT clock_timestamp() AS now')).rows[0].now;
    const pdf=new jsPDF(),lines=[row.title,'IGA Extra Famille Benoit',e.name,'Modèle · version '+row.template_version,'',row.body,'',...row.fields.flatMap(f=>[f.label,String(answers[f.id]===true?'Oui':answers[f.id]===false?'Non':answers[f.id]),'']),'Confirmation personnelle : '+e.name,'Je confirme avoir relu et approuvé les renseignements ci-dessus.','Horodatage serveur (UTC) : '+new Date(stamp).toISOString(),'Identifiant de la fiche : '+row.id];let y=18;pdf.setFontSize(11);for(const line of lines){for(const part of pdf.splitTextToSize(line,175)){if(y>276){pdf.addPage();y=18;}pdf.text(part,18,y);y+=6;}}const bytes=Buffer.from(pdf.output('arraybuffer'));
    const original=await saveOriginal(db,req.ef,e,row.category,bytes,{name:row.title+'.pdf',mime:'application/pdf',provenance:'Formulaire confirmé personnellement dans le portail',documentDate:today(),signatureKind:'portal_confirmation'});await db.query('UPDATE employee_file_assignments SET draft=$1 WHERE id=$2',[json(answers),row.id]);await link(db,req.ef,row,original,'Confirmation personnelle','signed');await event(db,req.ef,'signed',{answers,templateId:row.template_id,confirmedText:'Je confirme avoir relu et approuvé les renseignements ci-dessus.',serverTimestamp:stamp,originalId:original.id},row.id);return {id:original.id};});res.status(201).json(result);}));
- app.post(BASE+'/assignments/:id/originals',auth,origin,express.raw({type:'application/octet-stream',limit:'12mb'}),wrap(async(req,res)=>{
-  const bytes=req.body;if(!Buffer.isBuffer(bytes)||!bytes.length)fail('Choisissez un fichier non vide.');let name;try{name=decodeURIComponent(req.get('x-filename')||'').replaceAll('\\','/').split('/').at(-1).replace(/[\x00-\x1f]/g,'').slice(0,180);}catch{fail('Nom de fichier invalide.');}if(!name)fail('Nom de fichier requis.');const mime=sstFileMime(bytes,name),documentDate=date(req.query.documentDate);if(documentDate&&documentDate>today())fail('La date du document ne peut pas être future.');const provenance=str(req.query.provenance),reason=str(req.query.reason);if(!provenance)fail('Indiquez la provenance de la pièce.');const dir=await directory();
-  const result=await transaction(async db=>{const {row,e}=await assignment(req.ef,req.params.id,dir,db);if(row.version!==Number(req.query.version))fail('Ce dossier a changé. Rechargez-le.',409);const prior=await originals(row.id,db);if(prior.length&&!reason)fail('Indiquez le motif de la nouvelle pièce; l’original reste conservé.');const original=await saveOriginal(db,req.ef,e,row.category,bytes,{name,mime,documentDate,provenance,signatureKind:req.query.signed==='true'?'paper_declared':'supporting'});await link(db,req.ef,row,original,reason,'review');return {id:original.id};});res.status(201).json(result);
+ function originalOptions(req) {
+   const documentDate=date(req.query.documentDate),provenance=str(req.query.provenance);
+   if(documentDate && documentDate>today()) fail('La date du document ne peut pas être future.');
+   if(!provenance) fail('Indiquez la provenance de la pièce.');
+   return {documentDate,provenance,reason:str(req.query.reason),version:Number(req.query.version),signed:req.query.signed==='true'};
+ }
+ async function authorizeOriginal(db,req) {
+   return assignment(req.ef,req.params.id,await directory(),db);
+ }
+ async function fileOriginal(db,req,{row,e},bytes,name,metadata) {
+   if(row.version!==metadata.version) fail('Ce dossier a changé. Rechargez-le.',409);
+   const prior=await originals(row.id,db);
+   if(prior.length && !metadata.reason) fail('Indiquez le motif de la nouvelle pièce; l’original reste conservé.');
+   const original=await saveOriginal(db,req.ef,e,row.category,bytes,{name,mime:sstFileMime(bytes,name),
+     documentDate:metadata.documentDate,provenance:metadata.provenance,signatureKind:metadata.signed?'paper_declared':'supporting'});
+   await link(db,req.ef,row,original,metadata.reason,'review');
+   return original.id;
+ }
+ const originalPath=BASE+'/assignments/:id/originals';
+ if(pool) installDocumentUploads(app,{path:originalPath,auth,origin,wrap,transaction,pool,
+   owner:req=>JSON.stringify([req.ef.audit.kind,req.ef.audit.id,req.ef.view]),target:req=>req.params.id,
+   options:originalOptions,authorize:authorizeOriginal,save:fileOriginal});
+ app.post(originalPath,auth,origin,express.raw({type:'application/octet-stream',limit:'12mb'}),wrap(async(req,res)=>{
+   const bytes=req.body;
+   if(!Buffer.isBuffer(bytes)||!bytes.length) fail('Choisissez un fichier non vide.');
+   const name=originalName(req,'');
+   const metadata=originalOptions(req);
+   const id=await transaction(async db=>fileOriginal(db,req,await authorizeOriginal(db,req),bytes,name,metadata));
+   res.status(201).json({id});
  }));
  app.post(BASE+'/assignments/:id/review',auth,origin,wrap(async(req,res)=>{const dir=await directory();await transaction(async db=>{const {row}=await assignment(req.ef,req.params.id,dir,db);if(['employe','sst'].includes(req.ef.view))fail('Révision réservée au responsable autorisé.',403);if(row.version!==req.body.version)fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason||!['filed','review'].includes(req.body.status)||!(await originals(row.id,db)).length)fail('Indiquez le résultat et le motif de la vérification.');await db.query('UPDATE employee_file_assignments SET status=$1,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[req.body.status,row.id]);await event(db,req.ef,'reviewed',{status:req.body.status,reason},row.id);});res.json({ok:true});}));
  app.post(BASE+'/assignments/:id/renew',auth,origin,wrap(async(req,res)=>{const dir=await directory();const id=await transaction(async db=>{const {row,e}=await assignment(req.ef,req.params.id,dir,db);const ts=await templates(db),t=latest(ts).find(t=>t.family_id===row.family_id);if(!t?.published||!templateAllowed(req.ef,t,e))fail('Nouvelle attribution non autorisée.',403);if(row.version!==req.body.version||row.status==='superseded')fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason)fail('Indiquez le motif de la mise à jour.');const id=randomUUID();await db.query('INSERT INTO employee_file_assignments(id,employee_key,template_id,workflow,due_date,actor) VALUES($1,$2,$3,$4,$5,$6)',[id,e.key,t.id,'update',date(req.body.dueDate),json(req.ef.audit)]);await db.query("UPDATE employee_file_assignments SET status='superseded',version=version+1 WHERE id=$1",[row.id]);await event(db,req.ef,'renewed',{newAssignmentId:id,reason},row.id);await event(db,req.ef,'assigned',{previousAssignmentId:row.id,reason},id);return id;});res.status(201).json({id});}));

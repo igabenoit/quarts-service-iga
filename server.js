@@ -3,7 +3,8 @@ import {needsSchema,isPreparingPreview,usePreparedSchema} from './preview-schema
 import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
-import {employeeFilesStorage} from './employee-files-storage.js';
+import {employeeFilesStorage,previewEmployeeFilesStorage} from './employee-files-storage.js';
+import {clearExpiredDocuments} from './document-uploads.js';
 import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
 import {installInspectionGrid} from './inspection-grid.js';
@@ -546,7 +547,16 @@ await installEquipmentTraining(app,pool,sstService);
 await installPreventionProgram(app,pool,sstService);
 let employeeVault;
 let onboardingReminders;
-try{employeeVault=process.env.VERCEL && (process.env.VERCEL_ENV!=='production' || preparation) ? {pool:null,trialPool:null,status:{ready:false,message:'Le coffre RH est fermé dans la préversion de migration.'}} : await employeeFilesStorage();}catch{logEvent('employee_vault_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien est indisponible ou sa configuration est incomplète. Aucune nouvelle saisie n’est permise.'}};}
+try {
+  if(process.env.VERCEL && (preparation || process.env.VERCEL_ENV!=='production')) {
+    employeeVault=!preparation && process.env.QUART_PREVIEW_VAULT_SCHEMA
+      ? await previewEmployeeFilesStorage()
+      : {pool:null,status:{ready:false,message:'Le coffre RH est fermé dans cette préversion.'}};
+  } else employeeVault=await employeeFilesStorage();
+} catch {
+  logEvent('employee_vault_unavailable',{},'error');
+  employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien est indisponible ou sa configuration est incomplète. Aucune nouvelle saisie n’est permise.'}};
+}
 try{onboardingReminders=await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,vaultPool:employeeVault.pool,trialPool:employeeVault.trialPool,storageStatus:employeeVault.status});}
 catch{await employeeVault.trialPool?.end();await employeeVault.pool?.end();logEvent('employee_vault_schema_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien n’a pas pu être initialisé. Les dossiers sont en consultation seulement; le portail SST reste disponible.'}};await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,storageStatus:employeeVault.status});}
 app.get('/api/access-session',async(req,res)=>{
@@ -832,11 +842,17 @@ app.use((error,_req,res,_next)=>{
   if(!res.headersSent)res.status(error.status>=400&&error.status<500?error.status:500).json({error:'Service temporairement indisponible. Réessayez.'});
 });
 export default app;
+async function clearDocumentUploads(){
+  await clearExpiredDocuments(pool);
+  if(employeeVault.pool) await clearExpiredDocuments(employeeVault.pool);
+}
+if(runsInWebProcess()) setInterval(()=>clearDocumentUploads().catch(error=>logEvent('document_upload_cleanup_failed',{code:errorCode(error)},'error')),3600000).unref();
 if (preparation) await installScheduledWorkSchema(pool);
 export function runPeriodicTasks(executionId) {
   return runScheduledWork(pool,executionId,{
     departures:departmentService.finishDueDepartures,
     photoUploads:()=>clearExpiredPhotoUploads(pool),
+    documentUploads:clearDocumentUploads,
     ...leaveAccess.periodic,
     ...(onboardingReminders ? {onboarding:onboardingReminders} : {}),
     notifications:chatPush.drain,

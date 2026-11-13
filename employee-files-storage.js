@@ -1,4 +1,18 @@
 import pg from 'pg';
+import {schedulePoolConfig,verifyPreviewDatabase} from './schedule-database.js';
+
+// An explicitly enabled synthetic vault has its own search path on the test project.
+export async function previewEmployeeFilesStorage(env=process.env) {
+ const schema='quart_rh_fixture';
+ if (env.VERCEL_ENV!=='preview' || env.QUART_PREVIEW_VAULT_SCHEMA!==schema ||
+     env.QUART_PREVIEW_SCHEMA===schema || env.QUART_PREVIEW_PROJECT_REF!=='rhjzjdvrxcrybnxnlzdi')
+   throw Error('Coffre fictif de préversion non configuré.');
+ const config={...env,QUART_PREVIEW_SCHEMA:schema};
+ const pool=new pg.Pool(schedulePoolConfig(config));
+ try { await verifyPreviewDatabase(pool,config);await verifyVercelVault(pool,schema,false); }
+ catch(error){await pool.end();throw error;}
+ return {pool,status:{ready:true,synthetic:true,region:'ca-central-1',message:'Coffre de préversion · fichiers fictifs.'}};
+}
 
 async function verifyVercelVault(pool,schema,trial){
  const required=trial ? ['employee_file_originals','onboarding_cases','onboarding_docs'] :

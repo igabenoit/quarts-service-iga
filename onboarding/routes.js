@@ -18,12 +18,12 @@ const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 
-export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,trial=null}){
+export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,trial=null,synthetic=false}){
  if(!pool)return;
  if(!process.env.VERCEL)await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_cases(employee_key text PRIMARY KEY ${trial?"CHECK(employee_key='trial:unique')":''}, nonce text, token_hash text UNIQUE, generation integer NOT NULL DEFAULT 0, invited_at timestamptz, activity timestamptz, due date, reminder_at timestamptz, reminded boolean DEFAULT false, completed_at timestamptz, notified boolean DEFAULT false, employee_email text, manager_email text);
  CREATE TABLE IF NOT EXISTS onboarding_docs(employee_key text REFERENCES onboarding_cases, kind text, draft jsonb DEFAULT '{}', version integer DEFAULT 0, original_id uuid REFERENCES employee_file_originals, PRIMARY KEY(employee_key,kind));
  ALTER TABLE onboarding_docs ADD COLUMN IF NOT EXISTS invited boolean NOT NULL DEFAULT true`);
- const drain=process.env.RESEND_API_KEY && process.env.SESSION_SECRET ? ()=>sendPending(pool,{trial}) : undefined;
+ const drain=!synthetic && process.env.RESEND_API_KEY && process.env.SESSION_SECRET ? ()=>sendPending(pool,{trial}) : undefined;
  if(runsInWebProcess() && drain){
   const timer=setInterval(()=>drain().catch(()=>{}),60000);timer.unref();
  }
