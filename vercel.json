@@ -13,6 +13,7 @@
     {"source": "/discussion", "destination": "/discussion.html"},
     {"source": "/departements", "destination": "/departements.html"},
     {"source": "/sst", "destination": "/sst.html"},
+    {"source": "/connexion", "destination": "/connexion.html"},
     {"source": "/connexion-employe", "destination": "/connexion-employe.html"},
     {"source": "/cles-employes", "destination": "/cles-employes.html"},
     {"source": "/h/:token([A-Za-z0-9_-]{43})", "destination": "/horaire.html"},
