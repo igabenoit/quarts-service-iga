@@ -1,3 +1,4 @@
+import {runsInWebProcess} from './scheduled-work.js';
 import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
@@ -100,7 +101,7 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
       const r=(await client.query(`INSERT INTO schedule_availability_requests(submission_key,employee_id,employee_name,email,effective_date,target_minutes,availability,acknowledged,rule_version,comments,is_test,department_id,department_name,employee_name_key,person_id)
         VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,[b.submissionKey,e.id,e.name,data.email,data.effectiveDate,data.targetMinutes,JSON.stringify(data.availability),RULE_VERSION,data.comments,test,department.id,department.name,employeeNameKey,test?null:req.requestPerson.personId])).rows[0];
       await client.query("INSERT INTO schedule_availability_events(request_id,status) VALUES($1,'pending')",[r.id]);await mail.queue(client,r.id,'submitted');
-      await client.query('COMMIT');mail.run().catch(()=>{});res.status(201).json({id:r.id,isTest:test,status:'pending',message:service?'Demande reçue. Vos disponibilités seront modifiées après approbation, à la date effective indiquée.':'Demande reçue pour le département '+department.name+'. Elle sera transmise par courriel au responsable selon les réglages des congés, pour approbation.'});
+      await client.query('COMMIT');if (runsInWebProcess()) mail.run().catch(()=>{});res.status(201).json({id:r.id,isTest:test,status:'pending',message:service?'Demande reçue. Vos disponibilités seront modifiées après approbation, à la date effective indiquée.':'Demande reçue pour le département '+department.name+'. Elle sera transmise par courriel au responsable selon les réglages des congés, pour approbation.'});
     }catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(400).json({error:error.code?'Impossible d’enregistrer la demande. Actualisez le formulaire et réessayez.':error.message});}finally{client.release();}
   };
   app.post(base+'/submit',requireStaff,sameOrigin,ownRequest,submit(false));app.post(base+'/test-submit',requireManager,sameOrigin,submit(true));
@@ -152,8 +153,9 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
       await client.query('UPDATE schedule_availability_requests SET status=$1,decision_note=$2,decided_at=clock_timestamp(),version=version+1 WHERE id=$3',[b.status,note,r.id]);
       await client.query('INSERT INTO schedule_availability_events(request_id,status,note) VALUES($1,$2,$3)',[r.id,b.status,note]);
       if(b.status==='approved')await mail.queue(client,r.id,'approved');
-      await client.query('COMMIT');mail.run().catch(()=>{});res.json({ok:true});
+      await client.query('COMMIT');if (runsInWebProcess()) mail.run().catch(()=>{});res.json({ok:true});
     }catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(409).json({error:error.code?'Impossible d’enregistrer la décision. Aucun changement conservé.':error.message});}finally{client.release();}
   });
   for(const [url,file] of [['/disponibilites','disponibilites.html'],['/disponibilites-test','disponibilites.html'],['/disponibilites-gestion','disponibilites-gestion.html']])app.get(url,(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile(file,{root:'public'}));
+  return mail;
 }

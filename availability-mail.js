@@ -1,4 +1,5 @@
-import {isPreparingPreview,needsSchema} from './preview-schema.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 const days=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
@@ -51,6 +52,6 @@ export async function installAvailabilityMail(pool,{autoStart=true,fetchImpl=fet
       }catch(error){logEvent('mail_transaction_failed',{component:'availability',code:errorCode(error)},'error');await client.query('ROLLBACK').catch(()=>{});}finally{client.release();}}
     }finally{running=false;}
   }
-  if(autoStart&&!isPreparingPreview()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error'));}
+  if(autoStart&&runsInWebProcess()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error'));}
   return {run,queue};
 }

@@ -1,3 +1,4 @@
+import {installScheduledWorkSchema,runsInWebProcess,runScheduledWork} from './scheduled-work.js';
 import {needsSchema,isPreparingPreview,usePreparedSchema} from './preview-schema.js';
 import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
@@ -523,8 +524,8 @@ startupPhase('schema_leave');
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,employeeIdentity:req=>employeePortal.identity(req)});
 startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
-if (!isPreparingPreview()){
-  if (!process.env.VERCEL) await departmentService.finishDueDepartures();
+if (runsInWebProcess()){
+  await departmentService.finishDueDepartures();
   setInterval(()=>departmentService.finishDueDepartures().catch(error=>console.error('Fin d’emploi planifiée',error.message)),60000).unref();
 }
 const employeePortal=departmentService.employeePortal;
@@ -825,6 +826,15 @@ app.use((error,_req,res,_next)=>{
   if(!res.headersSent)res.status(error.status>=400&&error.status<500?error.status:500).json({error:'Service temporairement indisponible. Réessayez.'});
 });
 export default app;
+if (preparation) await installScheduledWorkSchema(pool);
+export function runPeriodicTasks(executionId) {
+  return runScheduledWork(pool,executionId,{
+    departures:departmentService.finishDueDepartures,
+    ...leaveAccess.periodic,
+    notifications:chatPush.drain,
+    calendar:departmentService.familyPortal.googleCalendar.run
+  });
+}
 if (preparation) {
   await pool.end();
 } else if (process.env.VERCEL) {

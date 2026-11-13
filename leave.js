@@ -1,3 +1,4 @@
+import {runsInWebProcess} from './scheduled-work.js';
 import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
@@ -52,7 +53,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   const approvalMail=await installApprovalMail(pool);
   const employeeNotices=await installEmployeeNotices(pool);
   await installContacts(app,pool,{requireManager,sameOrigin});
-  await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
+  const availabilityMail=await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
   async function staff(request,response,next) {
     try {
       if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({error:'Lien invalide.'});
@@ -110,8 +111,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       if(saved.rowCount)await mail.queue(client,row.id);
       if(saved.rowCount&&row.status==='late')await employeeNotices.queue(client,row.id,'late');
       await client.query('COMMIT');
-      mail.run().catch(()=>{});
-      employeeNotices.run().catch(()=>{});
+      if (runsInWebProcess()) mail.run().catch(()=>{});
+      if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.set('Cache-Control','no-store').status(row.status==='late'?422:201).json({id:row.id,submittedAt:row.submitted_at,status:row.status,isTest,
         message:row.status==='late'?LATE_MESSAGE+' Un avis de retard est en attente d’envoi à votre adresse courriel.':'Votre demande a été reçue. Elle doit être approuvée par votre gérante.'});
     } catch(error) {
@@ -204,8 +205,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       if(b.status==='approved')await approvalMail.queue(client,row.id);
       if(['refused','conditional'].includes(b.status))await employeeNotices.queue(client,row.id,b.status);
       await client.query('COMMIT');
-      approvalMail.run().catch(()=>{});
-      employeeNotices.run().catch(()=>{});
+      if (runsInWebProcess()) approvalMail.run().catch(()=>{});
+      if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.json({ok:true,corrected:correction,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
   });
@@ -217,7 +218,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row||row.archived_at||row.status!=='late'||row.version!==req.body.version){await client.query('ROLLBACK');return res.status(409).json({error:'La demande a changé. Actualisez le suivi.'});}
       const queued=await employeeNotices.queue(client,row.id,'late');
-      await client.query('COMMIT');employeeNotices.run().catch(()=>{});
+      await client.query('COMMIT');if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.json({ok:true,queued});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible de préparer l’avis de retard.'});}finally{client.release();}
   });
@@ -235,5 +236,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
     finally{client.release();}
   });
   app.get('/h/:token/conges',(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile('conges.html',{root:'public'}));
-  return {requireStaff:requireStoreStaff};
+  return {requireStaff:requireStoreStaff, periodic:{
+    leave_manager:mail.run,leave_approval:approvalMail.run,leave_notice:employeeNotices.run,availability:availabilityMail.run
+  }};
 }

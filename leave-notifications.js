@@ -1,4 +1,5 @@
-import {isPreparingPreview,needsSchema} from './preview-schema.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 // Department recipients and copies are kept in the private database. Tests never use department recipients.
 export async function installNotifications(app,pool,{requireManager,sameOrigin}) {
@@ -24,7 +25,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
     if(copy!==undefined&&(typeof copy!=='string'||copy.length>254||(copy.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(copy.trim()))))return res.status(400).json({error:'Adresse de copie invalide.'});
     await pool.query('UPDATE schedule_leave_mail_settings SET test_recipient=$1,copy_recipient=COALESCE($2,copy_recipient) WHERE id=1',[email,copy===undefined?null:copy.trim()]);
     res.json({ok:true,configured:configured()});
-    run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+    if (runsInWebProcess()) run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
   });
   async function queue(client,id) {
     await client.query(`INSERT INTO schedule_leave_mail (request_id) VALUES ($1) ON CONFLICT DO NOTHING`,[id]);
@@ -65,7 +66,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
       }
     }finally{running=false;}
   }
-  if (!isPreparingPreview()) {
+  if (runsInWebProcess()) {
     const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
   }
   return {queue,run};

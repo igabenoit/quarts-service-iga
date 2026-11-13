@@ -1,4 +1,5 @@
-import {isPreparingPreview,needsSchema} from './preview-schema.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {activePersonSQL} from './employee-access.js';
 import {errorCode,logEvent} from './runtime-diagnostics.js';
 import crypto from 'node:crypto';
@@ -185,9 +186,10 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
         }));
       }
       }
-    }catch(error){logEvent('push_worker_failed',{component:'service_chat',code:errorCode(error)},'error');}finally{running=false;}
+    }finally{running=false;}
   }
-  function kick(){void drain();}
+  const onWorkerError=error=>logEvent('push_worker_failed',{component:'service_chat',code:errorCode(error)},'error');
+  function kick(){if(runsInWebProcess()) void drain().catch(onWorkerError);}
   function installRoutes(app,{auth,sameOrigin}){
     const endpoint=fn=>async(req,res)=>{
       try{await fn(req,res);}catch(error){res.status(error.status||503).json({error:error.status?error.message:'Notifications temporairement indisponibles. Réessaie.'});}
@@ -232,6 +234,6 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
       res.json({ok:true});
     }));
   }
-  const timer=startWorker&&!isPreparingPreview()?setInterval(kick,30000):null;timer?.unref();
+  const timer=startWorker&&runsInWebProcess()?setInterval(kick,30000):null;timer?.unref();
   return {enqueue,enqueueSchedule:schedulePush.enqueue,scheduleInventory:schedulePush.inventory,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
 }

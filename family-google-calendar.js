@@ -1,4 +1,5 @@
-import {isPreparingPreview,needsSchema} from './preview-schema.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import crypto from 'node:crypto';
 import {addDays,monday,today} from './public/departments-core.js';
 
@@ -125,7 +126,7 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
   let running=false;
   async function run(){if(running||!configured)return;running=true;try{const rows=(await pool.query('SELECT g.access_id FROM schedule_family_google g JOIN schedule_family_access a ON a.id=g.access_id WHERE g.enabled AND a.active')).rows;for(const row of rows)try{await sync(Number(row.access_id));}catch(error){logEvent('calendar_sync_failed',{component:'family_google',jobId:String(row.access_id),code:errorCode(error)},'error');}}finally{running=false;}}
   const workerError=error=>logEvent('calendar_worker_failed',{component:'family_google',code:errorCode(error)},'error');
-  const runWorker=startTimer&&!isPreparingPreview();
+  const runWorker=startTimer&&runsInWebProcess();
   const timer=runWorker?setInterval(()=>void run().catch(workerError),120000):null;timer?.unref();
   if(runWorker)void run().catch(workerError);
   return {sync,run,stop:()=>clearInterval(timer)};

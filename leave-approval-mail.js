@@ -1,4 +1,5 @@
-import {isPreparingPreview,needsSchema} from './preview-schema.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {escapeHTML as escape} from './public/departments-core.js';
@@ -107,6 +108,6 @@ export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}=
       }
     }finally{running=false;}
   }
-  if(autoStart&&!isPreparingPreview()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error'));}
+  if(autoStart&&runsInWebProcess()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error'));}
   return {run,queue:queueApprovalMail};
 }
