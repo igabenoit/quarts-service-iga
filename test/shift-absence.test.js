@@ -49,9 +49,9 @@ test('Service create/update handlers persist absence and mapping restores its ca
   const ensureWeek=async(start,client)=>client.query('INSERT INTO schedule_weeks(week_start) VALUES($1) ON CONFLICT DO NOTHING',[start]);
   new Function('app','pool','requireManager','sameOrigin','validDate','normalizeShift','beginUndo','ensureWeek','mapShift','parseMinutes','approvedLeave','conflictsWithLeave','isoDate','shiftWithApprovedLeave','storedShiftAbsence','editedShiftLeave','commitServiceTransaction',code)(app,f.pool,()=>{},()=>{},()=>true,normalizeShift,async()=>{},ensureWeek,mapShift,(v)=>Number(v),async()=>[],conflictsWithLeave,v=>v,shiftWithApprovedLeave,storedShiftAbsence,editedShiftLeave,commitServiceTransaction);
   const response=()=>({status(n){this.code=n;return this;},json(b){this.body=b;return this;}});
-  const r=response();await handlers.get('post /api/weeks/:weekStart/shifts')({params:{weekStart:'2026-10-26'},body:{role:'cashier',startMinute:480,endMinute:1020,days:[3],absence:absence(false)}},r);
+  const r=response();await handlers.get('post /api/weeks/:weekStart/shifts')({storeId:'principal',params:{weekStart:'2026-10-26'},body:{role:'cashier',startMinute:480,endMinute:1020,days:[3],absence:absence(false)}},r);
   assert.equal(r.code,201,JSON.stringify(r.body));assert.equal(r.body.shifts[0].paidMinutes,420);
-  const id=r.body.shifts[0].id,res=response();await handlers.get('put /api/shifts/:id')({params:{id},body:{role:'cashier',startMinute:480,endMinute:1020,dayIndex:3,absence:absence(true)}},res);
+  const id=r.body.shifts[0].id,res=response();await handlers.get('put /api/shifts/:id')({storeId:'principal',params:{id},body:{role:'cashier',startMinute:480,endMinute:1020,dayIndex:3,absence:absence(true)}},res);
   assert.equal(res.body.shift.paidMinutes,480,JSON.stringify(res.body));
   const row=(await f.pool.query('SELECT * FROM schedule_shifts WHERE id=$1',[id])).rows[0];assert.deepEqual(row.absence,absence(true));
  }finally{await f.db.close();}
