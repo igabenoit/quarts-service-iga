@@ -9,6 +9,7 @@
   "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
   "rewrites": [
+    {"source": "/discussion", "destination": "/discussion.html"},
     {"source": "/connexion-employe", "destination": "/connexion-employe.html"},
     {"source": "/cles-employes", "destination": "/cles-employes.html"},
     {"source": "/h/:token([A-Za-z0-9_-]{43})", "destination": "/horaire.html"},
