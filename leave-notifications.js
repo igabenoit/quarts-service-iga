@@ -1,3 +1,4 @@
+import {publicOrigin} from './public-origin.js';
 import {needsSchema} from './preview-schema.js';
 import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
@@ -52,7 +53,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
           ...(!job.is_test&&copy&&copy.toLowerCase()!==to.toLowerCase()?{cc:[copy]}:{}),
           reply_to:job.email,
           subject:`${job.is_test?'[TEST] ':''}Demande de congé n° ${job.request_id} — ${job.department_name}`,
-          text:`${job.is_test?'DEMANDE DE TEST — aucun effet sur les horaires.\n\n':''}Département : ${job.department_name}\nEmployé : ${job.employee_name}\nCourriel : ${job.email}\nRéférence : ${job.request_id}\nRemise : ${new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(job.submitted_at))} (Québec)\n\nDATES ET HEURES\n${periods}\n\nMOTIF\n${job.reason}\n\n${job.request_status==='late'?'Demande hors délai — l’employé doit s’adresser à sa gérante.':'La demande doit être évaluée par le responsable.'}\n\nSuivi central (accès gestionnaire requis) : https://quarts-service-iga.onrender.com/conges-gestion\nLe nom et le département sont déclarés par l’employé.`};
+          text:`${job.is_test?'DEMANDE DE TEST — aucun effet sur les horaires.\n\n':''}Département : ${job.department_name}\nEmployé : ${job.employee_name}\nCourriel : ${job.email}\nRéférence : ${job.request_id}\nRemise : ${new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(job.submitted_at))} (Québec)\n\nDATES ET HEURES\n${periods}\n\nMOTIF\n${job.reason}\n\n${job.request_status==='late'?'Demande hors délai — l’employé doit s’adresser à sa gérante.':'La demande doit être évaluée par le responsable.'}\n\nSuivi central (accès gestionnaire requis) : ${publicOrigin()}/conges-gestion\nLe nom et le département sont déclarés par l’employé.`};
         const claimed=(await pool.query(`UPDATE schedule_leave_mail SET status='sending',attempts=attempts+1,
           first_attempt_at=COALESCE(first_attempt_at,clock_timestamp()),last_attempt_at=clock_timestamp(),payload=COALESCE(payload,$2::jsonb)
           WHERE request_id=$1 AND (status IN ('pending','error') OR (status='sending' AND last_attempt_at<clock_timestamp()-interval '2 minutes')) RETURNING payload`,[job.request_id,JSON.stringify(payload)])).rows[0];

@@ -1,3 +1,4 @@
+import {publicOrigin} from './public-origin.js';
 import {needsSchema} from './preview-schema.js';
 import {runsInWebProcess} from './scheduled-work.js';
 import crypto from 'node:crypto';
@@ -43,7 +44,7 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
     access_id BIGINT NOT NULL REFERENCES schedule_family_access(id) ON DELETE CASCADE,
     shift_key TEXT NOT NULL,event_id TEXT NOT NULL,shift_date DATE NOT NULL,body_hash TEXT NOT NULL,
     PRIMARY KEY(access_id,shift_key));`);
-  const redirect=env.GOOGLE_CALENDAR_REDIRECT_URI||'https://quarts-service-iga.onrender.com'+callbackPath;
+  const redirect=env.GOOGLE_CALENDAR_REDIRECT_URI||publicOrigin(env)+callbackPath;
   const configured=Boolean(env.GOOGLE_CALENDAR_CLIENT_ID&&env.GOOGLE_CALENDAR_CLIENT_SECRET&&env.SESSION_SECRET);
   const configuredOrFail=()=>{if(!configured)fail('La connexion Google doit être configurée par l’administration avant l’activation.',503);};
   const wrap=fn=>async(req,res)=>{res.set('Cache-Control','no-store');res.set('Referrer-Policy','no-referrer');try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'La synchronisation Google est momentanément indisponible.'});}};

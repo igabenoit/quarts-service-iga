@@ -1,3 +1,4 @@
+import {publicOrigin} from './public-origin.js';
 import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 
@@ -16,7 +17,7 @@ export async function installAcknowledgementSchema(pool){
 }
 
 // Created in the same transaction as the frozen outgoing message. Only its hash is stored here.
-export async function createAcknowledgement(client,row,kind,snapshot,{baseUrl=process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL||'https://quarts-service-iga.onrender.com'}={}){
+export async function createAcknowledgement(client,row,kind,snapshot,{baseUrl=publicOrigin()}={}){
   if(!kinds.includes(kind))throw Error('Type de confirmation invalide.');
   const base=new URL(baseUrl);
   if(base.protocol!=='https:'&&!(base.protocol==='http:'&&['localhost','127.0.0.1'].includes(base.hostname)))throw Error('Adresse publique de confirmation invalide.');
