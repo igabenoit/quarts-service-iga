@@ -31,7 +31,7 @@ test('manager defaults persist through manual assignment, generation, copying an
       ['function mapShift(','function normalizeEmployee('],
       ['function mapEmployee(','app.get("/api/employees"'],
       ['app.put("/api/shifts/:id/assignment"','const leaveAccess=await installLeave('],
-      ['app.post("/api/weeks/:weekStart/copy-previous"','installPdfAssets(app);']
+      ['app.post("/api/weeks/:weekStart/copy-previous"','app.use(express.static("public"']
     ])vm.runInContext(source.slice(source.indexOf(start),source.indexOf(end)),context);
     const availability=JSON.stringify(Object.fromEntries(Array.from({length:7},(_,day)=>[day,[[0,1440]]])));
     await f.pool.query(`INSERT INTO schedule_employees(id,name,area,role,roles,seniority,availability,target_minutes,max_minutes,assignment_rank)

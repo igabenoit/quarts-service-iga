@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {createHash} from 'node:crypto';
 import {addDays, conflictsWithLeave, isDate} from './leave-rules.js';
 import {profileAt,historyOf} from './availability-rules.js';
@@ -66,7 +67,7 @@ export function restorationPreview(backup,current,{weekStart,employees,leaves,ti
 }
 
 export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_regeneration_backups (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_regeneration_backups (
     id BIGSERIAL PRIMARY KEY, week_start DATE NOT NULL, store_id text NOT NULL DEFAULT 'principal', FOREIGN KEY(week_start,store_id) REFERENCES schedule_weeks(week_start,store_id) ON DELETE CASCADE,
     snapshot JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     restored_at TIMESTAMPTZ, replaced_snapshot JSONB

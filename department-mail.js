@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {mailResult,logEvent,errorCode} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
@@ -10,7 +11,7 @@ export function recipients(value){
   return [...new Set(list)];
 }
 export async function installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl=fetch}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_department_mail_settings(department_id BIGINT PRIMARY KEY REFERENCES schedule_leave_departments(id),recipients JSONB NOT NULL DEFAULT '[]',version INTEGER NOT NULL DEFAULT 1);
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_department_mail_settings(department_id BIGINT PRIMARY KEY REFERENCES schedule_leave_departments(id),recipients JSONB NOT NULL DEFAULT '[]',version INTEGER NOT NULL DEFAULT 1);
   CREATE TABLE IF NOT EXISTS schedule_department_document_mail(id UUID PRIMARY KEY,department_id BIGINT REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,kind TEXT NOT NULL,recipients JSONB NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),attempt_at TIMESTAMPTZ,provider_id TEXT);`);
   const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Le courriel n’a pas pu être confirmé. Réessayez avec le même document.'});}};
   const dept=async id=>{if(!/^\d+$/.test(String(id)))fail('Département invalide.');const d=(await pool.query("SELECT id,name,schedule_key FROM schedule_leave_departments WHERE id=$1 AND schedule_key IS NOT NULL AND schedule_key<>'service'",[id])).rows[0];if(!d)fail('Département introuvable.',404);return d;};

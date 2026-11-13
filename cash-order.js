@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {orderXlsx} from './cash-xlsx.js';
 import {cashAccess} from './depot-access.js';
 import {createHash} from 'node:crypto';
@@ -38,8 +39,8 @@ export async function orderPdf(b,lines,folio){
  return Buffer.from(await pdf.save());
 }
 export async function installCash(app,pool,auth,origin){
- await pool.query('CREATE TABLE IF NOT EXISTS cash_order_mail (id uuid PRIMARY KEY, fingerprint text NOT NULL, attachment bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), sent boolean NOT NULL DEFAULT false)');
- await pool.query(`ALTER TABLE cash_order_mail ADD COLUMN IF NOT EXISTS pickup date,
+ if (needsSchema(pool)) await pool.query('CREATE TABLE IF NOT EXISTS cash_order_mail (id uuid PRIMARY KEY, fingerprint text NOT NULL, attachment bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), sent boolean NOT NULL DEFAULT false)');
+ if (needsSchema(pool)) await pool.query(`ALTER TABLE cash_order_mail ADD COLUMN IF NOT EXISTS pickup date,
   ADD COLUMN IF NOT EXISTS lockers smallint[], ADD COLUMN IF NOT EXISTS recipient text, ADD COLUMN IF NOT EXISTS excel24 bytea, ADD COLUMN IF NOT EXISTS excel25 bytea`);
  const access=cashAccess(auth,origin);
  const paths=(suffix='')=>['/api/numeraire'+suffix,'/api/depot/numeraire'+suffix];
@@ -73,19 +74,21 @@ export async function installCash(app,pool,auth,origin){
   }catch{res.sendStatus(503);}
  });
  // The first version archived only the PDF. Recover the fields from its printed text.
- const old=await pool.query('SELECT id FROM cash_order_mail WHERE pickup IS NULL AND sent');
- for(const {id} of old.rows){
-  const {rows:[row]}=await pool.query('SELECT attachment FROM cash_order_mail WHERE id=$1',[id]);
-  const pdf=await lib.PDFDocument.load(row.attachment);
-  const streams=pdf.getPage(0).node.Contents();
-  const lines=[];
-  for(let i=0;i<streams.size();i++){
-   const content=Buffer.from(lib.decodePDFRawStream(streams.lookup(i)).decode()).toString('ascii');
-   for(const match of content.matchAll(/<([0-9A-F]+)> Tj/gi))lines.push(Buffer.from(match[1],'hex').toString('latin1'));
-  }
-  const date=lines.find(l=>l.startsWith('Cueillette : '))?.slice('Cueillette : '.length,'Cueillette : '.length+10);
-  const lockers=lines.filter(l=>/^Casier (24|25)$/.test(l)).map(l=>Number(l.slice(-2)));
-  if(date&&lockers.length)await pool.query('UPDATE cash_order_mail SET pickup=$2,lockers=$3,recipient=$4 WHERE id=$1',[id,date,lockers,bank]);
+ if (needsSchema(pool)) {
+   const old=await pool.query('SELECT id FROM cash_order_mail WHERE pickup IS NULL AND sent');
+   for(const {id} of old.rows){
+    const {rows:[row]}=await pool.query('SELECT attachment FROM cash_order_mail WHERE id=$1',[id]);
+    const pdf=await lib.PDFDocument.load(row.attachment);
+    const streams=pdf.getPage(0).node.Contents();
+    const lines=[];
+    for(let i=0;i<streams.size();i++){
+     const content=Buffer.from(lib.decodePDFRawStream(streams.lookup(i)).decode()).toString('ascii');
+     for(const match of content.matchAll(/<([0-9A-F]+)> Tj/gi))lines.push(Buffer.from(match[1],'hex').toString('latin1'));
+    }
+    const date=lines.find(l=>l.startsWith('Cueillette : '))?.slice('Cueillette : '.length,'Cueillette : '.length+10);
+    const lockers=lines.filter(l=>/^Casier (24|25)$/.test(l)).map(l=>Number(l.slice(-2)));
+    if(date&&lockers.length)await pool.query('UPDATE cash_order_mail SET pickup=$2,lockers=$3,recipient=$4 WHERE id=$1',[id,date,lockers,bank]);
+   }
  }
  app.post(paths(),access,async(req,res)=>{
   if(req.manager?.kind!=='admin')return res.sendStatus(403);

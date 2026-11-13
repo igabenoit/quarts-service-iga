@@ -1,11 +1,11 @@
-import {readFileSync} from 'node:fs';
+import {installCoreSchema} from '../schedule-core-schema.js';
 import {PGlite} from '@electric-sql/pglite';
 import {installLeave} from '../leave.js';
 import {installDepartmentSchedules} from '../department-schedules.js';
 import {installUndoSchema} from '../undo.js';
 export async function departmentFixture({fetchImpl,photoTimeoutMs}={}){
   const db=new PGlite(),pool={release(){},async query(sql,args){const r=args?await db.query(sql,args):(await db.exec(sql)).at(-1)||{rows:[]};return {...r,rowCount:r.rows.length||r.affectedRows||0};}};pool.connect=async()=>pool;
-  const source=readFileSync(new URL('../server.js',import.meta.url),'utf8'),ddl=source.slice(source.indexOf('await pool.query(`'),source.indexOf('app.disable('));await new Function('pool','return (async()=>{'+ddl+'})();')(pool);
+  await installCoreSchema(pool);
   const routes=new Map(),app={use(){}};for(const verb of ['get','post','put','patch','delete'])app[verb]=(path,...handlers)=>routes.set(verb+' '+path,handlers);
   const manager=(_q,_s,next)=>next(),origin=(_q,_s,next)=>next(),staff=(_q,_s,next)=>next();
   const oldKey=process.env.RESEND_API_KEY,timer=globalThis.setInterval;process.env.RESEND_API_KEY='';globalThis.setInterval=()=>({unref(){}});
