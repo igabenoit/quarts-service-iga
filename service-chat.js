@@ -177,6 +177,6 @@ export async function installServiceChat(app,pool,{employeePortal,managerAccess,
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }));
   app.use('/api/service-chat',(error,_req,res,_next)=>res.status(error.type==='entity.too.large'?413:400).json({error:'Le message ou la photo est trop volumineux ou invalide.'}));
-  push?.kick();
+  if (!process.env.VERCEL) push?.kick();
   return push;
 }
