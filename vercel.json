@@ -1,7 +1,7 @@
 {
   "framework": "express",
   "schedules": {
-    "quart-periodique": {"schedule": "*/15 * * * *", "function": "api/periodic"}
+    "quart-periodique": {"schedule": "* * * * *", "function": "api/periodic"}
   },
   "functions": {
     "api/periodic.js": {"maxDuration": 300, "experimentalTriggers": [{"type": "schedule/v1beta"}]}
