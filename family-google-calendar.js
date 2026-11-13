@@ -86,7 +86,14 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
           if(existing.status!==404){if(existing.extendedProperties?.private?.igaFamily!==marker)fail('Un événement ne correspond pas à cette synchronisation.',409);await google(token,base+'/'+eventId,{method:'PATCH',body});}
           await client.query('UPDATE schedule_family_google_events SET body_hash=$3 WHERE access_id=$1 AND shift_key=$2',[id,event.key,hash]);
         }
-        for(const old of previous.filter(r=>!desired.some(e=>e.key===r.shift_key))){const path=base+'/'+old.event_id,current=await google(token,path,{allow:[404,410]});if(!current.status){if(current.extendedProperties?.private?.igaFamily!==sha(`family:${id}`))fail('Un événement ne correspond pas à cette synchronisation.',409);await google(token,path,{method:'DELETE',allow:[404,410]});}await client.query('DELETE FROM schedule_family_google_events WHERE access_id=$1 AND shift_key=$2',[id,old.shift_key]);}
+        for(const old of previous.filter(r=>!desired.some(e=>e.key===r.shift_key))){
+          const path=base+'/'+old.event_id,current=await google(token,path,{allow:[404,410]});
+          if(current.status!==404 && current.status!==410 && current.status!=='cancelled'){
+            if(current.extendedProperties?.private?.igaFamily!==sha(`family:${id}`))fail('Un événement ne correspond pas à cette synchronisation.',409);
+            await google(token,path,{method:'DELETE',allow:[404,410]});
+          }
+          await client.query('DELETE FROM schedule_family_google_events WHERE access_id=$1 AND shift_key=$2',[id,old.shift_key]);
+        }
         await client.query("UPDATE schedule_family_google SET last_sync=clock_timestamp(),last_error='' WHERE access_id=$1",[id]);
       }catch(error){await client.query('UPDATE schedule_family_google SET last_error=$2 WHERE access_id=$1',[id,error.status?error.message:'Synchronisation interrompue. Nouvelle tentative automatique dans quelques minutes.']);throw error;}
     });

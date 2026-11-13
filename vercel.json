@@ -17,7 +17,8 @@
     {"source": "/connexion-employe", "destination": "/connexion-employe.html"},
     {"source": "/cles-employes", "destination": "/cles-employes.html"},
     {"source": "/h/:token([A-Za-z0-9_-]{43})", "destination": "/horaire.html"},
-    {"source": "/horaires-departements", "destination": "/horaires-departements.html"}
+    {"source": "/horaires-departements", "destination": "/horaires-departements.html"},
+    {"source": "/horaire-famille", "destination": "/horaire-famille.html"}
   ],
   "headers": [
     {"source": "/h/:token", "headers": [{"key":"Cache-Control","value":"no-store"},{"key":"X-Robots-Tag","value":"noindex, nofollow"}]}
