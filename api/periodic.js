@@ -5,5 +5,5 @@ export const POST = handleSchedule(async ({executionId}) => {
   if (!['preview','production'].includes(process.env.VERCEL_ENV)) throw Error('Environnement de planification inattendu.');
   const {runPeriodicTasks} = await import('../server.js');
   const result = await runPeriodicTasks(executionId);
-  console.log('quart_periodic', executionId, result);
+  console.log('quart_periodic', executionId, result, process.env.VERCEL_REGION);
 });

@@ -4,7 +4,7 @@
     "quart-periodique": {"schedule": "* * * * *", "function": "api/periodic"}
   },
   "functions": {
-    "api/periodic.js": {"maxDuration": 300, "experimentalTriggers": [{"type": "schedule/v1beta"}]}
+    "api/periodic.js": {"regions": ["yul1"], "maxDuration": 300, "experimentalTriggers": [{"type": "schedule/v1beta"}]}
   },
   "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
