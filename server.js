@@ -27,6 +27,7 @@ import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
+import {renderScheduleConnection,verifyRenderScheduleConnection} from './render-schedule-database.js';
 import {saveEmployeeCode} from './employee-portal.js';
 import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
@@ -45,12 +46,9 @@ for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
   if (!process.env[key]) throw Object.assign(new Error(`Variable requise absente: ${key}`),{code:'MISSING_'+key});
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: production ? { rejectUnauthorized: false } : false,
-  max: 5,
-  connectionTimeoutMillis: 3000,
-});
+const scheduleTarget = renderScheduleConnection(process.env);
+const pool = new Pool(scheduleTarget.config);
+await verifyRenderScheduleConnection(pool,scheduleTarget);
 pool.on('error',error=>logEvent('database_pool_error',{code:errorCode(error)},'error'));
 startupPhase('schema_core');
 const attempts = new Map();
