@@ -30,6 +30,9 @@
 }
 
 .sv-document{overflow-x:auto;color:#111}
+@media screen and (min-width:751px){
+  .sidebar nav{min-height:0;overflow-y:auto}
+}
 .sv-document .sv-sheet{box-sizing:border-box;width:720px;background:white;color:#111;font: 13.33px/1.24 Arial,sans-serif;padding:0;margin:0 0 20px}
 .sv-document h1{font-size:21.33px;margin:0 0 6px}
 .sv-document h2{font-size:15px;margin:12px 0 5px}

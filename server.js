@@ -20,7 +20,6 @@ import {saveShiftLeave} from './approved-shift-leave.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {publishServiceWeek,publishedServiceResult} from './service-publication.js';
 import {serviceRevision,assertServiceRevision,commitServiceTransaction} from './service-concurrency.js';
-import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
 import {employeeAvailability,localDate,profileAt} from "./availability-rules.js";
@@ -823,7 +822,6 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
   } finally { client.release(); }
 });
 
-installPdfAssets(app);
 app.use(express.static("public", { extensions: ["html"] }));
 app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
 app.use((error,_req,res,_next)=>{

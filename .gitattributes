@@ -1,2 +1,2 @@
 onboarding/tuac/form.pdf binary
-public/vendor/simplewebauthn.js -text
+public/vendor/*.js -text
