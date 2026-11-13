@@ -19,6 +19,7 @@ import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
 import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
+import {sendDepartmentPhoto} from './department-photo-response.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const iso=v=>v instanceof Date?v.toISOString().slice(0,10):v?.slice(0,10)||'';
@@ -386,7 +387,10 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   const photoBlocked=p=>{const state=photoState(p);if(state.busy)fail('Une lecture de cette photo est déjà en cours. Cliquez sur « Actualiser la lecture » pour récupérer son résultat. Une reprise sera possible dans au plus '+state.retryAfterSeconds+' secondes si la lecture a été interrompue.',409);if(!state.remainingAttempts)fail('Les '+state.attemptLimit+' essais autorisés pour cette photo ont été utilisés, y compris les lectures échouées. Cliquez sur « Autoriser 5 essais de plus » pour pouvoir la relire.',409);fail('L’état de la photo a changé. Actualisez la lecture avant de réessayer.',409);};
   app.get('/api/departments/photos',requireManager,endpoint(async(req,res)=>res.json({photos:(await pool.query('SELECT id,name,state,created_at,candidate IS NOT NULL AS analyzed FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2 ORDER BY id',[integer(req.query.departmentId),week(req.query.weekStart)])).rows})));
-  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{const p=await readPhoto(integer(req.params.id),true);res.json({...photoState(p),dataUrl:p.data_url});}));
+  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{
+    const p=await readPhoto(integer(req.params.id),true);
+    await sendDepartmentPhoto(res,photoState(p),p.data_url);
+  }));
   app.get('/api/departments/photos/:id/status',requireManager,endpoint(async(req,res)=>res.json(photoState(await readPhoto(integer(req.params.id))))));
   app.post('/api/departments/photos/:id/extend-attempts',requireManager,sameOrigin,endpoint(async(req,res)=>{
     const id=integer(req.params.id);if(!Number.isSafeInteger(req.body.attemptLimit)||req.body.attemptLimit<5)fail('Actualisez la lecture avant d’autoriser de nouveaux essais.');
