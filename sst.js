@@ -1,3 +1,4 @@
+import {sendPrivateBytes} from './private-response.js';
 import {needsSchema} from './preview-schema.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {normalizeSupervision} from './public/supervision-schema.js';
@@ -168,7 +169,7 @@ export async function installSST(app,pool,{identity}){
   const id=await tx(async db=>{const recordId=req.query.recordId||null;if(recordId&&(await record(db,recordId)).archived_at)fail('Ce dossier est archivé.',409);const sha=createHash('sha256').update(bytes).digest('hex');const duplicate=(await db.query('SELECT id FROM sst_documents WHERE sha256=$1 AND record_id IS NOT DISTINCT FROM $2::uuid AND archived_at IS NULL',[sha,recordId])).rows[0];if(duplicate)return duplicate.id;
    const id=randomUUID();await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,name,mime,bytes.length,sha,bytes]);await audit(db,req,'document.added',null,{id,name,mime,size:bytes.length,sha256:sha},recordId,id);return id});res.status(201).json({id});
  }));
- app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=await readOriginal(req.params.id);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});res.send(Buffer.from(r.data))}));
+ app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=await readOriginal(req.params.id);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});await sendPrivateBytes(res,r.data)}));
  const configuredRecipients=()=>(process.env.SST_MAIL_RECIPIENTS||'').split(',').map(normalizeEmail).filter(Boolean);
  app.get('/api/sst/mail-recipients',admin,route(async(req,res)=>{
   const {rows}=await pool.query('SELECT email FROM sst_mail_recipients ORDER BY email');
