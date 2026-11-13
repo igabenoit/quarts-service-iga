@@ -31,6 +31,7 @@ function show(state){
 }
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
+ if(d.kind==='tuac')form.append(node('p','Une seule signature remplit les trois fiches. Pour imprimer, chargez la feuille originale des TUAC et choisissez Lettre, recto, taille réelle (100 %).'));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
  if(['sst','sst_general','ethique'].includes(d.kind)){
   const read=node('button',d.kind==='sst_general'?'Ouvrir le programme d’accueil SST (PDF remplissable)':d.kind==='sst'?'Ouvrir l’ancienne annexe SST (PDF remplissable)':'Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
@@ -59,6 +60,7 @@ function openForm(state,d){
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);
+ if(d.kind==='tuac')c.classList.add('tuac-signature');
  const ctx=c.getContext('2d');let strokes=[],line,active;
  const point=e=>{const r=c.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height].map(v=>Math.max(0,Math.min(1,v)));};
  c.onpointerdown=e=>{if(active!=null)return;active=e.pointerId;c.setPointerCapture(active);line=[point(e)];strokes.push(line);ctx.beginPath();ctx.moveTo(line[0][0]*800,line[0][1]*200);};

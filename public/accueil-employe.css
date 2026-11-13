@@ -1,2 +1,4 @@
 main{max-width:42rem;margin:auto;padding:clamp(1rem,4vw,2.5rem)}header{display:flex;align-items:center;gap:1rem}canvas{display:block;width:100%;height:130px;border:1px solid #8799aa;background:white;touch-action:none}label{display:block;margin:.8rem 0}input:not([type=checkbox]){display:block;width:100%}button{margin:.5rem .4rem .5rem 0}details p{white-space:pre-wrap}
 .retirement-authorization{display:block;width:100%;height:auto}#editor fieldset{min-width:0;margin:1rem 0;padding:1rem}#editor [hidden]{display:none}
+
+canvas.tuac-signature{height:auto;aspect-ratio:4/1}
