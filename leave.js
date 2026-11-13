@@ -13,9 +13,9 @@ import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
 import {applyApprovedLeave} from './leave-schedule.js';
 
-export async function approvedLeave(pool, weekStart) {
+export async function approvedLeave(pool, weekStart, storeId=null) {
   const result = await pool.query(`SELECT employee_id, COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests
-    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`, [weekStart,addDays(weekStart,6)]);
+    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`+(storeId?' AND employee_id IN(SELECT id FROM schedule_employees WHERE store_id=$3)':''), [weekStart,addDays(weekStart,6),...(storeId?[storeId]:[])]);
   return result.rows;
 }
 export async function installLeave(app, pool, {requireManager,sameOrigin,employeeIdentity}) {
@@ -144,7 +144,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   });
   app.get('/api/leave/week/:weekStart',requireManager,async(req,res)=>{
     if(!isDate(req.params.weekStart))return res.status(400).json({error:'Semaine invalide.'});
-    try {res.json({leaves:await approvedLeave(pool,req.params.weekStart)});}catch{res.status(500).json({error:'Impossible de charger les congés approuvés.'});}
+    try {res.json({leaves:await approvedLeave(pool,req.params.weekStart,req.storeId)});}catch{res.status(500).json({error:'Impossible de charger les congés approuvés.'});}
   });
   app.patch('/api/leave/requests/:id',requireManager,sameOrigin,async(req,res)=>{
     const client=await pool.connect();
@@ -228,7 +228,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(8675309)');
       await beginUndo(client,'Appliquer les congés approuvés',weekStart,req);
-      const changes=await applyApprovedLeave(client,{weekStart});
+      const changes=await applyApprovedLeave(client,{weekStart,store:req.storeId});
       await client.query('COMMIT');res.json({ok:true,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’appliquer les congés. Aucun changement enregistré.'});}
     finally{client.release();}

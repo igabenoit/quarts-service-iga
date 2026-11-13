@@ -15,13 +15,13 @@ export async function applyServiceRoleDefault(client,shift,employee){
 
 // Copy needs only, just like the original copy workflow. Legacy supervision
 // shifts occupied by a manager become manager needs in the destination week.
-export async function copyServiceShifts(client,weekStart,previous){
+export async function copyServiceShifts(client,weekStart,previous,store='principal'){
   await client.query(`INSERT INTO schedule_shifts
-    (week_start,area,role,day_index,start_minute,end_minute,break_minutes,source_department,notes,sort_order,training,training_minutes)
+    (week_start,area,role,day_index,start_minute,end_minute,break_minutes,source_department,notes,sort_order,training,training_minutes,store_id)
     SELECT $1,s.area,CASE WHEN e.role='manager' AND s.role='supervisor' THEN 'manager' ELSE s.role END,
-      s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.source_department,s.notes,s.sort_order,s.training,s.training_minutes
+      s.day_index,s.start_minute,s.end_minute,s.break_minutes,s.source_department,s.notes,s.sort_order,s.training,s.training_minutes,s.store_id
     FROM schedule_shifts s
     LEFT JOIN schedule_assignments a ON a.shift_id=s.id
     LEFT JOIN schedule_employees e ON e.id=a.employee_id
-    WHERE s.week_start=$2 ORDER BY s.id`,[weekStart,previous]);
+    WHERE s.week_start=$2 AND s.store_id=$3 ORDER BY s.id`,[weekStart,previous,store]);
 }

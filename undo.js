@@ -1,10 +1,10 @@
 import {assertServiceRevision} from './service-concurrency.js';
 // Parent tables precede children when rows are restored; deletions use reverse order.
-const keys={schedule_weeks:['week_start'],schedule_employees:['id'],schedule_leave_requests:['id'],schedule_availability_requests:['id'],
+const keys={schedule_weeks:['week_start','store_id'],schedule_employees:['id'],schedule_leave_requests:['id'],schedule_availability_requests:['id'],
   schedule_shifts:['id'],schedule_time_off:['week_start','employee_id','day_index'],
   schedule_day_exceptions:['week_start','employee_id'],schedule_assignments:['shift_id']};
 const tables=Object.keys(keys);
-const latestSQL=`SELECT a.id,a.label,a.week_start FROM schedule_undo_actions a WHERE a.undone_at IS NULL
+const latestSQL=`SELECT a.id,a.label,a.week_start FROM schedule_undo_actions a WHERE a.undone_at IS NULL AND ($1::text IS NULL OR COALESCE(a.store_id,'principal')=$1)
   AND EXISTS (SELECT 1 FROM schedule_undo_rows r WHERE r.action_id=a.id AND r.before_row IS DISTINCT FROM r.after_row)
   ORDER BY a.id DESC LIMIT 1`;
 
@@ -13,6 +13,7 @@ export async function installUndoSchema(pool){
     id BIGSERIAL PRIMARY KEY,label TEXT NOT NULL,week_start DATE,group_key TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),undone_at TIMESTAMPTZ
   );
+  ALTER TABLE schedule_undo_actions ADD COLUMN IF NOT EXISTS store_id TEXT;
   CREATE TABLE IF NOT EXISTS schedule_undo_rows (
     action_id BIGINT NOT NULL REFERENCES schedule_undo_actions(id),table_name TEXT NOT NULL,
     row_key JSONB NOT NULL,before_row JSONB,after_row JSONB,PRIMARY KEY(action_id,table_name,row_key)
@@ -56,15 +57,15 @@ export async function beginUndo(client,label,weekStart=null,request={}){
   const supplied=request.headers?.['x-undo-group'];
   const group=typeof supplied==='string'&&/^[a-f0-9-]{36}$/i.test(supplied)?supplied:null;
   let action=group?(await client.query(`SELECT id FROM schedule_undo_actions WHERE id=(SELECT MAX(id) FROM schedule_undo_actions)
-    AND group_key=$1 AND undone_at IS NULL`,[group])).rows[0]:null;
-  if(!action)action=(await client.query('INSERT INTO schedule_undo_actions(label,week_start,group_key) VALUES ($1,$2,$3) RETURNING id',[label,weekStart,group])).rows[0];
+    AND group_key=$1 AND store_id IS NOT DISTINCT FROM $2 AND undone_at IS NULL`,[group,request.storeId??null])).rows[0]:null;
+  if(!action)action=(await client.query('INSERT INTO schedule_undo_actions(label,week_start,group_key,store_id) VALUES ($1,$2,$3,$4) RETURNING id',[label,weekStart,group,request.storeId??null])).rows[0];
   else if(weekStart)await client.query('UPDATE schedule_undo_actions SET week_start=COALESCE(week_start,$1) WHERE id=$2',[weekStart,action.id]);
   await client.query("SELECT set_config('schedule.undo_action',$1,true)",[String(action.id)]);
 }
 
-export async function undoLast(client,expectedId){
+export async function undoLast(client,expectedId,storeId=null){
   await client.query('SELECT pg_advisory_xact_lock(8675309)');
-  const action=(await client.query(latestSQL)).rows[0];
+  const action=(await client.query(latestSQL,[storeId])).rows[0];
   if(!action)throw new Error('Aucune action à annuler.');
   if(String(action.id)!==String(expectedId))throw new Error('Une autre action a été enregistrée. Vérifiez le libellé du bouton puis réessayez.');
   const changes=(await client.query(`SELECT * FROM schedule_undo_rows WHERE action_id=$1 AND before_row IS DISTINCT FROM after_row`,[action.id])).rows;
@@ -102,16 +103,16 @@ export async function undoLast(client,expectedId){
 
 export async function installUndo(app,pool,{requireManager,sameOrigin}){
   await installUndoSchema(pool);
-  app.get('/api/undo',requireManager,async(_req,res)=>{
+  app.get('/api/undo',requireManager,async(req,res)=>{
     res.set('Cache-Control','no-store');
-    try{res.json({action:(await pool.query(latestSQL)).rows[0]||null});}
+    try{res.json({action:(await pool.query(latestSQL,[req.storeId??null])).rows[0]||null});}
     catch{res.status(500).json({error:'Impossible de charger la dernière action.'});}
   });
   app.post('/api/undo',requireManager,sameOrigin,async(req,res)=>{
     const client=await pool.connect();
     try{
       await client.query('BEGIN');
-      const action=await undoLast(client,req.body?.actionId);
+      const action=await undoLast(client,req.body?.actionId,req.storeId??null);
       await client.query('COMMIT');res.json({ok:true,action});
     }catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(409).json({error:error.code?'Cette action ne peut plus être annulée car d’autres données en dépendent. Aucun changement effectué.':error.message});}
     finally{client.release();}

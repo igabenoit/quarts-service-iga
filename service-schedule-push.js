@@ -9,25 +9,42 @@ export async function createSchedulePush(pool,{tables,pushTables,credential,send
     attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     UNIQUE(origin,subscription_id,week_start));
+    ALTER TABLE schedule_service_schedule_push_jobs ADD COLUMN IF NOT EXISTS store_id text;
+    UPDATE schedule_service_schedule_push_jobs j SET store_id=w.store_id FROM schedule_weeks w WHERE j.week_start=w.week_start AND j.store_id IS NULL;
+    UPDATE schedule_service_schedule_push_jobs SET store_id='principal' WHERE store_id IS NULL;
+    ALTER TABLE schedule_service_schedule_push_jobs ALTER COLUMN store_id SET NOT NULL, ALTER COLUMN store_id SET DEFAULT 'principal';
+    DO $$ DECLARE old_key name; BEGIN
+      SELECT conname INTO old_key FROM pg_constraint WHERE conrelid='schedule_service_schedule_push_jobs'::regclass
+        AND contype='u' AND cardinality(conkey)=3;
+      IF old_key IS NOT NULL THEN EXECUTE format('ALTER TABLE schedule_service_schedule_push_jobs DROP CONSTRAINT %I',old_key); END IF;
+    END $$;
+    CREATE UNIQUE INDEX IF NOT EXISTS schedule_push_store_week ON schedule_service_schedule_push_jobs(origin,subscription_id,week_start,store_id);
     CREATE INDEX IF NOT EXISTS schedule_service_schedule_push_due ON schedule_service_schedule_push_jobs(origin,due_at)`);
-  async function enqueue(client,week,kind){
+  const belongsToStore=(owner,store)=>`(${owner}='admin' OR EXISTS (
+    SELECT 1 FROM schedule_store_people p JOIN schedule_employees e ON e.id=p.service_employee_id
+    WHERE 'employee:'||p.id=${owner} AND e.store_id=${store}) OR EXISTS (
+    SELECT 1 FROM schedule_manager_accounts m JOIN schedule_store_people p ON p.id=m.person_id
+    LEFT JOIN schedule_employees e ON e.id=p.service_employee_id
+    WHERE 'manager:'||m.id=${owner} AND coalesce(e.store_id,'principal')=${store}))`;
+  async function enqueue(client,week,kind,store='principal'){
     if(!['published','updated'].includes(kind))return;
     const event=crypto.randomUUID();
     let queued=0;
     const origins=(await client.query('SELECT origin FROM schedule_service_push_origins')).rows;
     for(const {origin} of origins){
       const destination=pushTables(origin);
-      const result=await client.query(`INSERT INTO schedule_service_schedule_push_jobs(origin,subscription_id,week_start,kind,event_id)
-        SELECT $1,id,$2,$3,$4 FROM ${destination.subscriptions} WHERE owner_key LIKE 'employee:%' OR owner_key='admin' OR owner_key LIKE 'manager:%'
-        ON CONFLICT(origin,subscription_id,week_start) DO UPDATE SET
+      const result=await client.query(`INSERT INTO schedule_service_schedule_push_jobs(origin,subscription_id,week_start,kind,event_id,store_id)
+        SELECT $1,id,$2,$3,$4,$5 FROM ${destination.subscriptions} sub WHERE ${belongsToStore('sub.owner_key','$5')}
+        ON CONFLICT(origin,subscription_id,week_start,store_id) DO UPDATE SET
         kind=EXCLUDED.kind,event_id=EXCLUDED.event_id,attempts=0,due_at=clock_timestamp(),
-        lease_until=NULL,lease_token=NULL,created_at=clock_timestamp() RETURNING id`,[origin,week,kind,event]);
+        lease_until=NULL,lease_token=NULL,created_at=clock_timestamp() RETURNING id`,[origin,week,kind,event,store]);
       if(origin===tables.scope)queued=result.rows.length;
     }
     return queued;
   }
-  async function inventory(week,{includeRecipients=false}={}){
-    const subs=(await pool.query(`SELECT owner_key,credential_hash FROM ${tables.subscriptions}`)).rows;
+  async function inventory(week,{includeRecipients=false,store=null}={}){
+    const subs=(await pool.query(`SELECT owner_key,credential_hash FROM ${tables.subscriptions} sub`+
+      (store?' WHERE '+belongsToStore('sub.owner_key','$1'):''),store?[store]:[])).rows;
     let employees=0,managers=0,inactive=0;
     const recipients=new Map();
     for(const sub of subs){
@@ -48,7 +65,7 @@ export async function createSchedulePush(pool,{tables,pushTables,credential,send
         recipients.get(sub.owner_key).devices++;
       }
     }
-    const pending=week?Number((await pool.query('SELECT count(*) AS n FROM schedule_service_schedule_push_jobs WHERE origin=$1 AND week_start=$2',[tables.scope,week])).rows[0].n):0;
+    const pending=week?Number((await pool.query('SELECT count(*) AS n FROM schedule_service_schedule_push_jobs WHERE origin=$1 AND week_start=$2 AND ($3::text IS NULL OR store_id=$3)',[tables.scope,week,store])).rows[0].n):0;
     return {employees,managers,inactive,pending,...(includeRecipients?{recipients:[...recipients.values()].sort((a,b)=>a.kind.localeCompare(b.kind)||a.name.localeCompare(b.name,'fr'))}:{})};
   }
   async function drain(){
@@ -65,10 +82,8 @@ export async function createSchedulePush(pool,{tables,pushTables,credential,send
           const sub=(await pool.query(`SELECT * FROM ${tables.subscriptions} WHERE id=$1`,[job.subscription_id])).rows[0];
           // Active Service managers receive the same notices; temporary guests remain excluded.
           if(!sub||await credential(sub.owner_key,{includeGuests:false})!==sub.credential_hash){await remove();return;}
-          const link=await pool.query(`SELECT 1 FROM schedule_public_links l WHERE l.week_start=$1
-            AND ($2::text NOT LIKE 'employee:%' OR EXISTS (
-              SELECT 1 FROM schedule_store_people p JOIN schedule_employees e ON e.id=p.service_employee_id
-              WHERE 'employee:'||p.id=$2 AND e.store_id=l.store_id))`,[job.week_start,sub.owner_key]);
+          const link=await pool.query(`SELECT 1 FROM schedule_public_links l WHERE l.week_start=$1 AND l.store_id=$3
+            AND ${belongsToStore('$2::text','l.store_id')}`,[job.week_start,sub.owner_key,job.store_id]);
           if(!link.rowCount){await remove();return;}
           const week=typeof job.week_start==='string'?job.week_start.slice(0,10):job.week_start.toISOString().slice(0,10);
           const payload=JSON.stringify({kind:'schedule-'+job.kind,week,tag:'service-schedule-'+job.event_id});
