@@ -1,4 +1,5 @@
 import pg from 'pg';
+import {attachDatabasePool} from '@vercel/functions';
 import {schedulePoolConfig,verifyPreviewDatabase} from './schedule-database.js';
 
 // An explicitly enabled synthetic vault has its own search path on the test project.
@@ -9,6 +10,7 @@ export async function previewEmployeeFilesStorage(env=process.env) {
    throw Error('Coffre fictif de préversion non configuré.');
  const config={...env,QUART_PREVIEW_SCHEMA:schema};
  const pool=new pg.Pool(schedulePoolConfig(config));
+ attachDatabasePool(pool);
  try { await verifyPreviewDatabase(pool,config);await verifyVercelVault(pool,schema,false); }
  catch(error){await pool.end();throw error;}
  return {pool,status:{ready:true,synthetic:true,region:'ca-central-1',message:'Coffre de préversion · fichiers fictifs.'}};
@@ -49,7 +51,8 @@ export async function employeeFilesStorage(env=process.env){
  }
  const trial=env.EMPLOYEE_FILES_SINGLE_TRIAL==='yes';
  const schema=trial?'employee_files_single_trial':'employee_files_private';
- const pool=new pg.Pool({connectionString:isolated?url:u.toString(),ssl:isolated?false:{rejectUnauthorized:true,...(env.EMPLOYEE_FILES_CA_PEM?{ca:env.EMPLOYEE_FILES_CA_PEM}:{})},options:'-c search_path='+schema,max:3,connectionTimeoutMillis:5000});
+ const pool=new pg.Pool({connectionString:isolated?url:u.toString(),ssl:isolated?false:{rejectUnauthorized:true,...(env.EMPLOYEE_FILES_CA_PEM?{ca:env.EMPLOYEE_FILES_CA_PEM}:{})},options:'-c search_path='+schema,max:3,connectionTimeoutMillis:5000,...(env.VERCEL?{idleTimeoutMillis:2000}:{})});
+ if(env.VERCEL)attachDatabasePool(pool);
  pool.on('error',()=>{});
  // Verify only the connection and session configuration while collection is
  // closed. Never create a schema, read employee records, or return a usable

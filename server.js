@@ -1,3 +1,4 @@
+import {attachDatabasePool} from '@vercel/functions';
 import {installScheduledWorkSchema,runsInWebProcess,runScheduledWork} from './scheduled-work.js';
 import {needsSchema,isPreparingPreview,usePreparedSchema} from './preview-schema.js';
 import {installCash} from './cash-order.js';
@@ -56,6 +57,7 @@ for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
 }
 
 const pool = new Pool(schedulePoolConfig(process.env));
+if (process.env.VERCEL) attachDatabasePool(pool);
 await verifyPreviewDatabase(pool,process.env);
 const preparation = isPreparingPreview();
 if (process.env.VERCEL && !preparation) await usePreparedSchema(pool,process.env);

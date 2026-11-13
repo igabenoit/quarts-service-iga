@@ -33,11 +33,13 @@ test('Vercel vérifie le projet et les tables du coffre existant en lecture seul
   EMPLOYEE_FILES_DATABASE_URL:'postgresql://vault@db.'+vault+'.supabase.co/postgres',EMPLOYEE_FILES_HOSTING_REVIEWED:'yes'};
  let complete=true;
  const sql=[];
- t.mock.method(pg,'Pool',function(){return {on(){},end:async()=>{},query:async(statement,args)=>{
+ const poolEvents=[];
+ t.mock.method(pg,'Pool',function(options){return {options,on(event){poolEvents.push(event);},end:async()=>{},query:async(statement,args)=>{
   sql.push(statement);assert.ok(args[0].includes('onboarding_docs'));return {rows:[{name:'employee_files_private',complete}]};
  }};});
  await assert.rejects(employeeFilesStorage({...env,QUART_SUPABASE_PROJECT_REF:vault}),/Projet/);
  assert.equal((await employeeFilesStorage(env)).status.ready,true);
+ assert.ok(poolEvents.includes('release'));
  complete=false;
  await assert.rejects(employeeFilesStorage(env),/incomplet/);
  assert.equal(sql.length,2);assert.ok(sql.every(statement=>statement.startsWith('SELECT')));
