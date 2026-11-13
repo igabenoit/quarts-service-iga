@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import QRCode from 'qrcode';
@@ -10,7 +11,7 @@ const validToken=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{43}$/.test(v);
 const personId=v=>{if(!Number.isSafeInteger(v)||v<1)fail('Fiche invalide.');return v;};
 function topLevel(response){try{const d=JSON.parse(Buffer.from(response.response.clientDataJSON,'base64url').toString());if(d.crossOrigin===true||d.topOrigin)throw Error();}catch{fail('Ouvrez le portail directement dans votre navigateur.');}}
 export async function installEmployeePasskeys(app,pool,{requireManager}){
-  await installPasskeySchema(pool);
+  if (needsSchema(pool)) await installPasskeySchema(pool);
   const mode=process.env.EMPLOYEE_PASSKEY_MODE||'off';
   if(!['off','pilot','required'].includes(mode))throw Error('Invalid EMPLOYEE_PASSKEY_MODE');
   const enabled=mode!=='off',origin=process.env.EMPLOYEE_PASSKEY_ORIGIN||'';

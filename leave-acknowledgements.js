@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 
 const kinds=['approved','refused','conditional'];
@@ -30,7 +31,7 @@ export async function createAcknowledgement(client,row,kind,snapshot,{baseUrl=pr
 }
 
 export async function installLeaveAcknowledgements(app,pool,{sameOrigin}){
-  await installAcknowledgementSchema(pool);
+  if (needsSchema(pool)) await installAcknowledgementSchema(pool);
   const route=confirm=>async(req,res)=>{
     res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Robots-Tag':'noindex, nofollow'});
     const token=req.body?.token;

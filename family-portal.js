@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {installFamilyGoogleCalendar} from './family-google-calendar.js';
 import {isDate,monday,today} from './public/departments-core.js';
@@ -13,7 +14,7 @@ const newCode=()=>Array.from(crypto.randomBytes(16),n=>'ABCDEFGHJKLMNPQRSTUVWXYZ
 
 // Family identities are independent of employee records and manager accounts.
 export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_access(
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_access(
     id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,code_hash TEXT NOT NULL UNIQUE,
     active BOOLEAN NOT NULL DEFAULT TRUE,version INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS schedule_family_members(

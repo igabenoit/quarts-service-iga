@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 import {beginUndo} from "./undo.js";
@@ -19,7 +20,7 @@ export async function approvedLeave(pool, weekStart, storeId=null) {
   return result.rows;
 }
 export async function installLeave(app, pool, {requireManager,sameOrigin,employeeIdentity}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
     id BIGSERIAL PRIMARY KEY, submission_key UUID NOT NULL UNIQUE,
     employee_id BIGINT REFERENCES schedule_employees(id), employee_name TEXT NOT NULL,
     email TEXT NOT NULL, reason TEXT NOT NULL, periods JSONB NOT NULL,
@@ -63,7 +64,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   const noStore=(_req,res,next)=>{res.set('Cache-Control','no-store');next();};
   app.use('/api/leave', noStore);
   const ownRequest=employeeRequestSecurity(pool);
-  await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
+  if (needsSchema(pool)) await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
   const formInfo = (test,store=false) => async (_req,res)=>{
     try {
       const clock = (await pool.query('SELECT clock_timestamp() AS now')).rows[0].now;

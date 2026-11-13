@@ -1,3 +1,4 @@
+import {isPreparingPreview,needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {addDays,monday,today} from './public/departments-core.js';
 
@@ -30,7 +31,7 @@ export function encryptToken(value,secret){
 export function decryptToken(value,secret){const [iv,data,tag]=value.split('.'),cipher=crypto.createDecipheriv('aes-256-gcm',crypto.createHash('sha256').update(secret).digest(),Buffer.from(iv,'base64url'));cipher.setAuthTag(Buffer.from(tag,'base64url'));return Buffer.concat([cipher.update(Buffer.from(data,'base64url')),cipher.final()]).toString('utf8');}
 
 export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOrigin,readFamilyWeek,fetchImpl=fetch,env=process.env,startTimer=true}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_google(
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_google(
     access_id BIGINT PRIMARY KEY REFERENCES schedule_family_access(id) ON DELETE CASCADE,
     token TEXT NOT NULL,calendar_id TEXT,calendar_name TEXT,enabled BOOLEAN NOT NULL DEFAULT FALSE,
     last_sync TIMESTAMPTZ,last_error TEXT NOT NULL DEFAULT '');
@@ -124,8 +125,9 @@ export async function installFamilyGoogleCalendar(app,pool,{requireFamily,sameOr
   let running=false;
   async function run(){if(running||!configured)return;running=true;try{const rows=(await pool.query('SELECT g.access_id FROM schedule_family_google g JOIN schedule_family_access a ON a.id=g.access_id WHERE g.enabled AND a.active')).rows;for(const row of rows)try{await sync(Number(row.access_id));}catch(error){logEvent('calendar_sync_failed',{component:'family_google',jobId:String(row.access_id),code:errorCode(error)},'error');}}finally{running=false;}}
   const workerError=error=>logEvent('calendar_worker_failed',{component:'family_google',code:errorCode(error)},'error');
-  const timer=startTimer?setInterval(()=>void run().catch(workerError),120000):null;timer?.unref();
-  if(startTimer)void run().catch(workerError);
+  const runWorker=startTimer&&!isPreparingPreview();
+  const timer=runWorker?setInterval(()=>void run().catch(workerError),120000):null;timer?.unref();
+  if(runWorker)void run().catch(workerError);
   return {sync,run,stop:()=>clearInterval(timer)};
 }
 

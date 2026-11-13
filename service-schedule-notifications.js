@@ -1,7 +1,8 @@
+import {needsSchema} from './preview-schema.js';
 import {logEvent} from './runtime-diagnostics.js';
 
 export async function installScheduleNotifications(app,pool,{requireManager,sameOrigin,push}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_notice_resends(
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_notice_resends(
     week_start DATE PRIMARY KEY,last_sent_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_service_notice_resends ADD COLUMN IF NOT EXISTS store_id text;
     UPDATE schedule_service_notice_resends n SET store_id=w.store_id FROM schedule_weeks w WHERE n.week_start=w.week_start AND n.store_id IS NULL;

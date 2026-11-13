@@ -1,9 +1,10 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {logEvent,errorCode} from './runtime-diagnostics.js';
 
 // Separate queue: chat workers from an older deployment cannot consume schedule alerts.
 export async function createSchedulePush(pool,{tables,pushTables,credential,send,vapidDetails}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_schedule_push_jobs(
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_schedule_push_jobs(
     id BIGSERIAL PRIMARY KEY,origin TEXT NOT NULL,subscription_id UUID NOT NULL,
     week_start DATE NOT NULL,kind TEXT NOT NULL CHECK(kind IN('published','updated')),event_id UUID NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),

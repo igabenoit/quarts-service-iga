@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 export const nameKey=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[-’']/g,' ').replace(/\s+/g,' ').trim();
 export function normalizeEmail(value){
   const email=typeof value==='string'?value.trim().toLowerCase():'';
@@ -71,7 +72,7 @@ export async function loadContactDirectory(pool){
 }
 
 export async function installContacts(app,pool,{requireManager,sameOrigin}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_employee_contacts (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_employee_contacts (
     employee_id BIGINT PRIMARY KEY REFERENCES schedule_employees(id) ON DELETE CASCADE,
     email TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
   );CREATE TABLE IF NOT EXISTS schedule_leave_contact_links (

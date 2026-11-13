@@ -1,3 +1,4 @@
+import {isPreparingPreview,needsSchema} from './preview-schema.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {escapeHTML as escape} from './public/departments-core.js';
@@ -43,7 +44,7 @@ export function approvalPayload(job,{testRecipient='',from='Quarts Service <onbo
 
 // Approvals are queued only at decision time. Historical approvals are never backfilled.
 export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}={}){
-  await installApprovalMailSchema(pool);
+  if (needsSchema(pool)) await installApprovalMailSchema(pool);
   let running=false;
   async function run(){
     if(running||!process.env.RESEND_API_KEY)return;
@@ -106,6 +107,6 @@ export async function installApprovalMail(pool,{autoStart=true,fetchImpl=fetch}=
       }
     }finally{running=false;}
   }
-  if(autoStart){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error'));}
+  if(autoStart&&!isPreparingPreview()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_approval',code:errorCode(error)},'error'));}
   return {run,queue:queueApprovalMail};
 }

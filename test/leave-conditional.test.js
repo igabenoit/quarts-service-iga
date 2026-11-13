@@ -1,6 +1,6 @@
+import {installCoreSchema} from '../schedule-core-schema.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 import {installLeave,approvedLeave} from '../leave.js';
 import {installUndoSchema,undoLast} from '../undo.js';
@@ -26,8 +26,7 @@ test('PostgreSQL : accord conditionnel, migration, validation finale, refus et r
   const db=new PGlite(),pool={release(){},async query(sql,args){const r=args?await db.query(sql,args):(await db.exec(sql)).at(-1)||{rows:[]};return {...r,rowCount:r.affectedRows??r.rows.length};}};pool.connect=async()=>pool;
   const oldKey=process.env.RESEND_API_KEY;process.env.RESEND_API_KEY='';
   try{
-    const source=readFileSync(new URL('../server.js',import.meta.url),'utf8'),ddl=source.slice(source.indexOf('await pool.query(`'),source.indexOf('app.disable('));
-    await new Function('pool','return (async()=>{'+ddl+'})();')(pool);
+    await installCoreSchema(pool);
     const routes=new Map(),app={use(){}};for(const verb of ['get','post','put','patch'])app[verb]=(path,...handlers)=>routes.set(verb+' '+path,handlers);
     const manager=()=>{},origin=()=>{};
     const install=async()=>{const timer=globalThis.setInterval;globalThis.setInterval=()=>({unref(){}});try{await installLeave(app,pool,{requireManager:manager,sameOrigin:origin,hasStaffAccess:()=>false});}finally{globalThis.setInterval=timer;}};

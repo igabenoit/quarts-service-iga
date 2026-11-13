@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {normalizeSupervision} from './public/supervision-schema.js';
 import {normalizeWelcome,welcomeContent,validateWelcomeCompletion} from './public/welcome-form-schema.js';
@@ -54,27 +55,29 @@ export async function installSST(app,pool,{identity}){
   const hidden=new Set((await pool.query('SELECT document_id FROM sst_removed_documents')).rows.map(r=>r.document_id));
   return {records:shared.records.filter(r=>!hidden.has(r.fields?.employeeFileOriginalId)),documents:shared.documents.filter(d=>!hidden.has(d.id))};
  }catch{return {records:[],documents:[],warning:'Le coffre des dossiers employés est indisponible. Ses pièces SST ne sont pas affichées.'};}};
- const schemaDb=await pool.connect();
- try{await schemaDb.query('BEGIN');await schemaDb.query('SELECT pg_advisory_xact_lock(835107)');await schemaDb.query(`CREATE TABLE IF NOT EXISTS sst_records(
-  id UUID PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('training','equipment','incident','meeting','inspection','action','document')),
-  title TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('draft','open','progress','done')),
-  employee_key TEXT,employee_name TEXT NOT NULL DEFAULT '',department_id BIGINT REFERENCES schedule_leave_departments(id),
-  related_id UUID REFERENCES sst_records(id),owner TEXT NOT NULL DEFAULT '',event_date DATE,due_date DATE,
-  details TEXT NOT NULL DEFAULT '',fields JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
- ALTER TABLE sst_records ADD COLUMN IF NOT EXISTS event_group_id UUID REFERENCES sst_records(id);
- CREATE INDEX IF NOT EXISTS sst_records_event_group ON sst_records(event_group_id);
- CREATE TABLE IF NOT EXISTS sst_documents(
-  id UUID PRIMARY KEY,record_id UUID REFERENCES sst_records(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,
-  sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
- CREATE UNIQUE INDEX IF NOT EXISTS sst_document_unique ON sst_documents(sha256,COALESCE(record_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE archived_at IS NULL;
- CREATE TABLE IF NOT EXISTS sst_removed_documents(document_id UUID PRIMARY KEY,removed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE OR REPLACE VIEW sst_visible_documents AS SELECT d.* FROM sst_documents d
- WHERE NOT EXISTS (SELECT 1 FROM sst_removed_documents r WHERE r.document_id=d.id);
- CREATE TABLE IF NOT EXISTS sst_events(id BIGSERIAL PRIMARY KEY,record_id UUID REFERENCES sst_records(id),document_id UUID REFERENCES sst_documents(id),actor TEXT NOT NULL,action TEXT NOT NULL,before_value JSONB,after_value JSONB,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE TABLE IF NOT EXISTS sst_mail_recipients(email TEXT PRIMARY KEY);
- CREATE TABLE IF NOT EXISTS sst_imports(id UUID PRIMARY KEY,digest TEXT NOT NULL,label TEXT NOT NULL,record_count INTEGER NOT NULL,document_count INTEGER NOT NULL,report_id UUID REFERENCES sst_records(id),imported_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE INDEX IF NOT EXISTS sst_records_kind ON sst_records(kind,archived_at);CREATE INDEX IF NOT EXISTS sst_events_record ON sst_events(record_id,id);`);await schemaDb.query('COMMIT')}catch(error){await schemaDb.query('ROLLBACK');throw error}finally{schemaDb.release()}
+ if (needsSchema(pool)) {
+   const schemaDb=await pool.connect();
+   try{await schemaDb.query('BEGIN');await schemaDb.query('SELECT pg_advisory_xact_lock(835107)');await schemaDb.query(`CREATE TABLE IF NOT EXISTS sst_records(
+    id UUID PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('training','equipment','incident','meeting','inspection','action','document')),
+    title TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('draft','open','progress','done')),
+    employee_key TEXT,employee_name TEXT NOT NULL DEFAULT '',department_id BIGINT REFERENCES schedule_leave_departments(id),
+    related_id UUID REFERENCES sst_records(id),owner TEXT NOT NULL DEFAULT '',event_date DATE,due_date DATE,
+    details TEXT NOT NULL DEFAULT '',fields JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
+   ALTER TABLE sst_records ADD COLUMN IF NOT EXISTS event_group_id UUID REFERENCES sst_records(id);
+   CREATE INDEX IF NOT EXISTS sst_records_event_group ON sst_records(event_group_id);
+   CREATE TABLE IF NOT EXISTS sst_documents(
+    id UUID PRIMARY KEY,record_id UUID REFERENCES sst_records(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
+   CREATE UNIQUE INDEX IF NOT EXISTS sst_document_unique ON sst_documents(sha256,COALESCE(record_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE archived_at IS NULL;
+   CREATE TABLE IF NOT EXISTS sst_removed_documents(document_id UUID PRIMARY KEY,removed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE OR REPLACE VIEW sst_visible_documents AS SELECT d.* FROM sst_documents d
+   WHERE NOT EXISTS (SELECT 1 FROM sst_removed_documents r WHERE r.document_id=d.id);
+   CREATE TABLE IF NOT EXISTS sst_events(id BIGSERIAL PRIMARY KEY,record_id UUID REFERENCES sst_records(id),document_id UUID REFERENCES sst_documents(id),actor TEXT NOT NULL,action TEXT NOT NULL,before_value JSONB,after_value JSONB,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE TABLE IF NOT EXISTS sst_mail_recipients(email TEXT PRIMARY KEY);
+   CREATE TABLE IF NOT EXISTS sst_imports(id UUID PRIMARY KEY,digest TEXT NOT NULL,label TEXT NOT NULL,record_count INTEGER NOT NULL,document_count INTEGER NOT NULL,report_id UUID REFERENCES sst_records(id),imported_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE INDEX IF NOT EXISTS sst_records_kind ON sst_records(kind,archived_at);CREATE INDEX IF NOT EXISTS sst_events_record ON sst_events(record_id,id);`);await schemaDb.query('COMMIT')}catch(error){await schemaDb.query('ROLLBACK');throw error}finally{schemaDb.release()}
+ }
  const admin=async(req,res,next)=>{try{const who=await identity(req);if(!who)return res.status(401).json({error:'Connectez-vous avec le compte administrateur de Quarts Service.'});if(who.kind!=='admin')return res.status(403).json({error:'Cet espace SST est réservé à l’administration.'});req.sstActor=who.name||'Administration';req.sstIdentity={kind:who.kind,name:who.name||'Administration',...(who.id?{id:who.id}:{})};res.set('Cache-Control','no-store');next()}catch{res.status(503).json({error:'Accès SST temporairement indisponible.'})}};
  const origin=(req,res,next)=>{if(req.get('origin')!==`${req.protocol}://${req.get('host')}`||req.get('x-sst-request')!=='1')return res.status(403).json({error:'Rechargez l’espace SST avant de réessayer.'});next()};
  const route=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Le dossier n’a pas pu être enregistré. Les données existantes sont conservées.'})}};

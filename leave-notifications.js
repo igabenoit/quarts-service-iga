@@ -1,7 +1,8 @@
+import {isPreparingPreview,needsSchema} from './preview-schema.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 // Department recipients and copies are kept in the private database. Tests never use department recipients.
 export async function installNotifications(app,pool,{requireManager,sameOrigin}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_mail_settings (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_mail_settings (
     id INTEGER PRIMARY KEY CHECK(id=1), test_recipient TEXT NOT NULL DEFAULT ''
   );
   ALTER TABLE schedule_leave_mail_settings ADD COLUMN IF NOT EXISTS copy_recipient TEXT NOT NULL DEFAULT '';
@@ -64,6 +65,8 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
       }
     }finally{running=false;}
   }
-  const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+  if (!isPreparingPreview()) {
+    const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+  }
   return {queue,run};
 }

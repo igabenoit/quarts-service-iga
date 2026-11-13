@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 import {createHash} from 'node:crypto';
@@ -32,7 +33,7 @@ export async function availabilityConflicts(pool,today){
   return rows.filter(r=>historyOf(r).length&&!profileAt(r,addDays(r.week_start,r.day_index)).availability[r.day_index]?.some(([a,b])=>a<=r.start_minute&&b>=r.end_minute)).map(r=>({employeeId:Number(r.employee_id),name:r.name,shiftId:Number(r.id),date:addDays(r.week_start,r.day_index),startMinute:r.start_minute,endMinute:r.end_minute}));
 }
 export async function installAvailability(app,pool,{requireManager,sameOrigin,requireStaff}){
-  await pool.query(`ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS availability_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS availability_history JSONB NOT NULL DEFAULT '[]'::jsonb;
     CREATE TABLE IF NOT EXISTS schedule_availability_requests (
     id BIGSERIAL PRIMARY KEY,submission_key UUID NOT NULL UNIQUE,employee_id BIGINT REFERENCES schedule_employees(id),employee_name TEXT NOT NULL,email TEXT NOT NULL,
     effective_date DATE NOT NULL,target_minutes INTEGER NOT NULL,availability JSONB NOT NULL,acknowledged BOOLEAN NOT NULL CHECK(acknowledged),rule_version TEXT NOT NULL,
@@ -40,14 +41,14 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),decided_at TIMESTAMPTZ,decision_note TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL DEFAULT 1);
     CREATE UNIQUE INDEX IF NOT EXISTS schedule_availability_one_pending ON schedule_availability_requests(employee_id) WHERE status='pending' AND is_test=FALSE;
     CREATE TABLE IF NOT EXISTS schedule_availability_events (id BIGSERIAL PRIMARY KEY,request_id BIGINT NOT NULL REFERENCES schedule_availability_requests(id),status TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());`);
-  await pool.query(`ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS department_id BIGINT REFERENCES schedule_leave_departments(id);
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS department_id BIGINT REFERENCES schedule_leave_departments(id);
     ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS department_name TEXT NOT NULL DEFAULT 'Service';
     ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS employee_name_key TEXT NOT NULL DEFAULT '';
     UPDATE schedule_availability_requests SET department_id=(SELECT id FROM schedule_leave_departments WHERE code='service') WHERE department_id IS NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS schedule_availability_external_pending ON schedule_availability_requests(department_id,employee_name_key)
       WHERE employee_id IS NULL AND employee_name_key<>'' AND status='pending' AND is_test=FALSE;`);
   // Preserve undo snapshots created before departments were available on this form.
-  await pool.query(`DO $$ BEGIN IF to_regclass('schedule_undo_rows') IS NOT NULL THEN
+  if (needsSchema(pool)) await pool.query(`DO $$ BEGIN IF to_regclass('schedule_undo_rows') IS NOT NULL THEN
     UPDATE schedule_undo_rows SET
       before_row=CASE WHEN before_row IS NOT NULL AND NOT before_row ? 'department_id' THEN before_row||jsonb_build_object('department_id',(SELECT id FROM schedule_leave_departments WHERE code='service'),'department_name','Service','employee_name_key','') ELSE before_row END,
       after_row=CASE WHEN after_row IS NOT NULL AND NOT after_row ? 'department_id' THEN after_row||jsonb_build_object('department_id',(SELECT id FROM schedule_leave_departments WHERE code='service'),'department_name','Service','employee_name_key','') ELSE after_row END
@@ -56,7 +57,7 @@ export async function installAvailability(app,pool,{requireManager,sameOrigin,re
   const mail=await installAvailabilityMail(pool);
   const base='/api/leave/availability';
   const ownRequest=employeeRequestSecurity(pool);
-  await pool.query('ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
+  if (needsSchema(pool)) await pool.query('ALTER TABLE schedule_availability_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
   const info=test=>async(_req,res)=>{try{
     const today=localDate((await pool.query('SELECT clock_timestamp() AS now')).rows[0].now);
     const staff=test?[{id:0,name:'Employé test',max_minutes:MAX_TARGET}]: (await pool.query('SELECT * FROM schedule_employees WHERE active=TRUE AND departed_at IS NULL ORDER BY name')).rows;

@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {assertServiceRevision} from './service-concurrency.js';
 // Parent tables precede children when rows are restored; deletions use reverse order.
 const keys={schedule_weeks:['week_start','store_id'],schedule_employees:['id'],schedule_leave_requests:['id'],schedule_availability_requests:['id'],
@@ -102,7 +103,7 @@ export async function undoLast(client,expectedId,storeId=null){
 }
 
 export async function installUndo(app,pool,{requireManager,sameOrigin}){
-  await installUndoSchema(pool);
+  if (needsSchema(pool)) await installUndoSchema(pool);
   app.get('/api/undo',requireManager,async(req,res)=>{
     res.set('Cache-Control','no-store');
     try{res.json({action:(await pool.query(latestSQL,[req.storeId??null])).rows[0]||null});}

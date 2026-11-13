@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import express from 'express';
 import {randomUUID,createHash} from 'node:crypto';
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status})};
@@ -26,7 +27,7 @@ export function validateRun(b,template){
  return data;
 }
 export async function installInspectionGrid(app,pool,{admin,origin,route}){
- await pool.query(`CREATE TABLE IF NOT EXISTS sst_grid_templates(id UUID PRIMARY KEY,title TEXT NOT NULL,schema JSONB NOT NULL,document_id UUID NOT NULL REFERENCES sst_documents(id),digest TEXT UNIQUE NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+ if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS sst_grid_templates(id UUID PRIMARY KEY,title TEXT NOT NULL,schema JSONB NOT NULL,document_id UUID NOT NULL REFERENCES sst_documents(id),digest TEXT UNIQUE NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
  CREATE TABLE IF NOT EXISTS sst_grid_runs(id UUID PRIMARY KEY REFERENCES sst_records(id),template_id UUID NOT NULL REFERENCES sst_grid_templates(id),data JSONB NOT NULL,revision INTEGER NOT NULL DEFAULT 1);`);
  const tx=async fn=>{const db=await pool.connect();try{await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835107)');const result=await fn(db);await db.query('COMMIT');return result}catch(e){await db.query('ROLLBACK');throw e}finally{db.release()}};
  const event=(db,req,action,id,before,after)=>db.query('INSERT INTO sst_events(record_id,actor,action,before_value,after_value) VALUES($1,$2,$3,$4,$5)',[id,req.sstActor,action,before?JSON.stringify(before):null,JSON.stringify(after)]);

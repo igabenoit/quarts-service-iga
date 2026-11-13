@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {installPrivateChat} from './service-private-chat.js';
 import express from 'express';
 import {ensureChatGuests,isChatGuest} from './service-chat-guests.js';
@@ -32,8 +33,8 @@ export function chatPayload(input={}){
 }
 
 export async function installServiceChat(app,pool,{employeePortal,managerAccess,sameOrigin,pushFactory}){
-  await ensureChatGuests(pool);
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_messages(
+  if (needsSchema(pool)) await ensureChatGuests(pool);
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_service_messages(
     id BIGSERIAL PRIMARY KEY,author_key TEXT NOT NULL,author_name TEXT NOT NULL,
     request_id UUID NOT NULL,body TEXT NOT NULL CHECK(length(body)<=4000),photo TEXT,
     pinned BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),

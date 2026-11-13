@@ -1,6 +1,6 @@
 {
   "framework": "express",
-  "installCommand": "npm ci && node scripts/vercel-assets.mjs",
+  "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
   "rewrites": [
     {"source": "/connexion-employe", "destination": "/connexion-employe.html"},

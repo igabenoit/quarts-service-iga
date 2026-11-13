@@ -22,3 +22,24 @@ test('Vercel ouvre uniquement le projet, le rôle et le schéma attendus, avec v
   const pool={query:async()=>({rows:[{schema:'public',role:'quart_rehearsal'}]})};
   await assert.rejects(verifyPreviewDatabase(pool,env),/Schéma/);
 });
+import {PGlite} from '@electric-sql/pglite';
+import {preparePreview,usePreparedSchema,needsSchema,isPreparingPreview} from '../preview-schema.js';
+
+test('une préparation interrompue reste indisponible puis une reprise réussie est idempotente',async()=>{
+  const db=new PGlite();
+  const target={...env,RENDER_EXTERNAL_URL:'https://quart-preview.example.invalid'};
+  try {
+    await assert.rejects(usePreparedSchema(db,target),/absent/);
+    let attempts=0;
+    const install=async()=>{attempts++;assert.equal(isPreparingPreview(),true);if(attempts===1)throw Error('interruption simulée');};
+    await assert.rejects(preparePreview(db,target,install),/interruption/);
+    assert.equal(isPreparingPreview(),false);
+    await assert.rejects(usePreparedSchema(db,target),/absent/);
+    await preparePreview(db,target,install);
+    await preparePreview(db,target,install);
+    assert.equal(attempts,2);
+    await usePreparedSchema(db,target);
+    assert.equal(needsSchema(db),false);
+    await assert.rejects(usePreparedSchema(db,{...target,RENDER_EXTERNAL_URL:'https://autre.example.invalid'}),/absent/);
+  } finally {await db.close();}
+});
