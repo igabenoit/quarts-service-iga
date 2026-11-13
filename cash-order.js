@@ -1,5 +1,5 @@
 import {needsSchema} from './preview-schema.js';
-import {orderXlsx} from './cash-xlsx.js';
+import {orderWorkbooks} from './cash-xlsx.js';
 import {cashAccess} from './depot-access.js';
 import {createHash} from 'node:crypto';
 import lib from './onboarding/tuac/pdf-lib.min.cjs';
@@ -104,7 +104,7 @@ export async function installCash(app,pool,auth,origin){
   try{
    const fingerprint=createHash('sha256').update(JSON.stringify([b.lockers,b.date,b.time,b.name,b.notes,b.ink])).digest('hex');
    const pdf=await orderPdf(b,lines,process.env.CASH_ORDER_FOLIO);
-   const excel=await Promise.all(b.lockers.map((q,i)=>q.some(Boolean)?orderXlsx(b,24+i,Buffer.from(process.env['CASH_TEMPLATE_'+(24+i)]||'','base64')):null));
+   const excel=await orderWorkbooks(b);
    await pool.query('INSERT INTO cash_order_mail(id,fingerprint,attachment,pickup,lockers,recipient,excel24,excel25) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',[b.id,fingerprint,pdf,b.date,b.lockers.flatMap((q,i)=>q.some(Boolean)?[24+i]:[]),bank,...excel]);
    const {rows:[row]}=await pool.query('SELECT * FROM cash_order_mail WHERE id=$1',[b.id]);
    if(row.recipient!==bank||row.fingerprint!==fingerprint)return res.status(409).json({error:'Cette référence correspond déjà à une autre commande.'});
