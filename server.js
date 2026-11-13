@@ -4,7 +4,7 @@ import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
 import {employeeFilesStorage,previewEmployeeFilesStorage} from './employee-files-storage.js';
-import {clearExpiredDocuments} from './document-uploads.js';
+import {clearExpiredDocuments,sstImportUploads} from './document-uploads.js';
 import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
 import {installInspectionGrid} from './inspection-grid.js';
@@ -844,6 +844,7 @@ app.use((error,_req,res,_next)=>{
 export default app;
 async function clearDocumentUploads(){
   await clearExpiredDocuments(pool);
+  await clearExpiredDocuments(pool,sstImportUploads);
   if(employeeVault.pool) await clearExpiredDocuments(employeeVault.pool);
 }
 if(runsInWebProcess()) setInterval(()=>clearDocumentUploads().catch(error=>logEvent('document_upload_cleanup_failed',{code:errorCode(error)},'error')),3600000).unref();

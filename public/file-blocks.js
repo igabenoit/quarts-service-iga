@@ -16,7 +16,7 @@ export async function sendBlocks(file, url, headers, metadata) {
       }
       if (response.status >= 500 && !attempt) continue;
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw Error(result.error || 'Le transfert a échoué. Réessayez.');
+      if (!response.ok) throw Object.assign(Error(result.error || 'Le transfert a échoué. Réessayez.'),{status:response.status});
       return result;
     }
   }
@@ -34,8 +34,8 @@ export async function sendBlocks(file, url, headers, metadata) {
   }
 }
 
-export function depositDocument(file,originalUrl,header) {
-  if (!file?.size || file.size>12*1024*1024) throw Error('Choisissez un fichier de 12 Mo ou moins.');
+export function depositDocument(file,originalUrl,header,limitMiB=12) {
+  if (!file?.size || file.size>limitMiB*1024*1024) throw Error('Choisissez un fichier de '+limitMiB+' Mo ou moins.');
   const url=new URL(originalUrl,location.origin);
   url.pathname+='/uploads/'+crypto.randomUUID();
   return sendBlocks(file,url,{[header]:'1'},{name:file.name});

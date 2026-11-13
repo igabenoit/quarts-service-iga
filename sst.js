@@ -1,4 +1,4 @@
-import {originalName,installDocumentUploads,installDocumentUploadSchema} from './document-uploads.js';
+import {originalName,installDocumentUploads,installDocumentUploadSchema,sstImportUploads} from './document-uploads.js';
 import {sendPrivateBytes} from './private-response.js';
 import {needsSchema} from './preview-schema.js';
 import {normalizeEmail} from './employee-contacts.js';
@@ -59,6 +59,7 @@ export async function installSST(app,pool,{identity}){
  }catch{return {records:[],documents:[],warning:'Le coffre des dossiers employés est indisponible. Ses pièces SST ne sont pas affichées.'};}};
  if (needsSchema(pool)) {
    await installDocumentUploadSchema(pool);
+   await installDocumentUploadSchema(pool,sstImportUploads);
    const schemaDb=await pool.connect();
    try{await schemaDb.query('BEGIN');await schemaDb.query('SELECT pg_advisory_xact_lock(835107)');await schemaDb.query(`CREATE TABLE IF NOT EXISTS sst_records(
     id UUID PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('training','equipment','incident','meeting','inspection','action','document')),
@@ -264,7 +265,12 @@ export async function installSST(app,pool,{identity}){
   res.json({format:'iga-sst-audit-v1',exportedAt:new Date().toISOString(),...result});
  }));
  app.get('/api/sst/export',admin,route(async(_req,res)=>{const shared=employeeFiles?await employeeFiles.list():{records:[],documents:[]};const db=await pool.connect();try{await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const [directory,records,documents,events,imports]=await Promise.all([sstDirectory(db),db.query('SELECT * FROM sst_records ORDER BY created_at'),db.query('SELECT id,record_id,name,mime,size,sha256,version,created_at,archived_at FROM sst_documents ORDER BY created_at'),db.query('SELECT * FROM sst_events ORDER BY id'),db.query('SELECT * FROM sst_imports ORDER BY imported_at')]);const gridTemplates=(await db.query('SELECT * FROM sst_grid_templates ORDER BY created_at')).rows,gridRuns=(await db.query('SELECT * FROM sst_grid_runs ORDER BY id')).rows;const equipmentTrainingEntries=(await db.query('SELECT * FROM sst_training_entries ORDER BY created_at,id')).rows;const preventionRevisions=(await db.query('SELECT * FROM sst_prevention_revisions ORDER BY created_at')).rows;records.rows.push(...shared.records);documents.rows.push(...shared.documents);res.attachment('SST-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json');res.type('application/json');res.write(JSON.stringify({format:'iga-sst-v1',exportedAt:new Date().toISOString(),...directory,records:records.rows,events:events.rows,imports:imports.rows,gridTemplates,gridRuns,equipmentTrainingEntries,preventionRevisions,removedDocuments:(await db.query('SELECT * FROM sst_removed_documents')).rows,removedTrainingEntries:(await db.query('SELECT * FROM sst_removed_training_entries')).rows}).slice(0,-1)+',"documents":[');for(const [i,d] of documents.rows.entries()){const raw=(await db.query('SELECT data FROM sst_documents WHERE id=$1',[d.id])).rows[0]?.data||(employeeFiles?await employeeFiles.read(d.id):null)?.data;if(!raw)throw Error('Original partagé indisponible');res.write((i?',':'')+JSON.stringify({...d,dataBase64:Buffer.from(raw).toString('base64')}))}res.end(']}');await db.query('COMMIT')}catch(e){await db.query('ROLLBACK');if(res.headersSent)res.destroy();else throw e}finally{db.release()}}));
- return {directory:()=>sstDirectory(pool),admin,origin,route,registerEmployeeFiles:adapter=>{employeeFiles=adapter;}};
+ function installImport(path,save) {
+   installDocumentUploads(app,{path,auth:admin,origin,wrap:route,transaction:tx,pool,storage:sstImportUploads,
+     owner:req=>JSON.stringify([req.sstIdentity.kind,req.sstIdentity.id??req.sstActor]),target:()=>path,
+     options:()=>({}),save:(db,req,_access,bytes)=>save(db,req,bytes)});
+ }
+ return {directory:()=>sstDirectory(pool),admin,origin,route,installImport,registerEmployeeFiles:adapter=>{employeeFiles=adapter;}};
 }
 
 

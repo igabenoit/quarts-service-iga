@@ -26,24 +26,27 @@ export function validateRun(b,template){
  }
  return data;
 }
-export async function installInspectionGrid(app,pool,{admin,origin,route}){
+export async function installInspectionGrid(app,pool,{admin,origin,route,installImport}){
  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS sst_grid_templates(id UUID PRIMARY KEY,title TEXT NOT NULL,schema JSONB NOT NULL,document_id UUID NOT NULL REFERENCES sst_documents(id),digest TEXT UNIQUE NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
  CREATE TABLE IF NOT EXISTS sst_grid_runs(id UUID PRIMARY KEY REFERENCES sst_records(id),template_id UUID NOT NULL REFERENCES sst_grid_templates(id),data JSONB NOT NULL,revision INTEGER NOT NULL DEFAULT 1);`);
  const tx=async fn=>{const db=await pool.connect();try{await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835107)');const result=await fn(db);await db.query('COMMIT');return result}catch(e){await db.query('ROLLBACK');throw e}finally{db.release()}};
  const event=(db,req,action,id,before,after)=>db.query('INSERT INTO sst_events(record_id,actor,action,before_value,after_value) VALUES($1,$2,$3,$4,$5)',[id,req.sstActor,action,before?JSON.stringify(before):null,JSON.stringify(after)]);
  app.get('/api/sst/grid/templates',admin,route(async(req,res)=>res.json({templates:(await pool.query('SELECT id,title,schema,document_id FROM sst_grid_templates ORDER BY created_at DESC')).rows})));
- app.post('/api/sst/grid/templates',admin,origin,express.raw({type:'application/octet-stream',limit:'16mb'}),route(async(req,res)=>{
- let b;try{b=JSON.parse(req.body.toString('utf8'))}catch{fail('Fichier de modèle illisible.')}
+ async function storeTemplate(db,req,bytes){
+ let b;try{b=JSON.parse(bytes.toString('utf8'))}catch{fail('Fichier de modèle illisible.')}
  const schema=validateTemplate(b);if(typeof b.pdfBase64!=='string'||b.pdfBase64.length>16*1024*1024)fail('Original PDF invalide.');
  const pdf=Buffer.from(b.pdfBase64,'base64');if(!pdf.subarray(0,1024).includes(Buffer.from('%PDF-'))||pdf.length>12*1024*1024)fail('Original PDF invalide.');
  const name=str(b.sourceName,180),sha=createHash('sha256').update(pdf).digest('hex'),digest=createHash('sha256').update(JSON.stringify(schema)+sha).digest('hex');
- const result=await tx(async db=>{
  const old=(await db.query('SELECT id FROM sst_grid_templates WHERE digest=$1',[digest])).rows[0];if(old)return old;
  const id=randomUUID(),recordId=randomUUID(),documentId=randomUUID();
  await db.query("INSERT INTO sst_records(id,kind,title,status,fields,details) VALUES($1,'document',$2,'open',$3,$4)",[recordId,schema.title+' · modèle original',JSON.stringify({reference:schema.sourceVersion}), 'Modèle de la grille d’inspection numérique. Original conservé.']);
  await db.query("INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,'application/pdf',$4,$5,$6)",[documentId,recordId,name,pdf.length,sha,pdf]);
  await db.query('INSERT INTO sst_grid_templates(id,title,schema,document_id,digest) VALUES($1,$2,$3,$4,$5)',[id,schema.title,JSON.stringify(schema),documentId,digest]);
- await event(db,req,'grid.template.imported',recordId,null,{id,documentId,sha256:sha,title:schema.title});return {id};});res.json(result);
+ await event(db,req,'grid.template.imported',recordId,null,{id,documentId,sha256:sha,title:schema.title});return {id};
+ }
+ installImport('/api/sst/grid/templates',storeTemplate);
+ app.post('/api/sst/grid/templates',admin,origin,express.raw({type:'application/octet-stream',limit:'16mb'}),route(async(req,res)=>{
+ res.json(await tx(db=>storeTemplate(db,req,req.body)));
  }));
  app.get('/api/sst/grid/runs',admin,route(async(req,res)=>res.json({runs:(await pool.query('SELECT g.id,g.template_id,g.revision,r.title,r.status,r.owner,r.event_date FROM sst_grid_runs g JOIN sst_records r ON r.id=g.id WHERE r.archived_at IS NULL ORDER BY r.event_date DESC NULLS LAST,r.updated_at DESC')).rows})));
  app.get('/api/sst/grid/runs/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Inspection introuvable.',404);const r=(await pool.query('SELECT g.*,r.status,r.owner,r.event_date,r.version AS record_version FROM sst_grid_runs g JOIN sst_records r ON r.id=g.id WHERE g.id=$1 AND r.archived_at IS NULL',[req.params.id])).rows[0];if(!r)fail('Inspection introuvable.',404);r.data.inspector=r.owner;r.data.date=r.event_date?String(r.event_date.toISOString?.().slice(0,10)||r.event_date).slice(0,10):null;res.json(r)}));
