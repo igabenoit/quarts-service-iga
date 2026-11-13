@@ -1,5 +1,16 @@
 import pg from 'pg';
 
+async function verifyVercelVault(pool,schema,trial){
+ const required=trial ? ['employee_file_originals','onboarding_cases','onboarding_docs'] :
+  ['employee_file_grants','employee_file_templates','employee_file_assignments','employee_file_originals',
+   'employee_file_links','employee_file_events','employee_file_policies','employee_file_privacy',
+   'employee_file_campaigns','employee_file_privacy_incidents','employee_file_acknowledgements','onboarding_cases','onboarding_docs'];
+ const {rows:[db]}=await pool.query(`SELECT current_schema() AS name,
+   NOT EXISTS(SELECT 1 FROM unnest($1::text[]) AS t(name) WHERE to_regclass(format('%I.%I',$2::text,t.name)) IS NULL) AS complete`,
+   [required,schema]);
+ if(db.name!==schema || !db.complete)throw Error('Schéma du coffre canadien incomplet ou inaccessible.');
+}
+
 // Never fall back to the scheduling database. No production files are written
 // until a separate Canadian database and its hosting review are configured.
 export async function employeeFilesStorage(env=process.env){
@@ -11,6 +22,13 @@ export async function employeeFilesStorage(env=process.env){
  if(!isolated){
   if(!['postgres:','postgresql:'].includes(u.protocol)||url===env.DATABASE_URL||u.hostname.includes('render.com')||u.hostname.startsWith('dpg-'))throw Error('Le coffre employé doit utiliser une base distincte de Render.');
   if(env.EMPLOYEE_FILES_REGION!=='ca-central-1')throw Error('Confirmez la région Canada Central avant connexion.');
+  if(env.VERCEL && env.VERCEL_ENV==='production'){
+   const direct=/^db\.([a-z0-9]{20})\.supabase\.co$/.exec(u.hostname);
+   const vaultProject=direct?.[1] || (u.hostname.endsWith('.pooler.supabase.com') && /\.([a-z0-9]{20})$/.exec(u.username)?.[1]);
+   if(!vaultProject || vaultProject===env.QUART_SUPABASE_PROJECT_REF){
+    throw Error('Projet du coffre canadien inattendu.');
+   }
+  }
   if(!u.password)throw Error('Le mot de passe du coffre est absent.');
   // Connection-string SSL parameters must not override certificate validation.
   for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])u.searchParams.delete(key);
@@ -26,9 +44,12 @@ export async function employeeFilesStorage(env=process.env){
   try{
    const recipients=[env.EMPLOYEE_TRIAL_EMAIL,env.EMPLOYEE_TRIAL_MANAGER_EMAIL];
    if(!recipients.every(s=>typeof s==='string'&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)))throw Error('Boîtes de test requises.');
-   await pool.query('CREATE SCHEMA IF NOT EXISTS employee_files_single_trial; REVOKE ALL ON SCHEMA employee_files_single_trial FROM PUBLIC');
-   const check=await pool.query("SELECT current_schema() AS name");
-   if(check.rows[0]?.name!==schema)throw Error('Schéma d’essai inaccessible.');
+   if(!env.VERCEL)await pool.query('CREATE SCHEMA IF NOT EXISTS employee_files_single_trial; REVOKE ALL ON SCHEMA employee_files_single_trial FROM PUBLIC');
+   if(env.VERCEL)await verifyVercelVault(pool,schema,true);
+   else {
+    const check=await pool.query("SELECT current_schema() AS name");
+    if(check.rows[0]?.name!==schema)throw Error('Schéma d’essai inaccessible.');
+   }
    return {pool:null,trialPool:pool,status:{ready:false,singleTrial:true,message:'Essai limité à la fiche fictive. Le coffre RH général demeure fermé.'}};
   }catch(e){await pool.end();throw e;}
  }
@@ -45,6 +66,10 @@ export async function employeeFilesStorage(env=process.env){
   }finally{await pool.end();}
   return {pool:null,status};
  }
- try{await pool.query('CREATE SCHEMA IF NOT EXISTS employee_files_private');}catch(error){await pool.end();throw error;}
- return {pool,status:{ready:true,region:isolated?'test-local':'ca-central-1',message:isolated?'Base fictive isolée.':'Coffre documentaire distinct · Canada Central. Le traitement par l’application Render reste couvert par l’EFVP.'}};
+ try{
+  if(env.VERCEL){
+   await verifyVercelVault(pool,schema,false);
+  }else await pool.query('CREATE SCHEMA IF NOT EXISTS employee_files_private');
+ }catch(error){await pool.end();throw error;}
+ return {pool,status:{ready:true,region:isolated?'test-local':'ca-central-1',message:isolated?'Base fictive isolée.':'Coffre documentaire distinct · Canada Central.'}};
 }

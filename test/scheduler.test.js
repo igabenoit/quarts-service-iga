@@ -76,10 +76,10 @@ test('la route manuelle accepte le dépassement souhaité et renvoie le motif ex
     const e=employee({maxMinutes});
     const client={release(){},async query(sql,args=[]){
       if(['BEGIN','COMMIT','ROLLBACK'].includes(sql))transactions.push(sql);
-      if(sql==='SELECT * FROM schedule_shifts WHERE id=$1')return {rowCount:1,rows:[{...shifts[2],week_start:shifts[2].weekStart}]};
-      if(sql==='SELECT * FROM schedule_employees WHERE id=$1')return {rowCount:1,rows:[e]};
+      if(sql==='SELECT * FROM schedule_shifts WHERE id=$1 AND store_id=$2'&&args[1]==='principal')return {rowCount:1,rows:[{...shifts[2],week_start:shifts[2].weekStart}]};
+      if(sql==='SELECT * FROM schedule_employees WHERE id=$1 AND store_id=$2'&&args[1]==='principal')return {rowCount:1,rows:[e]};
       if(sql.includes('SELECT a.shift_id, a.employee_id'))return {rows:existing.map(a=>({shift_id:a.shiftId,employee_id:a.employeeId}))};
-      if(sql==='SELECT * FROM schedule_shifts WHERE week_start=$1')return {rows:shifts};
+      if(sql==='SELECT * FROM schedule_shifts WHERE week_start=$1 AND store_id=$2'&&args[1]==='principal')return {rows:shifts};
       if(sql.includes('INSERT INTO schedule_assignments'))writes.push(args);
       return {rowCount:0,rows:[]};
     }};
@@ -88,7 +88,7 @@ test('la route manuelle accepte le dépassement souhaité et renvoie le motif ex
       mapShift:s=>s,mapEmployee:e=>({...e}),approvedLeave:async()=>[],conflictsWithLeave,assignmentConflict,applyServiceRoleDefault,shiftWithApprovedLeave,saveShiftLeave});
     vm.runInContext(route,context);
     const response={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
-    await handler({params:{id:'3'},body:{employeeId:1}},response);
+    await handler({storeId:'principal',params:{id:'3'},body:{employeeId:1}},response);
     if(maxMinutes===900){
       assert.equal(response.code,400);
       assert.match(response.body.error,/18 h 30.*Maximum \/ semaine » de 15 h/);

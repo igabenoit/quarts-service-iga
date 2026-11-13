@@ -1,3 +1,5 @@
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {activePersonSQL} from './employee-access.js';
 import {errorCode,logEvent} from './runtime-diagnostics.js';
 import crypto from 'node:crypto';
@@ -49,45 +51,52 @@ export function pushTables(scope){
 
 export async function createServiceChatPush(pool,{secret,send=webpush.sendNotification.bind(webpush),subject='https://quarts-service-iga.onrender.com',scope=process.env.RENDER_EXTERNAL_URL||LEGACY_ORIGIN,startWorker=true}={}){
   if(!secret)throw Error('SESSION_SECRET requis pour les notifications.');
-  await ensureChatGuests(pool);
-  const tables=pushTables(scope),client=await pool.connect();
-  let config;
-  try{
-    await client.query('BEGIN');
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('service-push-schema'))");
-    await client.query(`CREATE TABLE IF NOT EXISTS ${tables.config}(
-    id INTEGER PRIMARY KEY CHECK(id=1),public_key TEXT NOT NULL,private_key_encrypted TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS ${tables.subscriptions}(
-    id UUID PRIMARY KEY,owner_key TEXT NOT NULL,credential_hash TEXT NOT NULL,endpoint_hash TEXT NOT NULL UNIQUE,
-    subscription JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),last_test_at TIMESTAMPTZ);
-    CREATE INDEX IF NOT EXISTS ${tables.ownerIndex} ON ${tables.subscriptions}(owner_key);
-    CREATE TABLE IF NOT EXISTS ${tables.jobs}(
-    id BIGSERIAL PRIMARY KEY,subscription_id UUID NOT NULL REFERENCES ${tables.subscriptions}(id) ON DELETE CASCADE,
-    message_id BIGINT NOT NULL REFERENCES schedule_service_messages(id) ON DELETE CASCADE,
-    attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE(subscription_id,message_id));
-    CREATE INDEX IF NOT EXISTS ${tables.dueIndex} ON ${tables.jobs}(due_at);`);
-    await client.query(`CREATE TABLE IF NOT EXISTS ${tables.jobs}_private(
+  if (needsSchema(pool)) await ensureChatGuests(pool);
+  const tables=pushTables(scope);
+  async function preparePushKeys(){
+    const client=await pool.connect();
+    let config;
+    try{
+      await client.query('BEGIN');
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('service-push-schema'))");
+      await client.query(`CREATE TABLE IF NOT EXISTS ${tables.config}(
+      id INTEGER PRIMARY KEY CHECK(id=1),public_key TEXT NOT NULL,private_key_encrypted TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ${tables.subscriptions}(
+      id UUID PRIMARY KEY,owner_key TEXT NOT NULL,credential_hash TEXT NOT NULL,endpoint_hash TEXT NOT NULL UNIQUE,
+      subscription JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),last_test_at TIMESTAMPTZ);
+      CREATE INDEX IF NOT EXISTS ${tables.ownerIndex} ON ${tables.subscriptions}(owner_key);
+      CREATE TABLE IF NOT EXISTS ${tables.jobs}(
       id BIGSERIAL PRIMARY KEY,subscription_id UUID NOT NULL REFERENCES ${tables.subscriptions}(id) ON DELETE CASCADE,
-      message_id BIGINT NOT NULL REFERENCES schedule_service_private_messages(id) ON DELETE CASCADE,
+      message_id BIGINT NOT NULL REFERENCES schedule_service_messages(id) ON DELETE CASCADE,
       attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
       lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
       UNIQUE(subscription_id,message_id));
-      CREATE INDEX IF NOT EXISTS ${tables.dueIndex}_private ON ${tables.jobs}_private(due_at);`);
-    config=(await client.query(`SELECT * FROM ${tables.config} WHERE id=1`)).rows[0];
-    if(!config){
-      const keys=webpush.generateVAPIDKeys();
-      await client.query(`INSERT INTO ${tables.config}(id,public_key,private_key_encrypted) VALUES(1,$1,$2) ON CONFLICT DO NOTHING`,[keys.publicKey,encryptPushKey(keys.privateKey,secret)]);
+      CREATE INDEX IF NOT EXISTS ${tables.dueIndex} ON ${tables.jobs}(due_at);`);
+      await client.query(`CREATE TABLE IF NOT EXISTS ${tables.jobs}_private(
+        id BIGSERIAL PRIMARY KEY,subscription_id UUID NOT NULL REFERENCES ${tables.subscriptions}(id) ON DELETE CASCADE,
+        message_id BIGINT NOT NULL REFERENCES schedule_service_private_messages(id) ON DELETE CASCADE,
+        attempts INTEGER NOT NULL DEFAULT 0,due_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+        lease_until TIMESTAMPTZ,lease_token UUID,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+        UNIQUE(subscription_id,message_id));
+        CREATE INDEX IF NOT EXISTS ${tables.dueIndex}_private ON ${tables.jobs}_private(due_at);`);
       config=(await client.query(`SELECT * FROM ${tables.config} WHERE id=1`)).rows[0];
-    }
-    // A changed secret or damaged key within the same origin must still fail visibly.
-    try{decryptPushKey(config.private_key_encrypted,secret);}
-    catch{throw Object.assign(Error('Clé de notifications illisible pour ce service. Vérifier SESSION_SECRET sans régénérer les clés.'),{code:'PUSH_KEY_DECRYPT_FAILED'});}
-    await client.query(`CREATE TABLE IF NOT EXISTS schedule_service_push_origins(origin TEXT PRIMARY KEY)`);
-    await client.query(`INSERT INTO schedule_service_push_origins(origin) VALUES($1) ON CONFLICT DO NOTHING`,[tables.scope]);
-    await client.query('COMMIT');
-  }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
+      if(!config){
+        const keys=webpush.generateVAPIDKeys();
+        await client.query(`INSERT INTO ${tables.config}(id,public_key,private_key_encrypted) VALUES(1,$1,$2) ON CONFLICT DO NOTHING`,[keys.publicKey,encryptPushKey(keys.privateKey,secret)]);
+        config=(await client.query(`SELECT * FROM ${tables.config} WHERE id=1`)).rows[0];
+      }
+      // A changed secret or damaged key within the same origin must still fail visibly.
+      try{decryptPushKey(config.private_key_encrypted,secret);}
+      catch{throw Object.assign(Error('Clé de notifications illisible pour ce service. Vérifier SESSION_SECRET sans régénérer les clés.'),{code:'PUSH_KEY_DECRYPT_FAILED'});}
+      await client.query(`CREATE TABLE IF NOT EXISTS schedule_service_push_origins(origin TEXT PRIMARY KEY)`);
+      await client.query(`INSERT INTO schedule_service_push_origins(origin) VALUES($1) ON CONFLICT DO NOTHING`,[tables.scope]);
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
+    return config;
+  }
+  const config=needsSchema(pool) ? await preparePushKeys() :
+    (await pool.query(`SELECT * FROM ${tables.config} WHERE id=1`)).rows[0];
+  if(!config)throw Error('Clés de notification absentes pour cette origine.');
   const vapidDetails={subject,publicKey:config.public_key,privateKey:decryptPushKey(config.private_key_encrypted,secret)};
   const fingerprint=value=>crypto.createHmac('sha256',secret).update('service-push-credential:'+value).digest('hex');
   async function credential(owner,{includeGuests=true}={}){
@@ -177,9 +186,10 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
         }));
       }
       }
-    }catch(error){logEvent('push_worker_failed',{component:'service_chat',code:errorCode(error)},'error');}finally{running=false;}
+    }finally{running=false;}
   }
-  function kick(){void drain();}
+  const onWorkerError=error=>logEvent('push_worker_failed',{component:'service_chat',code:errorCode(error)},'error');
+  function kick(){if(runsInWebProcess()) void drain().catch(onWorkerError);}
   function installRoutes(app,{auth,sameOrigin}){
     const endpoint=fn=>async(req,res)=>{
       try{await fn(req,res);}catch(error){res.status(error.status||503).json({error:error.status?error.message:'Notifications temporairement indisponibles. Réessaie.'});}
@@ -224,6 +234,6 @@ export async function createServiceChatPush(pool,{secret,send=webpush.sendNotifi
       res.json({ok:true});
     }));
   }
-  const timer=startWorker?setInterval(kick,30000):null;timer?.unref();
+  const timer=startWorker&&runsInWebProcess()?setInterval(kick,30000):null;timer?.unref();
   return {enqueue,enqueueSchedule:schedulePush.enqueue,scheduleInventory:schedulePush.inventory,kick,drain,installRoutes,logout,credential,publicKey:vapidDetails.publicKey,stop(){stopped=true;if(timer)clearInterval(timer);}};
 }

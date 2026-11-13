@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
 import {buildTrainingReport,entryLabels,localDay} from './public/equipment-training-model.js';
@@ -104,7 +105,7 @@ export function validateTrainingEntry(body,context){
 
 export async function installEquipmentTraining(app,pool,service){
  const {admin,origin,route,directory}=service;
- await pool.query(`CREATE TABLE IF NOT EXISTS sst_training_entries(
+ if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS sst_training_entries(
  id UUID PRIMARY KEY,equipment_id UUID NOT NULL REFERENCES sst_records(id),kind TEXT NOT NULL,
  data JSONB NOT NULL,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
  supersedes UUID UNIQUE REFERENCES sst_training_entries(id),correction_reason TEXT NOT NULL DEFAULT '');

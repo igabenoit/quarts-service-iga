@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import crypto from 'node:crypto';
 import {mailResult,logEvent,errorCode} from './runtime-diagnostics.js';
@@ -10,13 +11,13 @@ const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/Toronto
 const open=c=>c?.opened&&(!c.deadline||c.deadline>=today());
 const endpoint=fn=>async(req,res)=>{res.set('Cache-Control','no-store');try{await fn(req,res);}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Impossible de terminer cette action. Réessayez sans créer une nouvelle commande.'});}};
 export async function installClothing(app,pool,{requireStaff,requireManager,sameOrigin,fetchImpl=fetch}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_clothing_campaigns(id BIGSERIAL PRIMARY KEY,title TEXT NOT NULL,deadline TEXT NOT NULL DEFAULT '',opened BOOLEAN NOT NULL DEFAULT FALSE,recipients JSONB NOT NULL DEFAULT '[]',version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_clothing_campaigns(id BIGSERIAL PRIMARY KEY,title TEXT NOT NULL,deadline TEXT NOT NULL DEFAULT '',opened BOOLEAN NOT NULL DEFAULT FALSE,recipients JSONB NOT NULL DEFAULT '[]',version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
   CREATE TABLE IF NOT EXISTS schedule_clothing_orders(id UUID PRIMARY KEY,campaign_id BIGINT NOT NULL REFERENCES schedule_clothing_campaigns(id),campaign_title TEXT NOT NULL,employee_name TEXT NOT NULL,department_name TEXT NOT NULL,items JSONB NOT NULL,total_cents INTEGER NOT NULL,digest TEXT NOT NULL,recipients JSONB NOT NULL,cancelled BOOLEAN NOT NULL DEFAULT FALSE,version INTEGER NOT NULL DEFAULT 1,mail_status TEXT NOT NULL DEFAULT 'pending',mail_attempt TIMESTAMPTZ,provider_id TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
   INSERT INTO schedule_clothing_campaigns(title) SELECT 'Chandails 2026 — noir et vert forêt' WHERE NOT EXISTS(SELECT 1 FROM schedule_clothing_campaigns);`);
   async function transaction(fn){const c=await pool.connect();try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(734882)');const out=await fn(c);await c.query('COMMIT');return out;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
-  await pool.query(`ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ; ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ;`);
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ; ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ;`);
   const ownRequest=employeeRequestSecurity(pool);
-  await pool.query('ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES schedule_store_people(id)');
+  if (needsSchema(pool)) await pool.query('ALTER TABLE schedule_clothing_orders ADD COLUMN IF NOT EXISTS person_id BIGINT REFERENCES schedule_store_people(id)');
   const campaign=async(id,db=pool)=>(await db.query('SELECT * FROM schedule_clothing_campaigns WHERE id=$1',[id])).rows[0];
   const orders=async id=>(await pool.query('SELECT id,campaign_id,employee_name,department_name,items,total_cents,cancelled,version,mail_status,created_at,paid_at,collected_at FROM schedule_clothing_orders WHERE campaign_id=$1 ORDER BY created_at,id',[id])).rows;
   async function deliver(id){

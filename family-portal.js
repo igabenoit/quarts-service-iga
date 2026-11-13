@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {installFamilyGoogleCalendar} from './family-google-calendar.js';
 import {isDate,monday,today} from './public/departments-core.js';
@@ -13,7 +14,7 @@ const newCode=()=>Array.from(crypto.randomBytes(16),n=>'ABCDEFGHJKLMNPQRSTUVWXYZ
 
 // Family identities are independent of employee records and manager accounts.
 export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_access(
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_family_access(
     id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,code_hash TEXT NOT NULL UNIQUE,
     active BOOLEAN NOT NULL DEFAULT TRUE,version INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE IF NOT EXISTS schedule_family_members(
@@ -57,7 +58,7 @@ export async function installFamilyPortal(app,pool,{requireManager,sameOrigin,di
     const group=await members(req.family,await directory(pool)),ids=new Set(group.people.map(p=>p.id));
     const published=(await pool.query('SELECT week_start,published FROM schedule_department_weeks WHERE published IS NOT NULL')).rows;
     const weeks=published.filter(w=>w.published.rows.some(r=>ids.has(r.personId))).map(w=>iso(w.week_start));
-    if(group.people.some(p=>p.serviceEmployeeId))weeks.push(...(await pool.query('SELECT week_start FROM schedule_public_links')).rows.map(w=>iso(w.week_start)));
+    if(group.people.some(p=>p.serviceEmployeeId))weeks.push(...(await pool.query('SELECT DISTINCT week_start FROM schedule_employee_links WHERE employee_id=ANY($1::bigint[])',[group.people.map(p=>p.serviceEmployeeId).filter(Boolean)])).rows.map(w=>iso(w.week_start)));
     res.json({name:req.family.name,today:today(),people:group.roots.map(({id,name})=>({id,name})),weeks:[...new Set(weeks)].sort().reverse()});
   }));
   async function readFamilyWeek(family,start){

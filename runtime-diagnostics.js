@@ -2,7 +2,10 @@ import {randomUUID} from 'node:crypto';
 
 const startedAt=new Date().toISOString();
 let phase='module_import';
-export const release=()=>/^[a-f0-9]{40}$/i.test(process.env.RENDER_GIT_COMMIT||'')?process.env.RENDER_GIT_COMMIT:null;
+export function release(){
+  const commit=(process.env.VERCEL && process.env.VERCEL_GIT_COMMIT_SHA) || process.env.RENDER_GIT_COMMIT;
+  return /^[a-f0-9]{40}$/i.test(commit||'') ? commit : null;
+}
 export function logEvent(event,details={},level='info'){
   // Never serialize an Error, request, SQL statement, cookie, URL, or payload.
   const record={time:new Date().toISOString(),level,event,phase,commit:release()};

@@ -1,6 +1,6 @@
+import {installCoreSchema} from '../schedule-core-schema.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 import {installUndoSchema,beginUndo,undoLast} from '../undo.js';
 import {installLeave} from '../leave.js';
@@ -10,9 +10,7 @@ test('annulation transactionnelle sur PostgreSQL : quarts, cascade, congés, gro
   const db=new PGlite();
   const pool={query:async(sql,args)=>args?db.query(sql,args):(await db.exec(sql)).at(-1)||{rows:[]}};
   try{
-    const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-    const ddl=source.slice(source.indexOf('await pool.query(`'),source.indexOf('app.disable('));
-    await new Function('pool','return (async()=>{'+ddl+'})();')(pool);
+    await installCoreSchema(pool);
     const app={use(){},get(){},post(){},patch(){},put(){}};
     const timer=globalThis.setInterval;globalThis.setInterval=()=>({unref(){}});
     try{await installLeave(app,pool,{requireManager(){},sameOrigin(){},hasStaffAccess(){}});}finally{globalThis.setInterval=timer;}

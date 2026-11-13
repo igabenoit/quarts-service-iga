@@ -1,3 +1,5 @@
+import {installScheduledWorkSchema,runsInWebProcess,runScheduledWork} from './scheduled-work.js';
+import {needsSchema,isPreparingPreview,usePreparedSchema} from './preview-schema.js';
 import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
@@ -18,7 +20,6 @@ import {saveShiftLeave} from './approved-shift-leave.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 import {publishServiceWeek,publishedServiceResult} from './service-publication.js';
 import {serviceRevision,assertServiceRevision,commitServiceTransaction} from './service-concurrency.js';
-import {installPdfAssets} from './pdf-assets.js';
 import {installManagerAccess} from './manager-access.js';
 import crypto from "node:crypto";
 import {employeeAvailability,localDate,profileAt} from "./availability-rules.js";
@@ -27,7 +28,8 @@ import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
-import {renderScheduleConnection,verifyRenderScheduleConnection} from './render-schedule-database.js';
+import {installCoreSchema} from "./schedule-core-schema.js";
+import {schedulePoolConfig,verifyPreviewDatabase} from "./schedule-database.js";
 import {saveEmployeeCode} from './employee-portal.js';
 import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
@@ -38,6 +40,11 @@ import {applyServiceRoleDefault,copyServiceShifts} from './service-role-defaults
 
 const { Pool } = pg;
 const app = express();
+// Vercel reserves /api for filesystem functions. Restore the app path before routing and access checks.
+if (process.env.VERCEL) app.use((req,_res,next)=>{
+  if (req.url.startsWith('/quart-api/')) req.url='/api/'+req.url.slice('/quart-api/'.length);
+  next();
+});
 const port = Number(process.env.PORT || 3000);
 const production = process.env.NODE_ENV === "production";
 
@@ -46,137 +53,17 @@ for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
   if (!process.env[key]) throw Object.assign(new Error(`Variable requise absente: ${key}`),{code:'MISSING_'+key});
 }
 
-const scheduleTarget = renderScheduleConnection(process.env);
-const pool = new Pool(scheduleTarget.config);
-await verifyRenderScheduleConnection(pool,scheduleTarget);
+const pool = new Pool(schedulePoolConfig(process.env));
+await verifyPreviewDatabase(pool,process.env);
+const preparation = isPreparingPreview();
+if (process.env.VERCEL && !preparation) await usePreparedSchema(pool,process.env);
 pool.on('error',error=>logEvent('database_pool_error',{code:errorCode(error)},'error'));
 startupPhase('schema_core');
 const attempts = new Map();
 const scheduleAccessAttempts = new Map();
 const sessionSecret = process.env.SESSION_SECRET;
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_weeks (
-    week_start DATE PRIMARY KEY,
-    cashier_budget_minutes INTEGER NOT NULL DEFAULT 26580 CHECK (cashier_budget_minutes >= 0),
-    packer_budget_minutes INTEGER NOT NULL DEFAULT 11820 CHECK (packer_budget_minutes >= 0),
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-
-  CREATE TABLE IF NOT EXISTS schedule_shifts (
-    id BIGSERIAL PRIMARY KEY,
-    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
-    area TEXT NOT NULL CHECK (area IN ('front', 'packer')),
-    role TEXT NOT NULL CHECK (role IN ('cashier', 'supervisor', 'support', 'packer')),
-    day_index INTEGER NOT NULL CHECK (day_index BETWEEN 0 AND 6),
-    start_minute INTEGER NOT NULL CHECK (start_minute BETWEEN 0 AND 1439),
-    end_minute INTEGER NOT NULL CHECK (end_minute BETWEEN 1 AND 1440),
-    break_minutes INTEGER NOT NULL DEFAULT 0 CHECK (break_minutes BETWEEN 0 AND 240),
-    source_department TEXT NOT NULL DEFAULT '',
-    notes TEXT NOT NULL DEFAULT '',
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (end_minute > start_minute),
-    CHECK (end_minute - start_minute > break_minutes)
-  );
-
-  CREATE INDEX IF NOT EXISTS schedule_shifts_week_idx
-  ON schedule_shifts (week_start, area, day_index, start_minute);
-`);
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_employees (
-    id BIGSERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    area TEXT NOT NULL CHECK (area IN ('front','packer')),
-    role TEXT NOT NULL CHECK (role IN ('cashier','supervisor','packer')),
-    seniority TEXT NOT NULL DEFAULT '9999-12-31',
-    target_minutes INTEGER NOT NULL DEFAULT 0,
-    max_minutes INTEGER NOT NULL DEFAULT 2400,
-    availability JSONB NOT NULL DEFAULT '{}'::jsonb,
-    notes TEXT NOT NULL DEFAULT '',
-    active BOOLEAN NOT NULL DEFAULT TRUE
-  );
-  CREATE TABLE IF NOT EXISTS schedule_assignments (
-    shift_id BIGINT PRIMARY KEY REFERENCES schedule_shifts(id) ON DELETE CASCADE,
-    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-`);
-await pool.query(`
-  ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS training BOOLEAN NOT NULL DEFAULT FALSE;
-  ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS training_minutes INTEGER;
-  UPDATE schedule_shifts s SET training=TRUE, role=COALESCE((
-    SELECT e.role FROM schedule_assignments a JOIN schedule_employees e ON e.id=a.employee_id WHERE a.shift_id=s.id
-  ),'cashier') WHERE s.role='training';
-  UPDATE schedule_shifts SET area='packer' WHERE training AND role='packer' AND area<>'packer';
-  ALTER TABLE schedule_shifts DROP CONSTRAINT IF EXISTS schedule_shifts_role_check;
-  ALTER TABLE schedule_shifts ADD CONSTRAINT schedule_shifts_role_check
-    CHECK (role IN ('cashier','supervisor','support','packer','orders','manager'));
-  ALTER TABLE schedule_employees DROP CONSTRAINT IF EXISTS schedule_employees_role_check;
-  ALTER TABLE schedule_employees ADD CONSTRAINT schedule_employees_role_check
-    CHECK (role IN ('cashier','supervisor','packer','orders','manager'));
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS display_rank INTEGER;
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS assignment_rank INTEGER;
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS is_minor BOOLEAN NOT NULL DEFAULT FALSE;
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS allow_extra_hours BOOLEAN NOT NULL DEFAULT FALSE;
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS roles JSONB NOT NULL DEFAULT '[]'::jsonb;
-  ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS departed_at TIMESTAMPTZ;
-  UPDATE schedule_employees SET roles=jsonb_build_array(role)
-    WHERE jsonb_typeof(roles) <> 'array' OR NOT (roles ? role);
-`);
-await pool.query(`
-  WITH ranks AS (
-    SELECT id, ROW_NUMBER() OVER (PARTITION BY role ORDER BY seniority, id)
-      + COALESCE((SELECT MAX(display_rank) FROM schedule_employees existing WHERE existing.role = missing.role), 0) AS position
-    FROM schedule_employees missing WHERE display_rank IS NULL
-  )
-  UPDATE schedule_employees e SET display_rank = ranks.position FROM ranks WHERE e.id = ranks.id;
-  WITH ranks AS (
-    SELECT id, ROW_NUMBER() OVER (PARTITION BY role ORDER BY seniority, id)
-      + COALESCE((SELECT MAX(assignment_rank) FROM schedule_employees existing WHERE existing.role = missing.role), 0) AS position
-    FROM schedule_employees missing WHERE assignment_rank IS NULL
-  )
-  UPDATE schedule_employees e SET assignment_rank = ranks.position FROM ranks WHERE e.id = ranks.id;
-`);
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_time_off (
-    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
-    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id) ON DELETE CASCADE,
-    day_index INTEGER NOT NULL CHECK (day_index BETWEEN 0 AND 6),
-    PRIMARY KEY (week_start, employee_id, day_index)
-  );
-`);
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_day_exceptions (
-    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
-    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id) ON DELETE CASCADE,
-    PRIMARY KEY (week_start, employee_id)
-  );
-`);
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_public_links (
-    week_start DATE PRIMARY KEY REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
-    token TEXT NOT NULL UNIQUE,
-    access_code_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  );
-`);
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedule_schedule_views (
-    week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
-    employee_id BIGINT NOT NULL REFERENCES schedule_employees(id) ON DELETE CASCADE,
-    first_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    view_count INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY (week_start, employee_id)
-  );
-`);
-
-await pool.query('ALTER TABLE schedule_shifts ADD COLUMN IF NOT EXISTS absence JSONB');
+if (needsSchema(pool)) await installCoreSchema(pool);
 app.disable("x-powered-by");
 startupPhase('http_setup');
 app.use(requestDiagnostics);
@@ -229,9 +116,19 @@ function secureEqual(left, right) {
   const b = crypto.createHash("sha256").update(String(right)).digest();
   return crypto.timingSafeEqual(a, b);
 }
+import {managerStores} from './service-store-weeks.js';
 async function requireManager(request, response, next) {
   try {
     await managerAccess.authorize(request);
+    const storeHeader=request.get('X-Service-Store');
+    const storePortal=request.path.startsWith('/api/store-portal') && (request.manager.kind==='account'||storeHeader);
+    if (storePortal || (request.path==='/api/undo' && storeHeader) || /^\/api\/(weeks\/|shifts\/|employees(?:\/|$)|leave\/week\/)/.test(request.path)) {
+      const stores=await managerStores(pool,request.manager);
+      const selected=storeHeader ?? (stores.includes('principal')?'principal':stores[0]);
+      if (!stores.includes(selected)) return response.status(403).json({error:'Magasin inaccessible.'});
+      request.storeId=selected;
+      request.serviceStores=stores;
+    }
     if(request.manager?.kind==='account') {
       if(!response.employeeSecretsRedacted){
         response.employeeSecretsRedacted=true;
@@ -289,12 +186,12 @@ function normalizeShift(body) {
     notes: String(body.notes || "").trim().slice(0, 300),
   };
 }
-async function ensureWeek(weekStart, client = pool) {
-  await client.query(`INSERT INTO schedule_weeks (week_start) VALUES ($1) ON CONFLICT DO NOTHING`, [weekStart]);
+async function ensureWeek(weekStart, client = pool, store='principal') {
+  await client.query(`INSERT INTO schedule_weeks (week_start,store_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [weekStart,store]);
 }
 function mapWeek(row) {
   return {
-    weekStart: isoDate(row.week_start),
+    weekStart: isoDate(row.week_start), storeId:row.store_id,
     cashierBudgetMinutes: Number(row.cashier_budget_minutes),
     packerBudgetMinutes: Number(row.packer_budget_minutes),
     notes: row.notes,
@@ -344,9 +241,9 @@ function desiredRank(value, fallback) {
   return value === undefined || value === null || value === ""
     ? fallback : parseMinutes(value, "Rang", 1, 500);
 }
-async function reorderEmployees(client, role, column, movedId, requestedRank) {
-  const result = await client.query(`SELECT id FROM schedule_employees WHERE role=$1
-    ORDER BY ${column}, seniority, id FOR UPDATE`, [role]);
+async function reorderEmployees(client, role, column, movedId, requestedRank,store) {
+  const result = await client.query(`SELECT id FROM schedule_employees WHERE role=$1 AND store_id=$2
+    ORDER BY ${column}, seniority, id FOR UPDATE`, [role,store]);
   const ids = result.rows.map(row => Number(row.id)).filter(id => id !== movedId);
   if (movedId !== null) ids.splice(Math.min(requestedRank - 1, ids.length), 0, movedId);
   for (let i = 0; i < ids.length; i++) {
@@ -375,7 +272,7 @@ function mapEmployee(row,weekStart=null) {
 app.get("/api/employees", requireManager, async (request, response) => {
   try {
     if(request.query.weekStart&&!validDate(request.query.weekStart))return response.status(400).json({error:"Semaine invalide."});
-    const result = await pool.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id ORDER BY e.role, e.display_rank, e.seniority, e.name");
+    const result = await pool.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.store_id=$1 ORDER BY e.role, e.display_rank, e.seniority, e.name",[request.storeId]);
     response.json({ employees: result.rows.map(row=>mapEmployee(row,request.query.weekStart)) });
   } catch { response.status(500).json({ error: "Impossible de charger les employés." }); }
 });
@@ -388,18 +285,18 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
     if (new Set(normalized.map(e => e.name.toLocaleLowerCase("fr-CA"))).size !== normalized.length) throw new Error("Noms en double.");
     await client.query("BEGIN");
     await beginUndo(client,"Importer les employés",request.params.weekStart||null,request);
-    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees");
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE store_id=$1",[request.storeId]);
     if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
     for (const e of normalized) await client.query(
-      `INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
+      `INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,store_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.storeId]);
     for (const role of ["manager","supervisor","cashier","packer","orders"]) {
       await client.query(`WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
-        FROM schedule_employees WHERE role=$1
+        FROM schedule_employees WHERE role=$1 AND store_id=$2
       ) UPDATE schedule_employees e SET display_rank=ranked.position, assignment_rank=ranked.position
-        FROM ranked WHERE e.id=ranked.id`, [role]);
+        FROM ranked WHERE e.id=ranked.id`, [role,request.storeId]);
     }
     await commitServiceTransaction(client,request);
     response.status(201).json({ count: normalized.length });
@@ -414,13 +311,13 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
     await beginUndo(client,"Ajouter un employé",request.params.weekStart||null,request);
-    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,onboarding_new)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING *`,
-      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours]);
+    const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,onboarding_new,store_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13) RETURNING *`,
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.storeId]);
     const id = Number(result.rows[0].id);
-    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
-    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count));
-    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count));
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1 AND store_id=$2", [e.role,request.storeId]);
+    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,count.rows[0].count),request.storeId);
+    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,count.rows[0].count),request.storeId);
     await saveServicePersonal(client,id,request.body,request.manager?.kind==='account');
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await commitServiceTransaction(client,request);
@@ -436,7 +333,7 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     await client.query("BEGIN");
     await beginUndo(client,"Modifier un employé",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
-    const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 FOR UPDATE", [request.params.id]);
+    const before = await client.query("SELECT * FROM schedule_employees WHERE id=$1 AND store_id=$2 FOR UPDATE", [request.params.id,request.storeId]);
     if (!before.rowCount) { await client.query("ROLLBACK"); return response.status(404).json({ error: "Employé introuvable." }); }
     if(before.rows[0].departed_at){await client.query('ROLLBACK');return response.status(409).json({error:'Cet employé a été retiré pour un départ définitif. Sa fiche ne peut plus être modifiée.'});}
     const currentProfile=profileAt(before.rows[0],localDate());
@@ -449,14 +346,14 @@ app.put("/api/employees/:id", requireManager, sameOrigin, async (request, respon
     if(availabilityHistory.length)await saveAvailabilityHistory(client,Number(request.params.id),availabilityHistory);
     const id = Number(request.params.id), old = before.rows[0];
     if (old.role !== e.role) {
-      await reorderEmployees(client,old.role,"display_rank",null,1);
-      await reorderEmployees(client,old.role,"assignment_rank",null,1);
+      await reorderEmployees(client,old.role,"display_rank",null,1,request.storeId);
+      await reorderEmployees(client,old.role,"assignment_rank",null,1,request.storeId);
     }
-    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1", [e.role]);
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE role=$1 AND store_id=$2", [e.role,request.storeId]);
     const fallbackDisplay = old.role===e.role ? old.display_rank : count.rows[0].count;
     const fallbackAssignment = old.role===e.role ? old.assignment_rank : count.rows[0].count;
-    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,fallbackDisplay));
-    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment));
+    await reorderEmployees(client,e.role,"display_rank",id,desiredRank(request.body?.displayRank,fallbackDisplay),request.storeId);
+    await reorderEmployees(client,e.role,"assignment_rank",id,desiredRank(request.body?.assignmentRank,fallbackAssignment),request.storeId);
     await saveServicePersonal(client,id,request.body,request.manager?.kind==='account');
     const saved = await client.query("SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.id=$1", [id]);
     await commitServiceTransaction(client,request);
@@ -470,6 +367,7 @@ app.post('/api/employees/:id/departure',requireManager,sameOrigin,async(request,
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
+    if(!(await client.query('SELECT 1 FROM schedule_employees WHERE id=$1 AND store_id=$2 FOR UPDATE',[request.params.id,request.storeId])).rowCount)throw Error('Employé introuvable.');
     const employee=await recordDeparture(client,Number(request.params.id),request);
     await commitServiceTransaction(client,request);response.json({employee:mapEmployee(employee)});
   }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(error.status||400).json({error:error.message});}
@@ -478,21 +376,21 @@ app.post('/api/employees/:id/departure',requireManager,sameOrigin,async(request,
 app.get("/api/weeks/:weekStart/assignments", requireManager, async (request, response) => {
   try {
     const result = await pool.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-      WHERE s.week_start=$1`, [request.params.weekStart]);
+      WHERE s.week_start=$1 AND s.store_id=$2`, [request.params.weekStart,request.storeId]);
     response.json({ assignments: result.rows.map(r => ({ shiftId:Number(r.shift_id), employeeId:Number(r.employee_id) })) });
   } catch { response.status(500).json({ error: "Impossible de charger l’horaire." }); }
 });
 app.get("/api/weeks/:weekStart/time-off", requireManager, async (request, response) => {
   try {
     if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
-    const result = await pool.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1", [request.params.weekStart]);
+    const result = await pool.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1 AND store_id=$2", [request.params.weekStart,request.storeId]);
     response.json({ timeOff: result.rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)})) });
   } catch { response.status(400).json({ error:"Impossible de charger les congés demandés." }); }
 });
 app.get("/api/weeks/:weekStart/day-exceptions", requireManager, async (request, response) => {
   try {
     if (!validDate(request.params.weekStart)) throw new Error("Semaine invalide.");
-    const result = await pool.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart]);
+    const result = await pool.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1 AND store_id=$2", [request.params.weekStart,request.storeId]);
     response.json({ employeeIds: result.rows.map(row => Number(row.employee_id)) });
   } catch { response.status(400).json({ error: "Impossible de charger les exceptions de jours." }); }
 });
@@ -504,9 +402,10 @@ app.put("/api/weeks/:weekStart/employees/:id/day-exception", requireManager, sam
       throw new Error("Exception de jours invalide.");
     await client.query('BEGIN');
     await beginUndo(client,'Modifier l’exception de jours',weekStart,request);
-    await ensureWeek(weekStart,client);
-    if (request.body.allowed) await client.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id)
-      VALUES ($1,$2) ON CONFLICT DO NOTHING`, [weekStart,employeeId]);
+    await ensureWeek(weekStart,client,request.storeId);
+    if(!(await client.query("SELECT 1 FROM schedule_employees WHERE id=$1 AND store_id=$2",[employeeId,request.storeId])).rowCount)throw Error("Employé introuvable.");
+    if (request.body.allowed) await client.query(`INSERT INTO schedule_day_exceptions (week_start,employee_id,store_id)
+      VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [weekStart,employeeId,request.storeId]);
     else await client.query("DELETE FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
     await commitServiceTransaction(client,request);
     response.json({ allowed: request.body.allowed });
@@ -524,13 +423,13 @@ app.put("/api/weeks/:weekStart/employees/:id/time-off", requireManager, sameOrig
     await client.query("BEGIN");
     await beginUndo(client,"Modifier les congés manuels",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
-    await ensureWeek(weekStart,client);
-    const employee = await client.query("SELECT id FROM schedule_employees WHERE id=$1 FOR UPDATE", [employeeId]);
+    await ensureWeek(weekStart,client,request.storeId);
+    const employee = await client.query("SELECT id FROM schedule_employees WHERE id=$1 AND store_id=$2 FOR UPDATE", [employeeId,request.storeId]);
     if (!employee.rowCount) throw new Error("Employé introuvable.");
     await client.query("DELETE FROM schedule_time_off WHERE week_start=$1 AND employee_id=$2", [weekStart,employeeId]);
     for (const day of days) await client.query(
-      "INSERT INTO schedule_time_off (week_start,employee_id,day_index) VALUES ($1,$2,$3)",
-      [weekStart,employeeId,day]);
+      "INSERT INTO schedule_time_off (week_start,employee_id,day_index,store_id) VALUES ($1,$2,$3,$4)",
+      [weekStart,employeeId,day,request.storeId]);
     if (days.length) await client.query(`DELETE FROM schedule_assignments a USING schedule_shifts s
       WHERE a.shift_id=s.id AND a.employee_id=$1 AND s.week_start=$2 AND s.day_index=ANY($3::int[])`,
       [employeeId,weekStart,days]);
@@ -547,7 +446,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
     const id = Number(request.params.id), employeeId = Number(request.body?.employeeId);
-    const shiftResult = await client.query("SELECT * FROM schedule_shifts WHERE id=$1", [id]);
+    const shiftResult = await client.query("SELECT * FROM schedule_shifts WHERE id=$1 AND store_id=$2", [id,request.storeId]);
     if (!shiftResult.rowCount) throw new Error("Quart introuvable.");
     await beginUndo(client,"Modifier une affectation",isoDate(shiftResult.rows[0].week_start),request);
     if (request.body?.employeeId === null) {
@@ -557,7 +456,7 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       await commitServiceTransaction(client,request);
       return response.json({ ok:true,shift });
     }
-    const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1", [employeeId]);
+    const people = await client.query("SELECT * FROM schedule_employees WHERE id=$1 AND store_id=$2", [employeeId,request.storeId]);
     if (!people.rowCount) throw new Error("Employé introuvable.");
     const before = mapShift(shiftResult.rows[0]), e = mapEmployee(people.rows[0],before.weekStart);
     let s=before;
@@ -569,8 +468,8 @@ app.put("/api/shifts/:id/assignment", requireManager, sameOrigin, async (request
       WHERE week_start=$1 AND employee_id=$2 AND day_index=$3`, [s.weekStart,employeeId,s.dayIndex]);
     if (leave.rowCount) throw new Error("Congé demandé pour cette journée.");
     const current = await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-      WHERE s.week_start=$1 AND a.shift_id<>$2`, [s.weekStart,id]);
-    const all = await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1", [s.weekStart]);
+      WHERE s.week_start=$1 AND a.shift_id<>$2 AND s.store_id=$3`, [s.weekStart,id,request.storeId]);
+    const all = await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 AND store_id=$2", [s.weekStart,request.storeId]);
     const conflict = assignmentConflict(e,s,all.rows.map(mapShift),current.rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)})));
     if (conflict) throw new Error(conflict);
     await client.query(`INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)
@@ -588,11 +487,11 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     await client.query("BEGIN");
     await beginUndo(client,request.body?.replaceAll===true?"Recréer selon les priorités":"Attribuer les quarts libres",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
-    const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY id FOR UPDATE", [request.params.weekStart])).rows.map(mapShift);
-    const employees = (await client.query("SELECT * FROM schedule_employees")).rows.map(row=>mapEmployee(row,request.params.weekStart));
+    const shifts = (await client.query("SELECT * FROM schedule_shifts WHERE week_start=$1 AND store_id=$2 ORDER BY id FOR UPDATE", [request.params.weekStart,request.storeId])).rows.map(mapShift);
+    const employees = (await client.query("SELECT * FROM schedule_employees WHERE store_id=$1",[request.storeId])).rows.map(row=>mapEmployee(row,request.params.weekStart));
     const approved=await approvedLeave(client,request.params.weekStart);
     for(const e of employees) e.leavePeriods=approved.filter(r=>Number(r.employee_id)===e.id).flatMap(r=>r.periods);
-    const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1", [request.params.weekStart])).rows;
+    const exceptions = (await client.query("SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1 AND store_id=$2", [request.params.weekStart,request.storeId])).rows;
     for (const e of employees) e.allowSixOrSevenDays = exceptions.some(x => Number(x.employee_id) === e.id);
     const leaves = (await client.query("SELECT employee_id, day_index FROM schedule_time_off WHERE week_start=$1 UNION SELECT p.service_employee_id, day FROM schedule_store_people p CROSS JOIN generate_series(0,6) day WHERE p.service_employee_id IS NOT NULL AND p.employment_ended_on <= $1::date+day", [request.params.weekStart])).rows;
     for (const leave of leaves) {
@@ -601,12 +500,12 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
     }
     let backupId;
     if (request.body?.replaceAll === true) {
-      backupId=await backupBeforeRegeneration(client,request.params.weekStart);
+      backupId=await backupBeforeRegeneration(client,request.params.weekStart,request.storeId);
       await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN
-        (SELECT id FROM schedule_shifts WHERE week_start=$1)`, [request.params.weekStart]);
+        (SELECT id FROM schedule_shifts WHERE week_start=$1 AND store_id=$2)`, [request.params.weekStart,request.storeId]);
     }
     const current = (await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-      WHERE s.week_start=$1`, [request.params.weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
+      WHERE s.week_start=$1 AND s.store_id=$2`, [request.params.weekStart,request.storeId])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
     const result = generateAssignments(shifts, employees, current);
     for(const shift of shifts.filter(s=>!current.some(a=>a.shiftId===s.id))){
       const employee=employees.find(e=>e.id===result.assignments.find(a=>a.shiftId===shift.id)?.employeeId);
@@ -616,7 +515,7 @@ app.post("/api/weeks/:weekStart/generate", requireManager, sameOrigin, async (re
       await client.query("INSERT INTO schedule_assignments (shift_id,employee_id) VALUES ($1,$2)", [a.shiftId,a.employeeId]);
       await applyServiceRoleDefault(client,shifts.find(s=>s.id===a.shiftId),employees.find(e=>e.id===a.employeeId));
     }
-    if(backupId)await finishRegenerationBackup(client,backupId,request.params.weekStart);
+    if(backupId)await finishRegenerationBackup(client,backupId,request.params.weekStart,request.storeId);
     await commitServiceTransaction(client,request);
     response.json({ ...result, preserved:current.length });
   } catch (error) {
@@ -629,8 +528,10 @@ startupPhase('schema_leave');
 const leaveAccess=await installLeave(app,pool,{requireManager,sameOrigin,employeeIdentity:req=>employeePortal.identity(req)});
 startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
-await departmentService.finishDueDepartures();
-setInterval(()=>departmentService.finishDueDepartures().catch(error=>console.error('Fin d’emploi planifiée',error.message)),60000).unref();
+if (runsInWebProcess()){
+  await departmentService.finishDueDepartures();
+  setInterval(()=>departmentService.finishDueDepartures().catch(error=>console.error('Fin d’emploi planifiée',error.message)),60000).unref();
+}
 const employeePortal=departmentService.employeePortal;
 await managerAccess.installEmployeeLinks();
 startupPhase('schema_sst');
@@ -642,8 +543,9 @@ await installInspectionGrid(app,pool,sstService);
 await installEquipmentTraining(app,pool,sstService);
 await installPreventionProgram(app,pool,sstService);
 let employeeVault;
-try{employeeVault=await employeeFilesStorage();}catch{logEvent('employee_vault_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien est indisponible ou sa configuration est incomplète. Aucune nouvelle saisie n’est permise.'}};}
-try{await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,vaultPool:employeeVault.pool,trialPool:employeeVault.trialPool,storageStatus:employeeVault.status});}
+let onboardingReminders;
+try{employeeVault=process.env.VERCEL && (process.env.VERCEL_ENV!=='production' || preparation) ? {pool:null,trialPool:null,status:{ready:false,message:'Le coffre RH est fermé dans la préversion de migration.'}} : await employeeFilesStorage();}catch{logEvent('employee_vault_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien est indisponible ou sa configuration est incomplète. Aucune nouvelle saisie n’est permise.'}};}
+try{onboardingReminders=await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,vaultPool:employeeVault.pool,trialPool:employeeVault.trialPool,storageStatus:employeeVault.status});}
 catch{await employeeVault.trialPool?.end();await employeeVault.pool?.end();logEvent('employee_vault_schema_unavailable',{},'error');employeeVault={pool:null,status:{ready:false,message:'Le coffre canadien n’a pas pu être initialisé. Les dossiers sont en consultation seulement; le portail SST reste disponible.'}};await installEmployeeFiles(app,pool,{managerAccess,employeePortal,sstService,storageStatus:employeeVault.status});}
 app.get('/api/access-session',async(req,res)=>{
   res.set('Cache-Control','no-store');
@@ -695,7 +597,7 @@ app.get("/api/session", async (request, response) => {
 app.get("/api/weeks/:weekStart/share-link", requireManager, async (request, response) => {
   try {
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
-    const result = await pool.query("SELECT token FROM schedule_public_links WHERE week_start=$1", [request.params.weekStart]);
+    const result = await pool.query("SELECT token FROM schedule_public_links WHERE week_start=$1 AND store_id=$2", [request.params.weekStart,request.storeId]);
     response.set("Cache-Control", "no-store").json({ path: result.rowCount ? `/h/${result.rows[0].token}` : null });
   } catch { response.status(500).json({ error: "Impossible de charger le lien." }); }
 });
@@ -705,13 +607,13 @@ app.put("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async (r
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
     await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
     await assertServiceRevision(client,request.params.weekStart,request);
-    await ensureWeek(request.params.weekStart,client);
+    await ensureWeek(request.params.weekStart,client,request.storeId);
     const token = crypto.randomBytes(32).toString("base64url");
     const result = await client.query(`INSERT INTO schedule_public_links (week_start,token,access_code_hash,store_id)
-      SELECT week_start,$2,$3,store_id FROM schedule_weeks WHERE week_start=$1
-      ON CONFLICT (week_start) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'']);
-    const notification=await publishServiceWeek(client,request.params.weekStart);
-    if(notification)await chatPush.enqueueSchedule(client,request.params.weekStart,notification);
+      SELECT week_start,$2,$3,store_id FROM schedule_weeks WHERE week_start=$1 AND store_id=$4
+      ON CONFLICT (week_start,store_id) DO UPDATE SET week_start=EXCLUDED.week_start RETURNING token`, [request.params.weekStart,token,'',request.storeId ?? 'principal']);
+    const notification=await publishServiceWeek(client,request.params.weekStart,request.storeId);
+    if(notification)await chatPush.enqueueSchedule(client,request.params.weekStart,notification,request.storeId);
     await commitServiceTransaction(client,request);
     chatPush.kick();
     logEvent('schedule_publication_notice',{component:'service_schedule',code:notification||'UNCHANGED_NO_NOTICE'});
@@ -724,7 +626,7 @@ app.delete("/api/weeks/:weekStart/share-link", requireManager, sameOrigin, async
     if (!validDate(request.params.weekStart)) return response.status(400).json({ error: "Semaine invalide." });
     await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
     await assertServiceRevision(client,request.params.weekStart,request);
-    await client.query('DELETE FROM schedule_public_links WHERE week_start=$1',[request.params.weekStart]);
+    await client.query('DELETE FROM schedule_public_links WHERE week_start=$1 AND store_id=$2',[request.params.weekStart,request.storeId]);
     await commitServiceTransaction(client,request);response.json({ok:true});
   }catch(error){await client.query('ROLLBACK').catch(()=>{});response.status(error.status||500).json({error:error.status?error.message:'Impossible de désactiver le lien.'});}finally{client.release();}
 });
@@ -735,9 +637,9 @@ app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, 
     const result = await pool.query(`SELECT e.id, e.name, e.role, v.first_viewed_at, v.last_viewed_at, v.view_count
       FROM schedule_employees e
       LEFT JOIN schedule_schedule_views v ON v.employee_id=e.id AND v.week_start=$1
-      WHERE EXISTS (SELECT 1 FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
-        WHERE a.employee_id=e.id AND s.week_start=$1)
-      ORDER BY (v.last_viewed_at IS NOT NULL), e.role, e.name`, [request.params.weekStart]);
+      WHERE e.store_id=$2 AND EXISTS (SELECT 1 FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
+        WHERE a.employee_id=e.id AND s.week_start=$1 AND s.store_id=$2)
+      ORDER BY (v.last_viewed_at IS NOT NULL), e.role, e.name`, [request.params.weekStart,request.storeId]);
     response.set("Cache-Control", "no-store").json({ employees: result.rows });
   } catch { response.status(500).json({ error: "Impossible de charger les consultations." }); }
 });
@@ -745,12 +647,12 @@ app.get("/api/weeks/:weekStart/schedule-views", requireManager, async (request, 
 app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
-    const link = await pool.query("SELECT week_start FROM schedule_employee_links WHERE token=$1 AND employee_id=$2", [request.params.token,request.employee.service_employee_id]);
+    const link = await pool.query("SELECT week_start,store_id FROM schedule_employee_links WHERE token=$1 AND employee_id=$2", [request.params.token,request.employee.service_employee_id]);
     if (!link.rowCount) return response.status(404).json({ error: "Lien désactivé ou invalide." });
     if (!request.employee.service_employee_id)
       return response.status(401).json({ error: "Code requis." });
     const weekStart = isoDate(link.rows[0].week_start);
-    const publication=await publishedServiceResult(pool,weekStart);
+    const publication=await publishedServiceResult(pool,weekStart,link.rows[0].store_id);
     if(!publication)return response.status(404).json({error:'Cet horaire n’est pas publié.'});
     const employees=publication.data.employees.filter(e=>e.id===Number(request.employee.service_employee_id)).map(e=>({...e,birthdayMonthDay:request.employee.birthday?isoDate(request.employee.birthday).slice(5):''}));
     response.set({ "Cache-Control":"no-store", "X-Robots-Tag":"noindex, nofollow" }).json({ weekStart, employees });
@@ -759,10 +661,10 @@ app.get("/api/public-schedules/:token", employeePortal.requireEmployee, async (r
 app.post("/api/public-schedules/:token/views", sameOrigin, employeePortal.requireEmployee, async (request, response) => {
   try {
     if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({ error: "Lien invalide." });
-    const viewed=await pool.query(`INSERT INTO schedule_schedule_views (week_start,employee_id)
-      SELECT l.week_start,e.id FROM schedule_employee_links l JOIN schedule_employees e ON e.id=l.employee_id
+    const viewed=await pool.query(`INSERT INTO schedule_schedule_views (week_start,employee_id,store_id)
+      SELECT l.week_start,e.id,l.store_id FROM schedule_employee_links l JOIN schedule_employees e ON e.id=l.employee_id
       WHERE l.token=$1 AND e.id=$2 AND (e.active OR EXISTS (SELECT 1 FROM schedule_assignments a
-        JOIN schedule_shifts s ON s.id=a.shift_id WHERE a.employee_id=e.id AND s.week_start=l.week_start))
+        JOIN schedule_shifts s ON s.id=a.shift_id WHERE a.employee_id=e.id AND s.week_start=l.week_start AND s.store_id=l.store_id))
       ON CONFLICT (week_start,employee_id) DO UPDATE SET last_viewed_at=NOW(),
       view_count=schedule_schedule_views.view_count+1 RETURNING employee_id`, [request.params.token,request.employee.service_employee_id]);
     if(!viewed.rowCount)return response.status(404).json({error:"Lien désactivé ou invalide."});
@@ -784,18 +686,19 @@ app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
     const {weekStart}=request.params;
     if(!validDate(weekStart)||new Date(weekStart+'T12:00:00Z').getUTCDay()!==1)return response.status(400).json({error:'Choisissez une semaine commençant un lundi valide.'});
     await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');
-    await ensureWeek(weekStart,client);
-    const week=(await client.query('SELECT * FROM schedule_weeks WHERE week_start=$1',[weekStart])).rows[0];
-    const shifts=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1 ORDER BY area,day_index,start_minute,id',[weekStart])).rows.map(mapShift);
-    const employees=(await client.query('SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id ORDER BY e.role,e.display_rank,e.seniority,e.name')).rows.map(row=>mapEmployee(row,weekStart));
-    const assignments=(await client.query('SELECT a.shift_id,a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1',[weekStart])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
-    const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1',[weekStart])).rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)}));
-    const dayExceptions=(await client.query('SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1',[weekStart])).rows.map(r=>Number(r.employee_id));
-    const approvedLeaves=await approvedLeave(client,weekStart),relatedDepartments=await departmentService.serviceRelated(weekStart,client);
-    const link=(await client.query('SELECT token FROM schedule_public_links WHERE week_start=$1',[weekStart])).rows[0];
-    const revision=await serviceRevision(client,weekStart);
+    await ensureWeek(weekStart,client,request.storeId);
+    const week=(await client.query('SELECT * FROM schedule_weeks WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows[0];
+    const shifts=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1 AND store_id=$2 ORDER BY area,day_index,start_minute,id',[weekStart,request.storeId])).rows.map(mapShift);
+    const employees=(await client.query('SELECT e.*,p.employee_code,p.birthday FROM schedule_employees e LEFT JOIN schedule_store_people p ON p.service_employee_id=e.id WHERE e.store_id=$1 ORDER BY e.role,e.display_rank,e.seniority,e.name',[request.storeId])).rows.map(row=>mapEmployee(row,weekStart));
+    const assignments=(await client.query('SELECT a.shift_id,a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 AND s.store_id=$2',[weekStart,request.storeId])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
+    const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)}));
+    const dayExceptions=(await client.query('SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows.map(r=>Number(r.employee_id));
+    const approvedLeaves=await approvedLeave(client,weekStart,request.storeId),relatedDepartments=await departmentService.serviceRelated(weekStart,client);
+    const relatedForStore=relatedDepartments.filter(p=>employees.some(e=>e.id===Number(p.employeeId)));
+    const link=(await client.query('SELECT token FROM schedule_public_links WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows[0];
+    const revision=await serviceRevision(client,weekStart,request.storeId);
     await client.query('COMMIT');
-    response.set({'Cache-Control':'no-store','X-Service-Revision':revision}).json({week:mapWeek(week),shifts,employees,assignments,timeOff,dayExceptions,approvedLeaves,relatedDepartments,sharePath:link?'/h/'+link.token:null,revision});
+    response.set({'Cache-Control':'no-store','X-Service-Revision':revision}).json({stores:request.serviceStores,week:mapWeek(week),shifts,employees,assignments,timeOff,dayExceptions,approvedLeaves,relatedDepartments:relatedForStore,sharePath:link?'/h/'+link.token:null,revision});
   }catch(error){await client.query('ROLLBACK').catch(()=>{});logEvent('week_read_failed',{code:errorCode(error)},'error');response.status(500).json({error:'Impossible de charger la semaine. Réessayez.'});}
   finally{client.release();}
 });
@@ -810,8 +713,8 @@ app.put("/api/weeks/:weekStart", requireManager, sameOrigin, async (request, res
     const notes = String(request.body?.notes || "").trim().slice(0, 1000);
     await client.query('BEGIN');
     await beginUndo(client,'Modifier les budgets ou notes',weekStart,request);
-    await ensureWeek(weekStart,client);
-    const result = await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart]);
+    await ensureWeek(weekStart,client,request.storeId);
+    const result = await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes=$3, updated_at=NOW() WHERE week_start=$4 AND store_id=$5 RETURNING *`, [cashierBudgetMinutes, packerBudgetMinutes, notes, weekStart,request.storeId]);
     await commitServiceTransaction(client,request);
     response.json({ week: mapWeek(result.rows[0]) });
   } catch (error) {
@@ -831,10 +734,10 @@ app.post("/api/weeks/:weekStart/shifts", requireManager, sameOrigin, async (requ
     await client.query("BEGIN");
     await beginUndo(client,"Ajouter des quarts",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
-    await ensureWeek(weekStart, client);
+    await ensureWeek(weekStart, client,request.storeId);
     const created = [];
     for (const dayIndex of days) {
-      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence, training, training_minutes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence, shift.training, shift.trainingMinutes]);
+      const result = await client.query(`INSERT INTO schedule_shifts (week_start, area, role, day_index, start_minute, end_minute, break_minutes, source_department, notes, absence, training, training_minutes, store_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`, [weekStart, shift.area, shift.role, dayIndex, shift.startMinute, shift.endMinute, shift.breakMinutes, shift.sourceDepartment, shift.notes, shift.absence, shift.training, shift.trainingMinutes,request.storeId]);
       created.push(mapShift(result.rows[0]));
     }
     await commitServiceTransaction(client,request);
@@ -854,7 +757,8 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
     if (!Number.isInteger(id) || id <= 0) throw new Error("Quart invalide.");
     let shift = normalizeShift(request.body || {});
     const dayIndex = parseMinutes(request.body?.dayIndex, "Journée", 0, 6);
-    const existing=(await client.query("SELECT s.week_start,s.absence,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1",[id])).rows[0];
+    const existing=(await client.query("SELECT s.week_start,s.absence,a.employee_id FROM schedule_shifts s LEFT JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.id=$1 AND s.store_id=$2",[id,request.storeId])).rows[0];
+    if(!existing)throw Error("Quart introuvable.");
     await beginUndo(client,"Modifier un quart",existing?isoDate(existing.week_start):null,request);
     if(existing?.employee_id){
       const weekStart=isoDate(existing.week_start);
@@ -865,7 +769,7 @@ app.put("/api/shifts/:id", requireManager, sameOrigin, async (request, response)
       employee.leavePeriods=periods;
       employee.allowSixOrSevenDays=!!(await client.query('SELECT 1 FROM schedule_day_exceptions WHERE week_start=$1 AND employee_id=$2',[weekStart,employeeId])).rowCount;
       if((await client.query('SELECT 1 FROM schedule_time_off WHERE week_start=$1 AND employee_id=$2 AND day_index=$3',[weekStart,employeeId,dayIndex])).rowCount)throw Error('Congé demandé pour cette journée. Réattribuez le quart d’abord.');
-      const all=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1',[weekStart])).rows.map(mapShift);
+      const all=(await client.query('SELECT * FROM schedule_shifts WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows.map(mapShift);
       const assigned=(await client.query('SELECT a.shift_id,a.employee_id FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 AND a.shift_id<>$2',[weekStart,id])).rows.map(r=>({shiftId:Number(r.shift_id),employeeId:Number(r.employee_id)}));
       const conflict=assignmentConflict(employee,{...shift,...serviceShiftTiming(shift.startMinute,shift.endMinute,shift.absence),id,dayIndex},all,assigned);
       if(conflict)throw Error(conflict+' Réattribuez le quart d’abord.');
@@ -884,9 +788,9 @@ app.delete("/api/shifts/:id", requireManager, sameOrigin, async (request, respon
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(8675309)');
-    const previous=(await client.query("SELECT week_start FROM schedule_shifts WHERE id=$1",[id])).rows[0];
+    const previous=(await client.query("SELECT week_start FROM schedule_shifts WHERE id=$1 AND store_id=$2",[id,request.storeId])).rows[0];
     await beginUndo(client,"Supprimer un quart",previous?isoDate(previous.week_start):null,request);
-    await client.query("DELETE FROM schedule_shifts WHERE id=$1", [id]);
+    await client.query("DELETE FROM schedule_shifts WHERE id=$1 AND store_id=$2", [id,request.storeId]);
     await commitServiceTransaction(client,request);
     response.json({ ok: true });
   } catch {await client.query('ROLLBACK').catch(()=>{});response.status(500).json({error:'Suppression impossible.'});}
@@ -902,15 +806,15 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
     await client.query("BEGIN");
     await beginUndo(client,"Copier la semaine précédente",request.params.weekStart||null,request);
     await client.query("SELECT pg_advisory_xact_lock(8675309)");
-    await ensureWeek(weekStart, client);
-    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [weekStart]);
+    await ensureWeek(weekStart, client,request.storeId);
+    const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1 AND store_id=$2", [weekStart,request.storeId]);
     if (count.rows[0].count > 0) throw new Error("La semaine contient déjà des quarts.");
-    const previousWeek = await client.query("SELECT * FROM schedule_weeks WHERE week_start=$1", [previous]);
+    const previousWeek = await client.query("SELECT * FROM schedule_weeks WHERE week_start=$1 AND store_id=$2", [previous,request.storeId]);
     if (!previousWeek.rowCount) throw new Error("La semaine précédente est vide.");
-    const previousCount = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1", [previous]);
+    const previousCount = await client.query("SELECT COUNT(*)::int AS count FROM schedule_shifts WHERE week_start=$1 AND store_id=$2", [previous,request.storeId]);
     if (previousCount.rows[0].count === 0) throw new Error("La semaine précédente ne contient aucun quart.");
-    await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes='', updated_at=NOW() WHERE week_start=$3`, [previousWeek.rows[0].cashier_budget_minutes, previousWeek.rows[0].packer_budget_minutes, weekStart]);
-    await copyServiceShifts(client,weekStart,previous);
+    await client.query(`UPDATE schedule_weeks SET cashier_budget_minutes=$1, packer_budget_minutes=$2, notes='', updated_at=NOW() WHERE week_start=$3 AND store_id=$4`, [previousWeek.rows[0].cashier_budget_minutes, previousWeek.rows[0].packer_budget_minutes, weekStart,request.storeId]);
+    await copyServiceShifts(client,weekStart,previous,request.storeId);
     await commitServiceTransaction(client,request);
     response.json({ copiedFrom: previous });
   } catch (error) {
@@ -919,22 +823,36 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
   } finally { client.release(); }
 });
 
-installPdfAssets(app);
 app.use(express.static("public", { extensions: ["html"] }));
 app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
 app.use((error,_req,res,_next)=>{
   logEvent('http_unhandled_error',{code:errorCode(error)},'error');
   if(!res.headersSent)res.status(error.status>=400&&error.status<500?error.status:500).json({error:'Service temporairement indisponible. Réessayez.'});
 });
-startupPhase('listen');
-const server=app.listen(port,()=>startupPhase('ready'));
-const shutdown=()=>{
-  startupPhase('shutdown');
-  chatPush?.stop();
-  server.close(async()=>{await employeeVault.trialPool?.end();await employeeVault.pool?.end();await pool.end();process.exit(0);});
-  setTimeout(()=>process.exit(1),25000).unref();
-};
-process.once('SIGTERM',shutdown);
-process.once('SIGINT',shutdown);
-
-
+export default app;
+if (preparation) await installScheduledWorkSchema(pool);
+export function runPeriodicTasks(executionId) {
+  return runScheduledWork(pool,executionId,{
+    departures:departmentService.finishDueDepartures,
+    ...leaveAccess.periodic,
+    ...(onboardingReminders ? {onboarding:onboardingReminders} : {}),
+    notifications:chatPush.drain,
+    calendar:departmentService.familyPortal.googleCalendar.run
+  });
+}
+if (preparation) {
+  await pool.end();
+} else if (process.env.VERCEL) {
+  startupPhase('ready');
+} else {
+  startupPhase('listen');
+  const server=app.listen(port,()=>startupPhase('ready'));
+  const shutdown=()=>{
+    startupPhase('shutdown');
+    chatPush?.stop();
+    server.close(async()=>{await employeeVault.trialPool?.end();await employeeVault.pool?.end();await pool.end();process.exit(0);});
+    setTimeout(()=>process.exit(1),25000).unref();
+  };
+  process.once('SIGTERM',shutdown);
+  process.once('SIGINT',shutdown);
+}

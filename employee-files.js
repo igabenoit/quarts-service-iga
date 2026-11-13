@@ -38,7 +38,7 @@ export const privacyBaseline={
 
 export async function installEmployeeFiles(app,sourcePool,{managerAccess,employeePortal,sstService,vaultPool=null,trialPool=null,storageStatus={ready:false}}){
  const pool=vaultPool;
- if(pool)await pool.query(`CREATE TABLE IF NOT EXISTS employee_file_grants(account_id BIGINT NOT NULL ,role TEXT NOT NULL,departments JSONB NOT NULL DEFAULT '[]',all_departments BOOLEAN NOT NULL DEFAULT FALSE,actor JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(account_id,role));
+ if(pool && !process.env.VERCEL)await pool.query(`CREATE TABLE IF NOT EXISTS employee_file_grants(account_id BIGINT NOT NULL ,role TEXT NOT NULL,departments JSONB NOT NULL DEFAULT '[]',all_departments BOOLEAN NOT NULL DEFAULT FALSE,actor JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(account_id,role));
  CREATE TABLE IF NOT EXISTS employee_file_templates(id UUID PRIMARY KEY,family_id UUID NOT NULL,version INTEGER NOT NULL,title TEXT NOT NULL,category TEXT NOT NULL,body TEXT NOT NULL,fields JSONB NOT NULL,departments JSONB NOT NULL,jobs JSONB NOT NULL,manager_assignable BOOLEAN NOT NULL,published BOOLEAN NOT NULL,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),UNIQUE(family_id,version));
  CREATE TABLE IF NOT EXISTS employee_file_assignments(id UUID PRIMARY KEY,employee_key TEXT NOT NULL,template_id UUID NOT NULL REFERENCES employee_file_templates(id),workflow TEXT NOT NULL,due_date DATE,status TEXT NOT NULL DEFAULT 'missing',draft JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
  CREATE TABLE IF NOT EXISTS employee_file_originals(id UUID PRIMARY KEY,employee_key TEXT NOT NULL,category TEXT NOT NULL,name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,data BYTEA,sst_document_id UUID ,provenance TEXT NOT NULL,document_date DATE,signature_kind TEXT NOT NULL,actor JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),CHECK((data IS NULL)<>(sst_document_id IS NULL)),UNIQUE(employee_key,category,sha256));
@@ -51,11 +51,11 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  CREATE TABLE IF NOT EXISTS employee_file_privacy_incidents(id UUID PRIMARY KEY,data JSONB NOT NULL,actor JSONB NOT NULL,supersedes UUID UNIQUE REFERENCES employee_file_privacy_incidents(id),created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
  CREATE INDEX IF NOT EXISTS employee_file_employee ON employee_file_assignments(employee_key);
  CREATE OR REPLACE FUNCTION employee_file_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Employee file history is append-only'; END $$;`);
- if(pool)for(const table of ['employee_file_originals','employee_file_links','employee_file_events','employee_file_templates','employee_file_privacy','employee_file_campaigns','employee_file_policies','employee_file_acknowledgements','employee_file_privacy_incidents'])await pool.query(`DROP TRIGGER IF EXISTS employee_file_immutable_trigger ON ${table}; CREATE TRIGGER employee_file_immutable_trigger BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION employee_file_immutable();`);
- if(pool)await pool.query(`REVOKE ALL ON SCHEMA employee_files_private FROM PUBLIC; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON SCHEMA employee_files_private FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON SCHEMA employee_files_private FROM authenticated; END IF; END $$;`);
+ if(pool && !process.env.VERCEL)for(const table of ['employee_file_originals','employee_file_links','employee_file_events','employee_file_templates','employee_file_privacy','employee_file_campaigns','employee_file_policies','employee_file_acknowledgements','employee_file_privacy_incidents'])await pool.query(`DROP TRIGGER IF EXISTS employee_file_immutable_trigger ON ${table}; CREATE TRIGGER employee_file_immutable_trigger BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION employee_file_immutable();`);
+ if(pool && !process.env.VERCEL)await pool.query(`REVOKE ALL ON SCHEMA employee_files_private FROM PUBLIC; DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON SCHEMA employee_files_private FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON SCHEMA employee_files_private FROM authenticated; END IF; END $$;`);
  // Mount only after schema initialization succeeds, so startup can safely retry
  // in consultation-only mode without leaving a partially initialized router.
- if(trialPool)await installSingleTrial(app,trialPool,{managerAccess,wrap,date});
+ const trialReminders=trialPool ? await installSingleTrial(app,trialPool,{managerAccess,wrap,date}) : undefined;
  app.use(BASE,(req,res,next)=>{if(pool||req.path==='/direction-signature'||['/state','/policy','/privacy','/training','/legacy','/access','/reconcile'].includes(req.path)&&(['GET'].includes(req.method)||req.path==='/reconcile'))return next();res.status(503).json({error:storageStatus.message||'Connectez le coffre documentaire canadien avant toute saisie.'});});
  const transaction=async fn=>{const db=await pool.connect();try{await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835109)');const r=await fn(db);await db.query('COMMIT');return r;}catch(e){await db.query('ROLLBACK');throw e;}finally{db.release();}};
  const event=(db,a,action,data,id=null)=>db.query('INSERT INTO employee_file_events(assignment_id,action,actor,data) VALUES($1,$2,$3,$4)',[id,action,json(a.audit),json(data)]);
@@ -140,7 +140,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   await saveDirectionSignature(req.body?.strokes,req.ef.audit);
   res.json({ok:true});
  }));
- await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date});
+ const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));
  app.get(BASE+'/assignments/:id',auth,wrap(async(req,res)=>{const {row}=await assignment(req.ef,req.params.id,await directory());const history=(await pool.query('SELECT action,actor,created_at,data FROM employee_file_events WHERE assignment_id=$1 ORDER BY id',[row.id])).rows;res.json({assignment:row,originals:await originals(row.id),history});}));
@@ -217,4 +217,5 @@ Cette version est préparatoire. Le responsable doit confirmer les renseignement
   async read(id){const o=(await pool.query("SELECT id,name,mime,size,sha256,data,created_at FROM employee_file_originals WHERE id=$1 AND category='sst' AND sst_document_id IS NULL AND EXISTS(SELECT 1 FROM employee_file_links l WHERE l.original_id=employee_file_originals.id)",[id])).rows[0];return o||null;}
  });
 
+ return reminders || trialReminders;
 }

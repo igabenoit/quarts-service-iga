@@ -34,7 +34,7 @@ test('sync is idempotent, updates changed shifts, deletes only its own cancelled
       const id=decodeURIComponent(url.split('/').at(-1)),method=options.method||'GET',body=options.body?JSON.parse(options.body):null;
       if(method==='GET')return events.has(id)?response(events.get(id)):response({},deleted.has(id)?410:404);
       writes.push(method);
-      if(method==='POST'){if(events.has(body.id))return response({},409);events.set(body.id,body);if(failInsert){failInsert=false;throw Error('connection lost after insert');}return response(body);}
+      if(method==='POST'){if(events.has(body.id))return response({},409);events.set(body.id,{...body,status:'confirmed'});if(failInsert){failInsert=false;throw Error('connection lost after insert');}return response(events.get(body.id));}
       if(method==='PATCH'){events.set(id,{...events.get(id),...body});return response(events.get(id));}
       if(method==='DELETE'){events.delete(id);deleted.add(id);return response({},204);}
       throw Error('unexpected request');

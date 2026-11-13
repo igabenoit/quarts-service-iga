@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
 import {installCuisineMigration,membershipsAt} from './cuisine-migration.js';
@@ -26,7 +27,7 @@ const week=v=>isDate(v)&&monday(v)===v?v:fail('Choisissez le lundi de la semaine
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||400).json({error:error.status||!error.code?error.message:'Cette opération n’a pas pu être enregistrée.'});}};
 
 export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch,photoTimeoutMs=PHOTO_ANALYSIS_TIMEOUT_MS+5000}){
-  await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
     CREATE TABLE IF NOT EXISTS schedule_store_people(id BIGSERIAL PRIMARY KEY,service_employee_id BIGINT UNIQUE,name TEXT NOT NULL,seniority_date DATE,birthday DATE,email TEXT NOT NULL DEFAULT '',employment_group TEXT NOT NULL DEFAULT 'regular' CHECK(employment_group IN('regular','part_time')),availability JSONB NOT NULL DEFAULT '{}',active BOOLEAN NOT NULL DEFAULT TRUE,source_note TEXT NOT NULL DEFAULT '',verified_at TIMESTAMPTZ,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS onboarding_new boolean NOT NULL DEFAULT false;
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS onboarding_new boolean NOT NULL DEFAULT false;
@@ -44,7 +45,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS schedule_department_photo_week ON schedule_department_photos(department_id,week_start);`);
-  await pool.query(`DO $$ BEGIN
+  if (needsSchema(pool)) await pool.query(`DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='leave_person_identity_fk') THEN
       ALTER TABLE schedule_leave_requests ADD CONSTRAINT leave_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
     END IF;
@@ -52,7 +53,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       ALTER TABLE schedule_availability_requests ADD CONSTRAINT availability_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
     END IF;
   END $$;`);
-  await pool.query(`CREATE OR REPLACE FUNCTION schedule_guard_departure_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+  if (needsSchema(pool)) await pool.query(`CREATE OR REPLACE FUNCTION schedule_guard_departure_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
     DECLARE cutoff date; shift_date date;
     BEGIN
       IF TG_TABLE_NAME='schedule_assignments' THEN
@@ -67,16 +68,18 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     END $$;
     CREATE OR REPLACE TRIGGER schedule_guard_departure_assignment BEFORE INSERT OR UPDATE OF shift_id,employee_id ON schedule_assignments FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();
     CREATE OR REPLACE TRIGGER schedule_guard_departure_shift BEFORE UPDATE OF week_start,day_index ON schedule_shifts FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();`);
-  await installServicePublications(pool);
+  if (needsSchema(pool)) await installServicePublications(pool);
   const employeePortal=await installEmployeePortal(app,pool,{sameOrigin,requireManager});
-  const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
-  for(const style of DEPARTMENT_STYLES){
-    let d=existing.find(d=>d.schedule_key===style.key)||existing.find(d=>nameKey(d.name)===nameKey(style.name));
-    if(d)await pool.query('UPDATE schedule_leave_departments SET schedule_key=$1 WHERE id=$2 AND schedule_key IS NULL',[style.key,d.id]);
-    else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
+  if (needsSchema(pool)) {
+    const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
+    for(const style of DEPARTMENT_STYLES){
+      let d=existing.find(d=>d.schedule_key===style.key)||existing.find(d=>nameKey(d.name)===nameKey(style.name));
+      if(d)await pool.query('UPDATE schedule_leave_departments SET schedule_key=$1 WHERE id=$2 AND schedule_key IS NULL',[style.key,d.id]);
+      else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
+    }
+    await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
   }
-  await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
-  await installCuisineMigration(pool);
+  if (needsSchema(pool)) await installCuisineMigration(pool);
   await installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl});
   app.use('/api/departments',(req,res,next)=>{
     const send=res.json.bind(res);
@@ -255,8 +258,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       WHERE a.shift_id=s.id AND a.employee_id=p.service_employee_id AND p.id=ANY($1::bigint[]) AND s.week_start+s.day_index::int >= $2::date`,[ids,date]);
     const serviceIds=new Set(group.filter(p=>ids.includes(p.id)&&p.serviceEmployeeId).map(p=>p.serviceEmployeeId));
     if(serviceIds.size){
-      const publications=(await client.query('SELECT week_start,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
-      for(const {week_start,snapshot} of publications){
+      const publications=(await client.query('SELECT week_start,store_id,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
+      for(const {week_start,store_id,snapshot} of publications){
         const start=iso(week_start);
         const employees=snapshot.employees.filter(e=>start<date||!serviceIds.has(Number(e.id)));
         let changed=employees.length!==snapshot.employees.length;
@@ -264,7 +267,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
           if(!serviceIds.has(Number(shift.employee_id))||addDays(start,Number(shift.day_index))<date)return shift;
           changed=true;return {...shift,employee_id:null};
         });
-        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1',[start,JSON.stringify({...snapshot,employees,shifts})]);
+        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1 AND store_id=$3',[start,JSON.stringify({...snapshot,employees,shifts}),store_id]);
       }
     }
     await finishDueDepartures(client);
