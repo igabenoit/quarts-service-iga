@@ -27,6 +27,7 @@ import {beginUndo,installUndo} from "./undo.js";
 import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
+import {schedulePoolConfig,verifyPreviewDatabase} from "./schedule-database.js";
 import {saveEmployeeCode} from './employee-portal.js';
 import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
@@ -45,12 +46,8 @@ for (const key of ["DATABASE_URL", "SESSION_SECRET", "MANAGER_CODE"]) {
   if (!process.env[key]) throw Object.assign(new Error(`Variable requise absente: ${key}`),{code:'MISSING_'+key});
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: production ? { rejectUnauthorized: false } : false,
-  max: 5,
-  connectionTimeoutMillis: 3000,
-});
+const pool = new Pool(schedulePoolConfig(process.env));
+await verifyPreviewDatabase(pool,process.env);
 pool.on('error',error=>logEvent('database_pool_error',{code:errorCode(error)},'error'));
 startupPhase('schema_core');
 const attempts = new Map();
@@ -942,15 +939,18 @@ app.use((error,_req,res,_next)=>{
   logEvent('http_unhandled_error',{code:errorCode(error)},'error');
   if(!res.headersSent)res.status(error.status>=400&&error.status<500?error.status:500).json({error:'Service temporairement indisponible. Réessayez.'});
 });
-startupPhase('listen');
-const server=app.listen(port,()=>startupPhase('ready'));
-const shutdown=()=>{
-  startupPhase('shutdown');
-  chatPush?.stop();
-  server.close(async()=>{await employeeVault.trialPool?.end();await employeeVault.pool?.end();await pool.end();process.exit(0);});
-  setTimeout(()=>process.exit(1),25000).unref();
-};
-process.once('SIGTERM',shutdown);
-process.once('SIGINT',shutdown);
-
-
+export default app;
+if (process.env.VERCEL) {
+  startupPhase('ready');
+} else {
+  startupPhase('listen');
+  const server=app.listen(port,()=>startupPhase('ready'));
+  const shutdown=()=>{
+    startupPhase('shutdown');
+    chatPush?.stop();
+    server.close(async()=>{await employeeVault.trialPool?.end();await employeeVault.pool?.end();await pool.end();process.exit(0);});
+    setTimeout(()=>process.exit(1),25000).unref();
+  };
+  process.once('SIGTERM',shutdown);
+  process.once('SIGINT',shutdown);
+}

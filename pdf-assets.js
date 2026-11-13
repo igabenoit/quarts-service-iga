@@ -2,6 +2,7 @@ import {createRequire} from 'node:module';
 import {dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 export function installPdfAssets(app){
+  if (process.env.VERCEL) return; // Browser bundles are served by the Vercel CDN.
   const require=createRequire(import.meta.url),docx=require.resolve('docx-preview'),zip=require.resolve('jszip',{paths:[dirname(docx)]});
   app.get('/vendor/docx-preview.js',(_req,res)=>res.sendFile(docx));
   app.get('/vendor/jszip.js',(_req,res)=>res.sendFile(dirname(dirname(zip))+'/dist/jszip.min.js'));
