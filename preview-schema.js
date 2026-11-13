@@ -1,4 +1,4 @@
-const schemaVersion = '20261113.2';
+const schemaVersion = '20261113.3';
 const preparedPools = new WeakSet();
 let preparing = false;
 

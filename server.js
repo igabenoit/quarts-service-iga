@@ -35,6 +35,7 @@ import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
 import {conflictsWithLeave} from "./leave-rules.js";
 import { assignmentConflict, generateAssignments } from "./scheduler.js";
+import {clearExpiredPhotoUploads} from './department-photo-uploads.js';
 import {backupBeforeRegeneration,finishRegenerationBackup,installScheduleBackup} from './schedule-backup.js';
 import {applyServiceRoleDefault,copyServiceShifts} from './service-role-defaults.js';
 
@@ -530,6 +531,7 @@ startupPhase('schema_departments');
 const departmentService=await installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff:leaveAccess.requireStaff});
 if (runsInWebProcess()){
   await departmentService.finishDueDepartures();
+  setInterval(()=>clearExpiredPhotoUploads(pool).catch(error=>logEvent('photo_upload_cleanup_failed',{code:errorCode(error)},'error')),3600000).unref();
   setInterval(()=>departmentService.finishDueDepartures().catch(error=>console.error('Fin d’emploi planifiée',error.message)),60000).unref();
 }
 const employeePortal=departmentService.employeePortal;
@@ -834,6 +836,7 @@ if (preparation) await installScheduledWorkSchema(pool);
 export function runPeriodicTasks(executionId) {
   return runScheduledWork(pool,executionId,{
     departures:departmentService.finishDueDepartures,
+    photoUploads:()=>clearExpiredPhotoUploads(pool),
     ...leaveAccess.periodic,
     ...(onboardingReminders ? {onboarding:onboardingReminders} : {}),
     notifications:chatPush.drain,

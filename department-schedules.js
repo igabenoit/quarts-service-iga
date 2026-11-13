@@ -19,6 +19,7 @@ import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
 import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
+import {installPhotoUploads} from './department-photo-uploads.js';
 import {sendDepartmentPhoto} from './department-photo-response.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -374,9 +375,17 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const old=(await client.query('SELECT draft FROM schedule_department_history WHERE id=$1 AND department_id=$2 AND week_start=$3',[integer(req.body.historyId),current.department.id,current.weekStart])).rows[0];if(!old)fail('Version introuvable.',404);
     return saveWeek(client,current,normalizeDraft(old.draft,current.people),'restore');
   }))));
+  async function savePhoto(db,departmentId,weekStart,name,dataUrl) {
+    const count = await db.query('SELECT count(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[departmentId,weekStart]);
+    if (count.rows[0].n >= 4) fail('Quatre photos sont déjà conservées pour cette semaine.');
+    const result = await db.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[departmentId,weekStart,name,dataUrl]);
+    return Number(result.rows[0].id);
+  }
+  await installPhotoUploads(app,pool,{requireManager,sameOrigin,endpoint,week,department,transaction,savePhoto});
   app.post('/api/departments/photos',requireManager,sameOrigin,endpoint(async(req,res)=>{
     const d=await department(req.body.departmentId),start=week(req.body.weekStart),data=validatePhoto(req.body.dataUrl),name=String(req.body.name||'Photo').slice(0,120);
-    const result=await transaction(async client=>{const count=(await client.query('SELECT COUNT(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[d.id,start])).rows[0].n;if(count>=4)fail('Quatre photos sont déjà conservées pour cette semaine.');return (await client.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[d.id,start,name,data])).rows[0];});res.status(201).json({id:Number(result.id)});
+    const id = await transaction(db => savePhoto(db,d.id,start,name,data));
+    res.status(201).json({id});
   }));
   const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),elapsedSeconds=p.started_at?Math.max(0,Math.floor((Date.now()-new Date(p.started_at).getTime())/1000)):0,retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,300-elapsedSeconds):0;return {id:Number(p.id),name:p.name,state:p.state,phase:p.phase||'reading',attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,elapsedSeconds,retryAfterSeconds,lastError:p.last_error||'',candidate:applyPhotoRules(p.candidate)};};
   async function readPhoto(id,withImage=false){
