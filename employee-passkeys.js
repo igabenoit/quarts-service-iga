@@ -1,6 +1,5 @@
 import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
-import {fileURLToPath} from 'node:url';
 import QRCode from 'qrcode';
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import {token,digest,fail,activePerson,transaction,installPasskeySchema,invite,log,requireMatricule} from './passkey-store.js';
@@ -107,7 +106,6 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     const p=await sessionIdentity(req);if(!p)fail('Session expirée.',401);
     await pool.query('UPDATE schedule_passkey_sessions SET last_seen_at=clock_timestamp() WHERE hash=$1',[digest(cookie(req,'employee_portal').slice(3))]);res.json({ok:true});
   }));
-  if (!process.env.VERCEL) app.get('/vendor/simplewebauthn.js',(_req,res)=>res.sendFile(fileURLToPath(new URL('./node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js',import.meta.url))));
   app.post('/api/employee-passkeys/register/options',checkOrigin,endpoint(async(req,res)=>{
     await rate(req);if(!validToken(req.body?.token))fail('Lien invalide.');
     if(req.body.shared===true)fail('Créez la clé sur votre appareil personnel ou avec votre clé de sécurité individuelle.');

@@ -1,6 +1,6 @@
 # Préversion Vercel de Quart Service
 
-La préversion Express utilise le commit Git, Node 24 et le fichier `vercel.json` du dépôt. La commande d’installation copie les cinq bibliothèques navigateur de la version verrouillée par npm vers `public/vendor`. Le serveur exporte l’application Express pour Vercel. Sur Render, `npm start` continue à ouvrir le port du service.
+La préversion Express utilise le commit Git, Node 24 et le fichier `vercel.json` du dépôt. Le dépôt contient le script de connexion dans `public/vendor/simplewebauthn.js` pour sa publication par Vercel. À l’installation, le build vérifie que ce fichier est identique au bundle de la version npm verrouillée et copie les quatre autres bibliothèques navigateur vers `public/vendor`. Le serveur exporte l’application Express pour Vercel. Sur Render, `npm start` continue à ouvrir le port du service.
 
 Dans le projet Vercel de test, utiliser les variables Preview existantes de l’application. Définir aussi `QUART_PREVIEW_PROJECT_REF`, `QUART_PREVIEW_SCHEMA` et `QUART_PREVIEW_DB_ROLE` pour le jeu de données à tester. Le serveur vérifie le certificat Supabase, puis le rôle et le schéma effectivement ouverts avant son initialisation. Utiliser une adresse PostgreSQL directe ou un pooler en mode session compatible avec les options de connexion. Les tests de charge doivent distinguer le plafond de trois connexions par instance du nombre total de connexions sur Supabase.
 
