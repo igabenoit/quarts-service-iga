@@ -41,6 +41,11 @@ import {applyServiceRoleDefault,copyServiceShifts} from './service-role-defaults
 
 const { Pool } = pg;
 const app = express();
+// Vercel reserves /api for filesystem functions. Restore the app path before routing and access checks.
+if (process.env.VERCEL) app.use((req,_res,next)=>{
+  if (req.url.startsWith('/quart-api/')) req.url='/api/'+req.url.slice('/quart-api/'.length);
+  next();
+});
 const port = Number(process.env.PORT || 3000);
 const production = process.env.NODE_ENV === "production";
 

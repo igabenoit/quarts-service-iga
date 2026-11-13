@@ -9,6 +9,7 @@
   "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
   "rewrites": [
+    {"source": "/api/:path*", "destination": "/quart-api/:path*"},
     {"source": "/discussion", "destination": "/discussion.html"},
     {"source": "/connexion-employe", "destination": "/connexion-employe.html"},
     {"source": "/cles-employes", "destination": "/cles-employes.html"},
