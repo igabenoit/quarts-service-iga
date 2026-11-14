@@ -1,26 +1,27 @@
+import {needsSchema} from './preview-schema.js';
 import {createHash} from 'node:crypto';
 import {addDays, conflictsWithLeave, isDate} from './leave-rules.js';
 import {profileAt,historyOf} from './availability-rules.js';
 
 // The caller holds the scheduling advisory lock, inside the mutation transaction.
-export async function readSchedule(client, weekStart) {
+export async function readSchedule(client, weekStart,store='principal') {
   const shifts=(await client.query(`SELECT id, area, role, day_index, start_minute, end_minute, break_minutes, absence
-    FROM schedule_shifts WHERE week_start=$1 ORDER BY id`,[weekStart])).rows;
+    FROM schedule_shifts WHERE week_start=$1 AND store_id=$2 ORDER BY id`,[weekStart,store])).rows;
   const assignments=(await client.query(`SELECT a.shift_id, a.employee_id FROM schedule_assignments a
-    JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 ORDER BY a.shift_id`,[weekStart])).rows;
+    JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start=$1 AND s.store_id=$2 ORDER BY a.shift_id`,[weekStart,store])).rows;
   return {shifts,assignments};
 }
 
-export async function backupBeforeRegeneration(client, weekStart) {
-  const snapshot=await readSchedule(client,weekStart);
-  const saved=await client.query(`INSERT INTO schedule_regeneration_backups (week_start,snapshot)
-    VALUES ($1,$2::jsonb) RETURNING id`,[weekStart,JSON.stringify(snapshot)]);
+export async function backupBeforeRegeneration(client, weekStart,store='principal') {
+  const snapshot=await readSchedule(client,weekStart,store);
+  const saved=await client.query(`INSERT INTO schedule_regeneration_backups (week_start,snapshot,store_id)
+    VALUES ($1,$2::jsonb,$3) RETURNING id`,[weekStart,JSON.stringify(snapshot),store]);
   return saved.rows[0]?.id;
 }
 
 // Automatic role defaults are part of regeneration and must be reversible too.
-export async function finishRegenerationBackup(client,backupId,weekStart){
-  const {shifts}=await readSchedule(client,weekStart);
+export async function finishRegenerationBackup(client,backupId,weekStart,store='principal'){
+  const {shifts}=await readSchedule(client,weekStart,store);
   await client.query(`UPDATE schedule_regeneration_backups SET snapshot=snapshot||jsonb_build_object('generatedShifts',$1::jsonb) WHERE id=$2`,[JSON.stringify(shifts),backupId]);
 }
 
@@ -66,27 +67,27 @@ export function restorationPreview(backup,current,{weekStart,employees,leaves,ti
 }
 
 export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_regeneration_backups (
-    id BIGSERIAL PRIMARY KEY, week_start DATE NOT NULL REFERENCES schedule_weeks(week_start) ON DELETE CASCADE,
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_regeneration_backups (
+    id BIGSERIAL PRIMARY KEY, week_start DATE NOT NULL, store_id text NOT NULL DEFAULT 'principal', FOREIGN KEY(week_start,store_id) REFERENCES schedule_weeks(week_start,store_id) ON DELETE CASCADE,
     snapshot JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     restored_at TIMESTAMPTZ, replaced_snapshot JSONB
   ); CREATE INDEX IF NOT EXISTS schedule_regeneration_backups_week_idx ON schedule_regeneration_backups(week_start,id DESC);`);
 
   async function operation(req,res,restore){
     res.set('Cache-Control','no-store');
-    const weekStart=req.params.weekStart;
+    const weekStart=req.params.weekStart,store=req.storeId??'principal';
     if(!isDate(weekStart)||new Date(`${weekStart}T12:00:00Z`).getUTCDay()!==1)return res.status(400).json({error:'Semaine invalide.'});
     const client=await pool.connect();
     try{
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(8675309)');
-      const backup=(await client.query(`SELECT * FROM schedule_regeneration_backups WHERE week_start=$1 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[weekStart])).rows[0];
+      const backup=(await client.query(`SELECT * FROM schedule_regeneration_backups WHERE week_start=$1 AND store_id=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[weekStart,store])).rows[0];
       if(!backup||backup.restored_at){
         await client.query('COMMIT');
         return restore?res.status(409).json({error:'Aucune recréation à annuler pour cette semaine.'}):res.json({backup:null});
       }
-      const current=await readSchedule(client,weekStart);
-      const employees=(await client.query('SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees ORDER BY id')).rows;
+      const current=await readSchedule(client,weekStart,store);
+      const employees=(await client.query('SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees WHERE store_id=$1 ORDER BY id',[store])).rows;
       const leaves=(await client.query(`SELECT employee_id,COALESCE(effective_periods,periods) AS periods FROM schedule_leave_requests
         WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 ORDER BY id`,[weekStart,addDays(weekStart,6)])).rows;
       const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1 ORDER BY employee_id,day_index',[weekStart])).rows;
@@ -96,7 +97,7 @@ export async function installScheduleBackup(app,pool,{requireManager,sameOrigin}
         await client.query('ROLLBACK');return res.status(409).json({error:'L’horaire ou les congés ont changé. Fermez puis rouvrez l’aperçu avant de restaurer.'});
       }
       if(!preview.canRestore){await client.query('ROLLBACK');return res.status(409).json({error:preview.issues.join(' ')});}
-      await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN (SELECT id FROM schedule_shifts WHERE week_start=$1)`,[weekStart]);
+      await client.query(`DELETE FROM schedule_assignments WHERE shift_id IN (SELECT id FROM schedule_shifts WHERE week_start=$1 AND store_id=$2)`,[weekStart,store]);
       if(backup.snapshot.generatedShifts)for(const shift of backup.snapshot.shifts){
         const now=current.shifts.find(s=>String(s.id)===String(shift.id));
         if(now.role!==shift.role||serialized(now.absence)!==serialized(shift.absence))await client.query('UPDATE schedule_shifts SET role=$1,absence=$2,updated_at=NOW() WHERE id=$3',[shift.role,shift.absence||null,shift.id]);

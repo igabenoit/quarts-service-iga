@@ -1,3 +1,4 @@
+import {depositDocument} from './file-blocks.js';
 import {emailPaper} from './sst-email-paper.js';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const css=document.createElement('link');css.rel='stylesheet';css.href='/inspection-grid.css';document.head.append(css);
@@ -61,7 +62,7 @@ function bind(){
  if('gridFromNo'in d){const existing=new Set(run.data.actions.map(a=>a.finding));const additions=items().filter(x=>run.data.answers[x.id]?.value==='no'&&!existing.has(x.text));for(const x of additions){const blank=run.data.actions.find(a=>!a.finding&&!a.measure&&!a.owner&&!a.due);if(blank)blank.finding=x.text;else if(run.data.actions.length<100)run.data.actions.push({...emptyAction(),finding:x.text});else throw Error('Maximum de 100 constatations.')}changed();drawRun();return}
  }catch(error){toast(error.message,true)}};
  host.oninput=e=>{const x=e.target,d=x.dataset;if(d.gridMeta){run.data[d.gridMeta]=x.value;changed()}if(d.gridNote){run.data.answers[d.gridNote]={...(run.data.answers[d.gridNote]||{value:''}),note:x.value};changed()}if(d.gridAction!==undefined){run.data.actions[Number(d.gridAction)][d.field]=x.value;changed()}};
- host.onchange=async e=>{const x=e.target,d=x.dataset;if(d.gridAnswer){run.data.answers[d.gridAnswer]={...(run.data.answers[d.gridAnswer]||{note:''}),value:x.value};changed()}if('gridPage'in d){page=Number(x.value);drawRun()}if('gridImport'in d){const file=x.files?.[0];if(!file)return;try{if(file.size>16*1024*1024)throw Error('Le modèle dépasse 16 Mo.');toast('Installation du modèle…');await request('templates',await file.text());await mount(host);toast('Modèle et PDF original installés.')}catch(err){toast(err.message,true)}}};
+ host.onchange=async e=>{const x=e.target,d=x.dataset;if(d.gridAnswer){run.data.answers[d.gridAnswer]={...(run.data.answers[d.gridAnswer]||{note:''}),value:x.value};changed()}if('gridPage'in d){page=Number(x.value);drawRun()}if('gridImport'in d){const file=x.files?.[0];if(!file)return;try{if(file.size>16*1024*1024)throw Error('Le modèle dépasse 16 Mo.');toast('Installation du modèle…');await depositDocument(file,'/api/sst/grid/templates','X-SST-Request',16);await mount(host);toast('Modèle et PDF original installés.')}catch(err){toast(err.message,true)}}};
 }
 
 

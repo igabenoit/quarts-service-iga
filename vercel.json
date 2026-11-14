@@ -1,0 +1,28 @@
+{
+  "framework": "express",
+  "schedules": {
+    "quart-periodique": {"schedule": "* * * * *", "function": "api/periodic"}
+  },
+  "functions": {
+    "api/periodic.js": {"regions": ["yul1"], "maxDuration": 300, "experimentalTriggers": [{"type": "schedule/v1beta"}]}
+  },
+  "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
+  "regions": ["yul1"],
+  "redirects": [
+    {"source": "/", "destination": "/index.html", "permanent": false},
+    {"source": "/direction", "destination": "/horaires-departements?vue=magasin", "permanent": false}
+  ],
+  "rewrites": [
+    {"source": "/api/:path*", "destination": "/quart-api/:path*"},
+    {"source": "/:page(acces|acces-famille|accueil-employe|chandails|chandails-gestion|cles-employes|confidentialite|confidentialite-google|conge-lecture|conges|conges-gestion|connexion|connexion-employe|courriels|departements|discussion|disponibilites|disponibilites-gestion|dossiers-employes|essai-jo-blo|horaire|horaire-famille|horaires-departements|index|lecture-pdf|numeraire|sst)", "destination": "/:page.html"},
+    {"source": "/conges-test", "destination": "/conges.html"},
+    {"source": "/disponibilites-test", "destination": "/disponibilites.html"},
+    {"source": "/h/:token([A-Za-z0-9_-]{43})", "destination": "/horaire.html"},
+    {"source": "/h/:token([A-Za-z0-9_-]{43})/conges", "destination": "/conges.html"}
+  ],
+  "headers": [
+    {"source": "/h/:token", "headers": [{"key":"Cache-Control","value":"no-store"},{"key":"X-Robots-Tag","value":"noindex, nofollow"}]},
+    {"source": "/h/:token/conges", "headers": [{"key":"Cache-Control","value":"no-store"},{"key":"X-Robots-Tag","value":"noindex, nofollow"}]},
+    {"source": "/:page(conges|courriels|disponibilites|disponibilites-test|disponibilites-gestion)", "headers": [{"key":"Cache-Control","value":"no-store"},{"key":"X-Robots-Tag","value":"noindex, nofollow"}]}
+  ]
+}

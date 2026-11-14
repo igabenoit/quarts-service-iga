@@ -34,6 +34,7 @@
         <div><span>Semaine du</span><strong id="weekLabel"></strong></div>
         <button id="nextWeek" class="square" aria-label="Semaine suivante">›</button>
         <button id="refreshServiceWeek" class="secondary">Actualiser</button>
+        <label id="serviceStoreLabel" hidden>Magasin <select id="serviceStore"></select></label>
         <input id="weekPicker" type="date" aria-label="Choisir la semaine">
         <button id="copyPrevious" class="secondary">Copier la semaine précédente</button>
         <span id="saveStatus" class="save-status">Tout est enregistré</span>
@@ -65,7 +66,7 @@
         <p id="leaveApplyStatus" role="status"></p>
         <p id="scheduleStatus"></p><div id="permanentAvailabilityWarnings" class="notice" role="status"></div><div id="approvedLeaveSummary"></div>
         <p id="assignmentMessage" class="error" role="alert" hidden></p>
-        <p class="notice">Quart partagé : saisissez ici seulement la portion Service et l’autre portion dans son département, avec les fiches liées du même employé. Les deux horaires affichent la journée complète et ventilent les heures.</p><div class="sales-forecast-toolbar"><span data-sales-forecast-status role="status">Prévisions initiales du magasin</span><a href="https://releve-quotidien-iga.onrender.com/previsions/" target="_blank" rel="noopener noreferrer">Ouvrir les prévisions</a><button type="button" class="secondary quiet" data-refresh-sales>Actualiser les ventes</button></div><div id="scheduleBoard"></div>
+        <p class="notice">Quart partagé : saisissez ici seulement la portion Service et l’autre portion dans son département, avec les fiches liées du même employé. Les deux horaires affichent la journée complète et ventilent les heures.</p><div class="sales-forecast-toolbar"><span data-sales-forecast-status role="status">Prévisions initiales du magasin</span><a href="https://releve-quotidien-iga.vercel.app/previsions/" target="_blank" rel="noopener noreferrer">Ouvrir les prévisions</a><button type="button" class="secondary quiet" data-refresh-sales>Actualiser les ventes</button></div><div id="scheduleBoard"></div>
         <div id="employeeTotals" class="employee-totals"></div>
       </section>
 

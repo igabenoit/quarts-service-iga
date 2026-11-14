@@ -15,6 +15,9 @@
   "dependencies": {
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
+    "@vercel/blob": "2.8.0",
+    "@vercel/functions": "3.11.2",
+    "@vercel/schedules": "0.0.3",
     "docx-preview": "0.3.7",
     "express": "^5.1.0",
     "html2canvas": "1.4.1",
@@ -26,5 +29,10 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8"
+  },
+  "overrides": {
+    "@vercel/cli-config": {
+      "zod": "4.6.7"
+    }
   }
 }

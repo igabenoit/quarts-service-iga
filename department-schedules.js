@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
 import {installCuisineMigration,membershipsAt} from './cuisine-migration.js';
@@ -18,6 +19,8 @@ import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
 import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
 import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
+import {installPhotoUploads} from './department-photo-uploads.js';
+import {sendDepartmentPhoto} from './department-photo-response.js';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const iso=v=>v instanceof Date?v.toISOString().slice(0,10):v?.slice(0,10)||'';
@@ -26,7 +29,7 @@ const week=v=>isDate(v)&&monday(v)===v?v:fail('Choisissez le lundi de la semaine
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||400).json({error:error.status||!error.code?error.message:'Cette opération n’a pas pu être enregistrée.'});}};
 
 export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch,photoTimeoutMs=PHOTO_ANALYSIS_TIMEOUT_MS+5000}){
-  await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
     CREATE TABLE IF NOT EXISTS schedule_store_people(id BIGSERIAL PRIMARY KEY,service_employee_id BIGINT UNIQUE,name TEXT NOT NULL,seniority_date DATE,birthday DATE,email TEXT NOT NULL DEFAULT '',employment_group TEXT NOT NULL DEFAULT 'regular' CHECK(employment_group IN('regular','part_time')),availability JSONB NOT NULL DEFAULT '{}',active BOOLEAN NOT NULL DEFAULT TRUE,source_note TEXT NOT NULL DEFAULT '',verified_at TIMESTAMPTZ,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_employees ADD COLUMN IF NOT EXISTS onboarding_new boolean NOT NULL DEFAULT false;
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS onboarding_new boolean NOT NULL DEFAULT false;
@@ -44,7 +47,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
     ALTER TABLE schedule_department_photos ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS schedule_department_photo_week ON schedule_department_photos(department_id,week_start);`);
-  await pool.query(`DO $$ BEGIN
+  if (needsSchema(pool)) await pool.query(`DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='leave_person_identity_fk') THEN
       ALTER TABLE schedule_leave_requests ADD CONSTRAINT leave_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
     END IF;
@@ -52,7 +55,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       ALTER TABLE schedule_availability_requests ADD CONSTRAINT availability_person_identity_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
     END IF;
   END $$;`);
-  await pool.query(`CREATE OR REPLACE FUNCTION schedule_guard_departure_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+  if (needsSchema(pool)) await pool.query(`CREATE OR REPLACE FUNCTION schedule_guard_departure_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
     DECLARE cutoff date; shift_date date;
     BEGIN
       IF TG_TABLE_NAME='schedule_assignments' THEN
@@ -67,16 +70,18 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     END $$;
     CREATE OR REPLACE TRIGGER schedule_guard_departure_assignment BEFORE INSERT OR UPDATE OF shift_id,employee_id ON schedule_assignments FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();
     CREATE OR REPLACE TRIGGER schedule_guard_departure_shift BEFORE UPDATE OF week_start,day_index ON schedule_shifts FOR EACH ROW EXECUTE FUNCTION schedule_guard_departure_assignment();`);
-  await installServicePublications(pool);
+  if (needsSchema(pool)) await installServicePublications(pool);
   const employeePortal=await installEmployeePortal(app,pool,{sameOrigin,requireManager});
-  const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
-  for(const style of DEPARTMENT_STYLES){
-    let d=existing.find(d=>d.schedule_key===style.key)||existing.find(d=>nameKey(d.name)===nameKey(style.name));
-    if(d)await pool.query('UPDATE schedule_leave_departments SET schedule_key=$1 WHERE id=$2 AND schedule_key IS NULL',[style.key,d.id]);
-    else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
+  if (needsSchema(pool)) {
+    const existing=(await pool.query('SELECT * FROM schedule_leave_departments')).rows;
+    for(const style of DEPARTMENT_STYLES){
+      let d=existing.find(d=>d.schedule_key===style.key)||existing.find(d=>nameKey(d.name)===nameKey(style.name));
+      if(d)await pool.query('UPDATE schedule_leave_departments SET schedule_key=$1 WHERE id=$2 AND schedule_key IS NULL',[style.key,d.id]);
+      else await pool.query('INSERT INTO schedule_leave_departments(name,schedule_key) VALUES($1,$2) ON CONFLICT(schedule_key) DO NOTHING',[style.name,style.key]);
+    }
+    await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
   }
-  await pool.query("UPDATE schedule_leave_departments SET schedule_key='service' WHERE code='service' AND schedule_key IS NULL");
-  await installCuisineMigration(pool);
+  if (needsSchema(pool)) await installCuisineMigration(pool);
   await installDepartmentMail(app,pool,{requireManager,sameOrigin,fetchImpl});
   app.use('/api/departments',(req,res,next)=>{
     const send=res.json.bind(res);
@@ -255,8 +260,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       WHERE a.shift_id=s.id AND a.employee_id=p.service_employee_id AND p.id=ANY($1::bigint[]) AND s.week_start+s.day_index::int >= $2::date`,[ids,date]);
     const serviceIds=new Set(group.filter(p=>ids.includes(p.id)&&p.serviceEmployeeId).map(p=>p.serviceEmployeeId));
     if(serviceIds.size){
-      const publications=(await client.query('SELECT week_start,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
-      for(const {week_start,snapshot} of publications){
+      const publications=(await client.query('SELECT week_start,store_id,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
+      for(const {week_start,store_id,snapshot} of publications){
         const start=iso(week_start);
         const employees=snapshot.employees.filter(e=>start<date||!serviceIds.has(Number(e.id)));
         let changed=employees.length!==snapshot.employees.length;
@@ -264,7 +269,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
           if(!serviceIds.has(Number(shift.employee_id))||addDays(start,Number(shift.day_index))<date)return shift;
           changed=true;return {...shift,employee_id:null};
         });
-        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1',[start,JSON.stringify({...snapshot,employees,shifts})]);
+        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1 AND store_id=$3',[start,JSON.stringify({...snapshot,employees,shifts}),store_id]);
       }
     }
     await finishDueDepartures(client);
@@ -370,9 +375,17 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const old=(await client.query('SELECT draft FROM schedule_department_history WHERE id=$1 AND department_id=$2 AND week_start=$3',[integer(req.body.historyId),current.department.id,current.weekStart])).rows[0];if(!old)fail('Version introuvable.',404);
     return saveWeek(client,current,normalizeDraft(old.draft,current.people),'restore');
   }))));
+  async function savePhoto(db,departmentId,weekStart,name,dataUrl) {
+    const count = await db.query('SELECT count(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[departmentId,weekStart]);
+    if (count.rows[0].n >= 4) fail('Quatre photos sont déjà conservées pour cette semaine.');
+    const result = await db.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[departmentId,weekStart,name,dataUrl]);
+    return Number(result.rows[0].id);
+  }
+  await installPhotoUploads(app,pool,{requireManager,sameOrigin,endpoint,week,department,transaction,savePhoto});
   app.post('/api/departments/photos',requireManager,sameOrigin,endpoint(async(req,res)=>{
     const d=await department(req.body.departmentId),start=week(req.body.weekStart),data=validatePhoto(req.body.dataUrl),name=String(req.body.name||'Photo').slice(0,120);
-    const result=await transaction(async client=>{const count=(await client.query('SELECT COUNT(*)::int AS n FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2',[d.id,start])).rows[0].n;if(count>=4)fail('Quatre photos sont déjà conservées pour cette semaine.');return (await client.query('INSERT INTO schedule_department_photos(department_id,week_start,name,data_url) VALUES($1,$2,$3,$4) RETURNING id',[d.id,start,name,data])).rows[0];});res.status(201).json({id:Number(result.id)});
+    const id = await transaction(db => savePhoto(db,d.id,start,name,data));
+    res.status(201).json({id});
   }));
   const photoState=p=>{const attempts=Number(p.attempts),attemptLimit=Number(p.attempt_limit),remainingAttempts=Math.max(0,attemptLimit-attempts),elapsedSeconds=p.started_at?Math.max(0,Math.floor((Date.now()-new Date(p.started_at).getTime())/1000)):0,retryAfterSeconds=p.state==='processing'&&p.started_at?Math.max(0,300-elapsedSeconds):0;return {id:Number(p.id),name:p.name,state:p.state,phase:p.phase||'reading',attempts,attemptLimit,remainingAttempts,busy:retryAfterSeconds>0,elapsedSeconds,retryAfterSeconds,lastError:p.last_error||'',candidate:applyPhotoRules(p.candidate)};};
   async function readPhoto(id,withImage=false){
@@ -383,7 +396,10 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   const photoBlocked=p=>{const state=photoState(p);if(state.busy)fail('Une lecture de cette photo est déjà en cours. Cliquez sur « Actualiser la lecture » pour récupérer son résultat. Une reprise sera possible dans au plus '+state.retryAfterSeconds+' secondes si la lecture a été interrompue.',409);if(!state.remainingAttempts)fail('Les '+state.attemptLimit+' essais autorisés pour cette photo ont été utilisés, y compris les lectures échouées. Cliquez sur « Autoriser 5 essais de plus » pour pouvoir la relire.',409);fail('L’état de la photo a changé. Actualisez la lecture avant de réessayer.',409);};
   app.get('/api/departments/photos',requireManager,endpoint(async(req,res)=>res.json({photos:(await pool.query('SELECT id,name,state,created_at,candidate IS NOT NULL AS analyzed FROM schedule_department_photos WHERE department_id=$1 AND week_start=$2 ORDER BY id',[integer(req.query.departmentId),week(req.query.weekStart)])).rows})));
-  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{const p=await readPhoto(integer(req.params.id),true);res.json({...photoState(p),dataUrl:p.data_url});}));
+  app.get('/api/departments/photos/:id',requireManager,endpoint(async(req,res)=>{
+    const p=await readPhoto(integer(req.params.id),true);
+    await sendDepartmentPhoto(res,photoState(p),p.data_url);
+  }));
   app.get('/api/departments/photos/:id/status',requireManager,endpoint(async(req,res)=>res.json(photoState(await readPhoto(integer(req.params.id))))));
   app.post('/api/departments/photos/:id/extend-attempts',requireManager,sameOrigin,endpoint(async(req,res)=>{
     const id=integer(req.params.id);if(!Number.isSafeInteger(req.body.attemptLimit)||req.body.attemptLimit<5)fail('Actualisez la lecture avant d’autoriser de nouveaux essais.');

@@ -1,4 +1,5 @@
-import {orderXlsx} from './cash-xlsx.js';
+import {needsSchema} from './preview-schema.js';
+import {orderWorkbooks} from './cash-xlsx.js';
 import {cashAccess} from './depot-access.js';
 import {createHash} from 'node:crypto';
 import lib from './onboarding/tuac/pdf-lib.min.cjs';
@@ -38,8 +39,8 @@ export async function orderPdf(b,lines,folio){
  return Buffer.from(await pdf.save());
 }
 export async function installCash(app,pool,auth,origin){
- await pool.query('CREATE TABLE IF NOT EXISTS cash_order_mail (id uuid PRIMARY KEY, fingerprint text NOT NULL, attachment bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), sent boolean NOT NULL DEFAULT false)');
- await pool.query(`ALTER TABLE cash_order_mail ADD COLUMN IF NOT EXISTS pickup date,
+ if (needsSchema(pool)) await pool.query('CREATE TABLE IF NOT EXISTS cash_order_mail (id uuid PRIMARY KEY, fingerprint text NOT NULL, attachment bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), sent boolean NOT NULL DEFAULT false)');
+ if (needsSchema(pool)) await pool.query(`ALTER TABLE cash_order_mail ADD COLUMN IF NOT EXISTS pickup date,
   ADD COLUMN IF NOT EXISTS lockers smallint[], ADD COLUMN IF NOT EXISTS recipient text, ADD COLUMN IF NOT EXISTS excel24 bytea, ADD COLUMN IF NOT EXISTS excel25 bytea`);
  const access=cashAccess(auth,origin);
  const paths=(suffix='')=>['/api/numeraire'+suffix,'/api/depot/numeraire'+suffix];
@@ -73,19 +74,21 @@ export async function installCash(app,pool,auth,origin){
   }catch{res.sendStatus(503);}
  });
  // The first version archived only the PDF. Recover the fields from its printed text.
- const old=await pool.query('SELECT id FROM cash_order_mail WHERE pickup IS NULL AND sent');
- for(const {id} of old.rows){
-  const {rows:[row]}=await pool.query('SELECT attachment FROM cash_order_mail WHERE id=$1',[id]);
-  const pdf=await lib.PDFDocument.load(row.attachment);
-  const streams=pdf.getPage(0).node.Contents();
-  const lines=[];
-  for(let i=0;i<streams.size();i++){
-   const content=Buffer.from(lib.decodePDFRawStream(streams.lookup(i)).decode()).toString('ascii');
-   for(const match of content.matchAll(/<([0-9A-F]+)> Tj/gi))lines.push(Buffer.from(match[1],'hex').toString('latin1'));
-  }
-  const date=lines.find(l=>l.startsWith('Cueillette : '))?.slice('Cueillette : '.length,'Cueillette : '.length+10);
-  const lockers=lines.filter(l=>/^Casier (24|25)$/.test(l)).map(l=>Number(l.slice(-2)));
-  if(date&&lockers.length)await pool.query('UPDATE cash_order_mail SET pickup=$2,lockers=$3,recipient=$4 WHERE id=$1',[id,date,lockers,bank]);
+ if (needsSchema(pool)) {
+   const old=await pool.query('SELECT id FROM cash_order_mail WHERE pickup IS NULL AND sent');
+   for(const {id} of old.rows){
+    const {rows:[row]}=await pool.query('SELECT attachment FROM cash_order_mail WHERE id=$1',[id]);
+    const pdf=await lib.PDFDocument.load(row.attachment);
+    const streams=pdf.getPage(0).node.Contents();
+    const lines=[];
+    for(let i=0;i<streams.size();i++){
+     const content=Buffer.from(lib.decodePDFRawStream(streams.lookup(i)).decode()).toString('ascii');
+     for(const match of content.matchAll(/<([0-9A-F]+)> Tj/gi))lines.push(Buffer.from(match[1],'hex').toString('latin1'));
+    }
+    const date=lines.find(l=>l.startsWith('Cueillette : '))?.slice('Cueillette : '.length,'Cueillette : '.length+10);
+    const lockers=lines.filter(l=>/^Casier (24|25)$/.test(l)).map(l=>Number(l.slice(-2)));
+    if(date&&lockers.length)await pool.query('UPDATE cash_order_mail SET pickup=$2,lockers=$3,recipient=$4 WHERE id=$1',[id,date,lockers,bank]);
+   }
  }
  app.post(paths(),access,async(req,res)=>{
   if(req.manager?.kind!=='admin')return res.sendStatus(403);
@@ -101,7 +104,7 @@ export async function installCash(app,pool,auth,origin){
   try{
    const fingerprint=createHash('sha256').update(JSON.stringify([b.lockers,b.date,b.time,b.name,b.notes,b.ink])).digest('hex');
    const pdf=await orderPdf(b,lines,process.env.CASH_ORDER_FOLIO);
-   const excel=await Promise.all(b.lockers.map((q,i)=>q.some(Boolean)?orderXlsx(b,24+i,Buffer.from(process.env['CASH_TEMPLATE_'+(24+i)]||'','base64')):null));
+   const excel=await orderWorkbooks(b);
    await pool.query('INSERT INTO cash_order_mail(id,fingerprint,attachment,pickup,lockers,recipient,excel24,excel25) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',[b.id,fingerprint,pdf,b.date,b.lockers.flatMap((q,i)=>q.some(Boolean)?[24+i]:[]),bank,...excel]);
    const {rows:[row]}=await pool.query('SELECT * FROM cash_order_mail WHERE id=$1',[b.id]);
    if(row.recipient!==bank||row.fingerprint!==fingerprint)return res.status(409).json({error:'Cette référence correspond déjà à une autre commande.'});

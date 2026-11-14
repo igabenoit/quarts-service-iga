@@ -52,9 +52,9 @@ async function fixture({backup=saved(),failInsert=false}={}){
     if(sql==='BEGIN')rollback=structuredClone({current,backup});
     if(sql==='ROLLBACK'){current=rollback.current;backup=rollback.backup;}
     if(sql.includes('SELECT * FROM schedule_regeneration_backups')){assert.equal(args[0],week);return {rows:backup?[backup]:[]};}
-    if(sql.includes('FROM schedule_shifts WHERE week_start=$1 ORDER BY id'))return {rows:current.shifts};
+    if(sql.includes('FROM schedule_shifts WHERE week_start=$1 AND store_id=$2 ORDER BY id'))return {rows:current.shifts};
     if(sql.includes('JOIN schedule_shifts s ON s.id=a.shift_id WHERE'))return {rows:current.assignments};
-    if(sql==='SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees ORDER BY id')return {rows:people};
+    if(sql==='SELECT id,name,active,availability,target_minutes,availability_history FROM schedule_employees WHERE store_id=$1 ORDER BY id')return {rows:people};
     if(sql.startsWith('INSERT INTO schedule_regeneration_backups')){backup={...saved(),snapshot:JSON.parse(args[1])};}
     if(sql.startsWith('DELETE FROM schedule_assignments')){assert.equal(args[0],week);current.assignments=[];}
     if(sql.startsWith('INSERT INTO schedule_assignments')){
@@ -119,7 +119,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       if(sql.startsWith('INSERT INTO schedule_undo_actions'))return {rows:[{id:'1'}]};
       if(sql==='ROLLBACK'){stored=null;current=original().assignments;}
       if(sql.startsWith('SELECT')&&sql.includes('FROM schedule_shifts WHERE week_start='))return {rows:original().shifts};
-      if(sql==='SELECT * FROM schedule_employees')return {rows:[{id:8,role:'cashier'}]};
+      if(sql==='SELECT * FROM schedule_employees WHERE store_id=$1'&&args[0]==='principal')return {rows:[{id:8,role:'cashier'}]};
       if(sql.includes('SELECT a.shift_id, a.employee_id'))return {rows:current};
       if(sql.startsWith('INSERT INTO schedule_regeneration_backups'))stored=JSON.parse(args[1]);
       if(sql.includes('DELETE FROM schedule_assignments')){assert.deepEqual(stored,original());current=[];}
@@ -133,7 +133,7 @@ test('la véritable route de recréation sauvegarde avant le retrait; un échec 
       mapShift:r=>({...r,id:Number(r.id)}),mapEmployee:r=>r,approvedLeave:async()=>[],backupBeforeRegeneration,beginUndo,applyServiceRoleDefault,shiftWithApprovedLeave,saveShiftLeave,generateAssignments:()=>({assignments:[{shiftId:1,employeeId:8}],unfilled:[]})});
     vm.runInContext(route,context);
     const res={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
-    await handler({params:{weekStart:week},body:{replaceAll:true}},res);
+    await handler({storeId:'principal',params:{weekStart:week},body:{replaceAll:true}},res);
     assert.equal(res.code,fail?400:200);
     assert.deepEqual(stored,fail?null:original());
     assert.deepEqual(current,fail?original().assignments:[assignment(1,8)]);

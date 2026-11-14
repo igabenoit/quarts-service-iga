@@ -1,5 +1,5 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
-import {fileURLToPath} from 'node:url';
 import QRCode from 'qrcode';
 import {generateRegistrationOptions,verifyRegistrationResponse,generateAuthenticationOptions,verifyAuthenticationResponse} from '@simplewebauthn/server';
 import {token,digest,fail,activePerson,transaction,installPasskeySchema,invite,log,requireMatricule} from './passkey-store.js';
@@ -10,7 +10,7 @@ const validToken=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{43}$/.test(v);
 const personId=v=>{if(!Number.isSafeInteger(v)||v<1)fail('Fiche invalide.');return v;};
 function topLevel(response){try{const d=JSON.parse(Buffer.from(response.response.clientDataJSON,'base64url').toString());if(d.crossOrigin===true||d.topOrigin)throw Error();}catch{fail('Ouvrez le portail directement dans votre navigateur.');}}
 export async function installEmployeePasskeys(app,pool,{requireManager}){
-  await installPasskeySchema(pool);
+  if (needsSchema(pool)) await installPasskeySchema(pool);
   const mode=process.env.EMPLOYEE_PASSKEY_MODE||'off';
   if(!['off','pilot','required'].includes(mode))throw Error('Invalid EMPLOYEE_PASSKEY_MODE');
   const enabled=mode!=='off',origin=process.env.EMPLOYEE_PASSKEY_ORIGIN||'';
@@ -106,7 +106,6 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     const p=await sessionIdentity(req);if(!p)fail('Session expirée.',401);
     await pool.query('UPDATE schedule_passkey_sessions SET last_seen_at=clock_timestamp() WHERE hash=$1',[digest(cookie(req,'employee_portal').slice(3))]);res.json({ok:true});
   }));
-  app.get('/vendor/simplewebauthn.js',(_req,res)=>res.sendFile(fileURLToPath(new URL('./node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js',import.meta.url))));
   app.post('/api/employee-passkeys/register/options',checkOrigin,endpoint(async(req,res)=>{
     await rate(req);if(!validToken(req.body?.token))fail('Lien invalide.');
     if(req.body.shared===true)fail('Créez la clé sur votre appareil personnel ou avec votre clé de sécurité individuelle.');
@@ -174,7 +173,7 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     // Derive the target and authorizing credential from the verified session, never the body.
     const p=req.passkeyAdmin;
     const secret=await transaction(pool,c=>invite(c,{personId:Number(p.id),actor:'direction:'+p.id,reason:'Ajout de mon appareil personnel après confirmation de ma clé existante',addDevice:true,authorizedCredentialId:p.credentialId}));
-    const url=origin+'/connexion-employe?retour=%2Fhoraires-departements%3Fvue%3Dmagasin#activation='+secret;
+    const url=origin+'/connexion-employe#activation='+secret;
     // Encode locally; the bearer link is never sent to an external QR provider.
     res.json({url,qr:await QRCode.toDataURL(url,{width:320,margin:4,errorCorrectionLevel:'M'}),expiresInMinutes:15});
   }));

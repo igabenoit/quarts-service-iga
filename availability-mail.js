@@ -1,3 +1,6 @@
+import {publicOrigin} from './public-origin.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {normalizeEmail} from './employee-contacts.js';
 const days=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
@@ -11,10 +14,10 @@ export function availabilityMailPayload(row,settings){
   return {from:process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'Quarts Service <onboarding@resend.dev>',to:[to],
     ...(copy&&copy!==to?{cc:[copy]}:{}),...(!row.is_test&&reply?{reply_to:reply}:{}),
     subject:`${row.is_test?'[TEST] ':''}Disponibilités ${approval?'approuvées':'à approuver'} — ${row.employee_name} · ${row.department_name||'Service'}`,
-    text:`${row.is_test?'TEST — aucun changement réel.\n\n':''}Bonjour${approval?' '+row.employee_name:''},\n\n${approval?'Votre nouvelle disponibilité permanente est approuvée.':'Une nouvelle demande de disponibilité permanente a été reçue. Consultez son état dans le suivi.'}\n\nEmployé : ${row.employee_name}\nDépartement : ${row.department_name||'Service'}\nDate effective : ${String(row.effective_date).slice(0,10)}\nHeures souhaitées par semaine : ${row.target_minutes/60} h\n\n${grid}\n\nCes disponibilités se répètent chaque semaine et doivent être maintenues au moins 4 semaines.${approval?'':'\n\nCommentaires : '+(row.comments||'Aucun')+'\n\nSuivi gestionnaire : https://quarts-service-iga.onrender.com/disponibilites-gestion'}\n\nRéférence : ${row.request_id}\nIGA extra Famille Benoit`};
+    text:`${row.is_test?'TEST — aucun changement réel.\n\n':''}Bonjour${approval?' '+row.employee_name:''},\n\n${approval?'Votre nouvelle disponibilité permanente est approuvée.':'Une nouvelle demande de disponibilité permanente a été reçue. Consultez son état dans le suivi.'}\n\nEmployé : ${row.employee_name}\nDépartement : ${row.department_name||'Service'}\nDate effective : ${String(row.effective_date).slice(0,10)}\nHeures souhaitées par semaine : ${row.target_minutes/60} h\n\n${grid}\n\nCes disponibilités se répètent chaque semaine et doivent être maintenues au moins 4 semaines.${approval?'':'\n\nCommentaires : '+(row.comments||'Aucun')+'\n\nSuivi gestionnaire : '+publicOrigin()+'/disponibilites-gestion'}\n\nRéférence : ${row.request_id}\nIGA extra Famille Benoit`};
 }
 export async function installAvailabilityMail(pool,{autoStart=true,fetchImpl=fetch}={}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_availability_mail (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_availability_mail (
     id BIGSERIAL PRIMARY KEY,request_id BIGINT NOT NULL REFERENCES schedule_availability_requests(id),kind TEXT NOT NULL,
     request_version INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending',payload JSONB,attempts INTEGER NOT NULL DEFAULT 0,
     available_at TIMESTAMPTZ NOT NULL DEFAULT (clock_timestamp()+interval '15 seconds'),first_attempt_at TIMESTAMPTZ,last_attempt_at TIMESTAMPTZ,provider_id TEXT,error TEXT NOT NULL DEFAULT '',UNIQUE(request_id,kind,request_version));`);
@@ -50,6 +53,6 @@ export async function installAvailabilityMail(pool,{autoStart=true,fetchImpl=fet
       }catch(error){logEvent('mail_transaction_failed',{component:'availability',code:errorCode(error)},'error');await client.query('ROLLBACK').catch(()=>{});}finally{client.release();}}
     }finally{running=false;}
   }
-  if(autoStart){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error'));}
+  if(autoStart&&runsInWebProcess()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'availability',code:errorCode(error)},'error'));}
   return {run,queue};
 }

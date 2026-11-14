@@ -31,3 +31,54 @@ test('import SST : transmission privée avec contrôle de session et origine',as
   const saved=(await f.call('GET','/api/sst/export',{cookie:admin})).body;assert.equal(saved.documents[0].dataBase64,bytes.toString('base64'));assert.equal(saved.imports.length,1);
  }finally{await f.close()}
 });
+
+test('lots et grilles de 16 Mio : dépôt par blocs, relecture et reprise',async()=>{
+ const {liveAppFixture}=await import('./live-app-fixture.mjs');
+ const {PART_BYTES,sendBlocks}=await import('../public/file-blocks.js');
+ const f=await liveAppFixture();
+ const direct=globalThis.fetch;
+ const base=new URL(f.base);
+ const max=16*1024*1024;
+ const pdf=Buffer.concat([bytes,Buffer.alloc(9*1024*1024,32),Buffer.from('\n%%EOF')]);
+ const sha=createHash('sha256').update(pdf).digest('hex');
+ try{
+  const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
+  const headers={Cookie:cookie,Origin:base.origin,'X-SST-Request':'1'};
+  const lot=payload();
+  lot.documents[0]={key:'one',name:'lot-fictif.pdf',dataBase64:pdf.toString('base64'),sha256:sha};
+  const template={format:'iga-sst-grid-template-v1',title:'Grille fictive',sourceVersion:'v1',sourceName:'grille.pdf',pdfBase64:pdf.toString('base64'),
+   pages:[{number:1,title:'Visite',blocks:[{type:'item',id:'sol',text:'Vérifier le sol'}]}]};
+  for(const [path,object] of [['/api/sst/import',lot],['/api/sst/grid/templates',template]]){
+   const json=Buffer.from(JSON.stringify(object));
+   const file=new File([json,Buffer.alloc(max-json.length,32)],'essai.json');
+   const url=base.origin+path+'/uploads/'+randomUUID();
+   let parts=0;
+   globalThis.location=base;
+   globalThis.fetch=async(target,options)=>{
+    assert.equal(new URL(target).origin,base.origin);
+    if(options.method==='PUT'){assert.ok(options.body.size<=PART_BYTES);parts++;}
+    return direct(target,{...options,headers:{...options.headers,...headers}});
+   };
+   const receipt=await sendBlocks(file,url,{'X-SST-Request':'1'},{name:file.name});
+   assert.equal(parts,8);
+   assert.ok(receipt.id);
+   const replay=await direct(url+'/complete',{method:'POST',headers});
+   assert.equal(replay.status,201);
+   assert.deepEqual(await replay.json(),receipt);
+   const otherPath=path==='/api/sst/import'?'/api/sst/grid/templates':'/api/sst/import';
+   assert.equal((await direct(url.replace(path,otherPath)+'/complete',{method:'POST',headers})).status,404);
+   let doc;
+   if(path==='/api/sst/import'){
+    assert.equal(receipt.documents,1);assert.equal(receipt.records,3);assert.ok(receipt.reportId);
+    doc=(await f.query('SELECT id FROM sst_documents WHERE name=$1',['lot-fictif.pdf'])).rows[0].id;
+   }else{
+    doc=(await f.query('SELECT document_id FROM sst_grid_templates WHERE id=$1',[receipt.id])).rows[0].document_id;
+   }
+   const download=await direct(base.origin+'/api/sst/documents/'+doc,{headers});
+   assert.equal(download.status,200);
+   assert.equal(createHash('sha256').update(Buffer.from(await download.arrayBuffer())).digest('hex'),sha);
+   const staging=(await f.query('SELECT octet_length(content) AS remaining FROM sst_import_uploads WHERE original_id=$1',[receipt.id])).rows;
+   assert.deepEqual(staging,[{remaining:0}]);
+  }
+ }finally{globalThis.fetch=direct;delete globalThis.location;await f.close()}
+});

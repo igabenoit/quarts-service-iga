@@ -1,3 +1,6 @@
+import {originalName,installDocumentUploads,installDocumentUploadSchema,sstImportUploads} from './document-uploads.js';
+import {sendPrivateBytes} from './private-response.js';
+import {needsSchema} from './preview-schema.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {normalizeSupervision} from './public/supervision-schema.js';
 import {normalizeWelcome,welcomeContent,validateWelcomeCompletion} from './public/welcome-form-schema.js';
@@ -54,27 +57,31 @@ export async function installSST(app,pool,{identity}){
   const hidden=new Set((await pool.query('SELECT document_id FROM sst_removed_documents')).rows.map(r=>r.document_id));
   return {records:shared.records.filter(r=>!hidden.has(r.fields?.employeeFileOriginalId)),documents:shared.documents.filter(d=>!hidden.has(d.id))};
  }catch{return {records:[],documents:[],warning:'Le coffre des dossiers employés est indisponible. Ses pièces SST ne sont pas affichées.'};}};
- const schemaDb=await pool.connect();
- try{await schemaDb.query('BEGIN');await schemaDb.query('SELECT pg_advisory_xact_lock(835107)');await schemaDb.query(`CREATE TABLE IF NOT EXISTS sst_records(
-  id UUID PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('training','equipment','incident','meeting','inspection','action','document')),
-  title TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('draft','open','progress','done')),
-  employee_key TEXT,employee_name TEXT NOT NULL DEFAULT '',department_id BIGINT REFERENCES schedule_leave_departments(id),
-  related_id UUID REFERENCES sst_records(id),owner TEXT NOT NULL DEFAULT '',event_date DATE,due_date DATE,
-  details TEXT NOT NULL DEFAULT '',fields JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
- ALTER TABLE sst_records ADD COLUMN IF NOT EXISTS event_group_id UUID REFERENCES sst_records(id);
- CREATE INDEX IF NOT EXISTS sst_records_event_group ON sst_records(event_group_id);
- CREATE TABLE IF NOT EXISTS sst_documents(
-  id UUID PRIMARY KEY,record_id UUID REFERENCES sst_records(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,
-  sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
- CREATE UNIQUE INDEX IF NOT EXISTS sst_document_unique ON sst_documents(sha256,COALESCE(record_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE archived_at IS NULL;
- CREATE TABLE IF NOT EXISTS sst_removed_documents(document_id UUID PRIMARY KEY,removed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE OR REPLACE VIEW sst_visible_documents AS SELECT d.* FROM sst_documents d
- WHERE NOT EXISTS (SELECT 1 FROM sst_removed_documents r WHERE r.document_id=d.id);
- CREATE TABLE IF NOT EXISTS sst_events(id BIGSERIAL PRIMARY KEY,record_id UUID REFERENCES sst_records(id),document_id UUID REFERENCES sst_documents(id),actor TEXT NOT NULL,action TEXT NOT NULL,before_value JSONB,after_value JSONB,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE TABLE IF NOT EXISTS sst_mail_recipients(email TEXT PRIMARY KEY);
- CREATE TABLE IF NOT EXISTS sst_imports(id UUID PRIMARY KEY,digest TEXT NOT NULL,label TEXT NOT NULL,record_count INTEGER NOT NULL,document_count INTEGER NOT NULL,report_id UUID REFERENCES sst_records(id),imported_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
- CREATE INDEX IF NOT EXISTS sst_records_kind ON sst_records(kind,archived_at);CREATE INDEX IF NOT EXISTS sst_events_record ON sst_events(record_id,id);`);await schemaDb.query('COMMIT')}catch(error){await schemaDb.query('ROLLBACK');throw error}finally{schemaDb.release()}
+ if (needsSchema(pool)) {
+   await installDocumentUploadSchema(pool);
+   await installDocumentUploadSchema(pool,sstImportUploads);
+   const schemaDb=await pool.connect();
+   try{await schemaDb.query('BEGIN');await schemaDb.query('SELECT pg_advisory_xact_lock(835107)');await schemaDb.query(`CREATE TABLE IF NOT EXISTS sst_records(
+    id UUID PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('training','equipment','incident','meeting','inspection','action','document')),
+    title TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('draft','open','progress','done')),
+    employee_key TEXT,employee_name TEXT NOT NULL DEFAULT '',department_id BIGINT REFERENCES schedule_leave_departments(id),
+    related_id UUID REFERENCES sst_records(id),owner TEXT NOT NULL DEFAULT '',event_date DATE,due_date DATE,
+    details TEXT NOT NULL DEFAULT '',fields JSONB NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
+   ALTER TABLE sst_records ADD COLUMN IF NOT EXISTS event_group_id UUID REFERENCES sst_records(id);
+   CREATE INDEX IF NOT EXISTS sst_records_event_group ON sst_records(event_group_id);
+   CREATE TABLE IF NOT EXISTS sst_documents(
+    id UUID PRIMARY KEY,record_id UUID REFERENCES sst_records(id),name TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,data BYTEA NOT NULL,version INTEGER NOT NULL DEFAULT 1,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),archived_at TIMESTAMPTZ);
+   CREATE UNIQUE INDEX IF NOT EXISTS sst_document_unique ON sst_documents(sha256,COALESCE(record_id,'00000000-0000-0000-0000-000000000000'::uuid)) WHERE archived_at IS NULL;
+   CREATE TABLE IF NOT EXISTS sst_removed_documents(document_id UUID PRIMARY KEY,removed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE OR REPLACE VIEW sst_visible_documents AS SELECT d.* FROM sst_documents d
+   WHERE NOT EXISTS (SELECT 1 FROM sst_removed_documents r WHERE r.document_id=d.id);
+   CREATE TABLE IF NOT EXISTS sst_events(id BIGSERIAL PRIMARY KEY,record_id UUID REFERENCES sst_records(id),document_id UUID REFERENCES sst_documents(id),actor TEXT NOT NULL,action TEXT NOT NULL,before_value JSONB,after_value JSONB,created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE TABLE IF NOT EXISTS sst_mail_recipients(email TEXT PRIMARY KEY);
+   CREATE TABLE IF NOT EXISTS sst_imports(id UUID PRIMARY KEY,digest TEXT NOT NULL,label TEXT NOT NULL,record_count INTEGER NOT NULL,document_count INTEGER NOT NULL,report_id UUID REFERENCES sst_records(id),imported_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
+   CREATE INDEX IF NOT EXISTS sst_records_kind ON sst_records(kind,archived_at);CREATE INDEX IF NOT EXISTS sst_events_record ON sst_events(record_id,id);`);await schemaDb.query('COMMIT')}catch(error){await schemaDb.query('ROLLBACK');throw error}finally{schemaDb.release()}
+ }
  const admin=async(req,res,next)=>{try{const who=await identity(req);if(!who)return res.status(401).json({error:'Connectez-vous avec le compte administrateur de Quarts Service.'});if(who.kind!=='admin')return res.status(403).json({error:'Cet espace SST est réservé à l’administration.'});req.sstActor=who.name||'Administration';req.sstIdentity={kind:who.kind,name:who.name||'Administration',...(who.id?{id:who.id}:{})};res.set('Cache-Control','no-store');next()}catch{res.status(503).json({error:'Accès SST temporairement indisponible.'})}};
  const origin=(req,res,next)=>{if(req.get('origin')!==`${req.protocol}://${req.get('host')}`||req.get('x-sst-request')!=='1')return res.status(403).json({error:'Rechargez l’espace SST avant de réessayer.'});next()};
  const route=fn=>async(req,res)=>{try{await fn(req,res)}catch(e){res.status(e.status||500).json({error:e.status?e.message:'Le dossier n’a pas pu être enregistré. Les données existantes sont conservées.'})}};
@@ -157,15 +164,30 @@ export async function installSST(app,pool,{identity}){
  }));
  app.post('/api/sst/records/:id/archive',admin,origin,route(async(req,res)=>{if(typeof req.body?.archived!=='boolean')fail('État invalide.');await tx(async db=>{const before=await record(db,req.params.id);if(before.version!==req.body.version)fail('Ce dossier a changé. Actualisez.',409);await db.query('UPDATE sst_records SET archived_at=CASE WHEN $1 THEN clock_timestamp() ELSE NULL END,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[req.body.archived,before.id]);await audit(db,req,req.body.archived?'record.archived':'record.restored',before,await record(db,before.id),before.id)});res.json({ok:true})}));
  app.get('/api/sst/history',admin,route(async(req,res)=>{if(req.query.id&&!uuid(req.query.id))fail('Dossier invalide.');const events=await pool.query('SELECT * FROM sst_events WHERE ($1::uuid IS NULL OR record_id=$1) ORDER BY id DESC LIMIT 300',[req.query.id||null]);res.json({events:events.rows})}));
+ async function authorizeDocument(db,req,metadata) {
+   if(metadata.recordId && (await record(db,metadata.recordId)).archived_at) fail('Ce dossier est archivé.',409);
+ }
+ async function fileDocument(db,req,_access,bytes,name,{recordId}) {
+   const mime=sstFileMime(bytes,name),sha=createHash('sha256').update(bytes).digest('hex');
+   const duplicate=(await db.query('SELECT id FROM sst_documents WHERE sha256=$1 AND record_id IS NOT DISTINCT FROM $2::uuid AND archived_at IS NULL',[sha,recordId])).rows[0];
+   if(duplicate) return duplicate.id;
+   const id=randomUUID();
+   await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,name,mime,bytes.length,sha,bytes]);
+   await audit(db,req,'document.added',null,{id,name,mime,size:bytes.length,sha256:sha},recordId,id);
+   return id;
+ }
+ const documentOptions=req=>({recordId:req.query.recordId||null});
+ installDocumentUploads(app,{path:'/api/sst/documents',auth:admin,origin,wrap:route,transaction:tx,pool,
+   owner:req=>JSON.stringify([req.sstIdentity.kind,req.sstIdentity.id??req.sstActor]),target:req=>req.query.recordId||'',
+   options:documentOptions,authorize:authorizeDocument,save:fileDocument});
  app.post('/api/sst/documents',admin,origin,express.raw({type:'application/octet-stream',limit:'12mb'}),route(async(req,res)=>{
-  const bytes=req.body;if(!Buffer.isBuffer(bytes)||bytes.length===0)fail('Choisissez un fichier non vide.');
-  let name;try{name=decodeURIComponent(req.get('x-filename')||'document').replaceAll('\\','/').split('/').at(-1).replace(/[\r\n\x00-\x1f]/g,'').slice(0,180)}catch{fail('Nom de fichier invalide.')}
-  if(!name)fail('Nom de fichier invalide.');
-  const mime=sstFileMime(bytes,name);
-  const id=await tx(async db=>{const recordId=req.query.recordId||null;if(recordId&&(await record(db,recordId)).archived_at)fail('Ce dossier est archivé.',409);const sha=createHash('sha256').update(bytes).digest('hex');const duplicate=(await db.query('SELECT id FROM sst_documents WHERE sha256=$1 AND record_id IS NOT DISTINCT FROM $2::uuid AND archived_at IS NULL',[sha,recordId])).rows[0];if(duplicate)return duplicate.id;
-   const id=randomUUID();await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,name,mime,bytes.length,sha,bytes]);await audit(db,req,'document.added',null,{id,name,mime,size:bytes.length,sha256:sha},recordId,id);return id});res.status(201).json({id});
+   const bytes=req.body;
+   if(!Buffer.isBuffer(bytes)||!bytes.length) fail('Choisissez un fichier non vide.');
+   const name=originalName(req,'document'),metadata=documentOptions(req);
+   const id=await tx(async db=>{await authorizeDocument(db,req,metadata);return fileDocument(db,req,null,bytes,name,metadata);});
+   res.status(201).json({id});
  }));
- app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=await readOriginal(req.params.id);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});res.send(Buffer.from(r.data))}));
+ app.get('/api/sst/documents/:id',admin,route(async(req,res)=>{if(!uuid(req.params.id))fail('Document introuvable.',404);const r=await readOriginal(req.params.id);if(!r)fail('Document introuvable.',404);res.set({'Content-Type':r.mime,'Content-Disposition':`${r.mime==='application/octet-stream'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(r.name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Frame-Options':'SAMEORIGIN','X-Content-Type-Options':'nosniff'});await sendPrivateBytes(res,r.data)}));
  const configuredRecipients=()=>(process.env.SST_MAIL_RECIPIENTS||'').split(',').map(normalizeEmail).filter(Boolean);
  app.get('/api/sst/mail-recipients',admin,route(async(req,res)=>{
   const {rows}=await pool.query('SELECT email FROM sst_mail_recipients ORDER BY email');
@@ -243,7 +265,12 @@ export async function installSST(app,pool,{identity}){
   res.json({format:'iga-sst-audit-v1',exportedAt:new Date().toISOString(),...result});
  }));
  app.get('/api/sst/export',admin,route(async(_req,res)=>{const shared=employeeFiles?await employeeFiles.list():{records:[],documents:[]};const db=await pool.connect();try{await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const [directory,records,documents,events,imports]=await Promise.all([sstDirectory(db),db.query('SELECT * FROM sst_records ORDER BY created_at'),db.query('SELECT id,record_id,name,mime,size,sha256,version,created_at,archived_at FROM sst_documents ORDER BY created_at'),db.query('SELECT * FROM sst_events ORDER BY id'),db.query('SELECT * FROM sst_imports ORDER BY imported_at')]);const gridTemplates=(await db.query('SELECT * FROM sst_grid_templates ORDER BY created_at')).rows,gridRuns=(await db.query('SELECT * FROM sst_grid_runs ORDER BY id')).rows;const equipmentTrainingEntries=(await db.query('SELECT * FROM sst_training_entries ORDER BY created_at,id')).rows;const preventionRevisions=(await db.query('SELECT * FROM sst_prevention_revisions ORDER BY created_at')).rows;records.rows.push(...shared.records);documents.rows.push(...shared.documents);res.attachment('SST-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json');res.type('application/json');res.write(JSON.stringify({format:'iga-sst-v1',exportedAt:new Date().toISOString(),...directory,records:records.rows,events:events.rows,imports:imports.rows,gridTemplates,gridRuns,equipmentTrainingEntries,preventionRevisions,removedDocuments:(await db.query('SELECT * FROM sst_removed_documents')).rows,removedTrainingEntries:(await db.query('SELECT * FROM sst_removed_training_entries')).rows}).slice(0,-1)+',"documents":[');for(const [i,d] of documents.rows.entries()){const raw=(await db.query('SELECT data FROM sst_documents WHERE id=$1',[d.id])).rows[0]?.data||(employeeFiles?await employeeFiles.read(d.id):null)?.data;if(!raw)throw Error('Original partagé indisponible');res.write((i?',':'')+JSON.stringify({...d,dataBase64:Buffer.from(raw).toString('base64')}))}res.end(']}');await db.query('COMMIT')}catch(e){await db.query('ROLLBACK');if(res.headersSent)res.destroy();else throw e}finally{db.release()}}));
- return {directory:()=>sstDirectory(pool),admin,origin,route,registerEmployeeFiles:adapter=>{employeeFiles=adapter;}};
+ function installImport(path,save) {
+   installDocumentUploads(app,{path,auth:admin,origin,wrap:route,transaction:tx,pool,storage:sstImportUploads,
+     owner:req=>JSON.stringify([req.sstIdentity.kind,req.sstIdentity.id??req.sstActor]),target:()=>path,
+     options:()=>({}),save:(db,req,_access,bytes)=>save(db,req,bytes)});
+ }
+ return {directory:()=>sstDirectory(pool),admin,origin,route,installImport,registerEmployeeFiles:adapter=>{employeeFiles=adapter;}};
 }
 
 
