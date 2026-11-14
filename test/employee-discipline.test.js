@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID,createHash} from 'node:crypto';
+import {jsPDF} from 'jspdf';
+import {liveAppFixture} from './live-app-fixture.mjs';
+
+test('discipline: scoped records, immutable revisions and exact PDF recovery in isolated vault',async()=>{
+ const f=await liveAppFixture({employeeVault:true});
+ const ok=(r,status=200)=>{assert.equal(r.status,status,JSON.stringify(r.body));return r.body;};
+ try{
+  const admin=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
+  const headers={Origin:f.base,'X-Employee-Files':'1'};
+  const call=(cookie,method,path,body)=>f.call(method,'/api/employee-files/'+path,{cookie,headers,body});
+  const a=(method,path,body)=>call(admin,method,path,body);
+  const meta=ok(await f.call('GET','/api/departments/meta',{cookie:admin}));
+  const dep=meta.departments.find(d=>d.key==='boulangerie').id,other=meta.departments.find(d=>!['service','boulangerie'].includes(d.key)).id;
+  const persons=[{name:'Salarié fictif A',code:'770001',dep},{name:'Salarié fictif B',code:'770002',dep:other},{name:'Gérant fictif',code:'770003',dep}];
+  for(const p of persons)ok(await f.call('POST','/api/departments/people',{cookie:admin,body:{name:p.name,group:'regular',active:true,departments:[p.dep],availability:{},employeeCode:p.code}}));
+  const state=ok(await a('GET','state'));for(const p of persons)p.key=state.employees.find(e=>e.name===p.name).key;
+  const password=randomUUID();
+  const accounts=ok(await f.call('POST','/api/manager-accounts',{cookie:admin,headers,body:{name:persons[2].name,login:'discipline.test',password,departments:[dep],personId:Number(persons[2].key.split(':')[1]),active:true}}));
+  const accountId=accounts.accounts.find(x=>x.login==='discipline.test').id;
+  const manager=(await f.call('POST','/api/manager-login',{body:{login:'discipline.test',password}})).cookie;
+  const employee=(await f.call('POST','/api/employee-portal/access',{body:{code:persons[0].code}})).cookie;
+  const m=(method,path,body)=>call(manager,method,path,body);
+  const body={employeeKey:persons[0].key,title:'Avis fictif — test',occurredOn:'2026-11-14',measureType:'written',facts:'Faits fictifs pour un essai.',expectations:'Suivi fictif.',followUpOn:'2026-11-21',status:'draft'};
+  assert.equal((await f.call('GET','/api/employee-files/discipline')).status,401);
+  assert.equal((await call(employee,'GET','discipline')).status,403);
+  assert.equal((await f.call('POST','/api/employee-files/discipline',{cookie:manager,body})).status,403);
+  assert.equal((await m('POST','discipline',{...body,employeeKey:persons[1].key})).status,404);
+  assert.equal((await m('POST','discipline',{...body,employeeKey:persons[2].key})).status,404);
+  const made=ok(await m('POST','discipline',body),201),id=made.id;
+  const foreign=ok(await a('POST','discipline',{...body,employeeKey:persons[1].key,title:'Autre département fictif'}),201);
+  assert.deepEqual(ok(await m('GET','discipline')).measures.map(r=>r.id),[id]);
+  for(const suffix of ['', '/pdf'])assert.equal((await m('GET','discipline/'+foreign.id+suffix)).status,404);
+  assert.equal((await m('POST','discipline/'+foreign.id+'/revisions',{...body,version:1})).status,404);
+  ok(await m('POST','discipline/'+id+'/revisions',{...body,version:1,status:'filed'}),201);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:1,status:'filed',reason:'Correction'})).status,409);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:2,status:'filed'})).status,400);
+  ok(await m('POST','discipline/'+id+'/revisions',{...body,version:2,status:'filed',facts:'Faits corrigés fictifs.',reason:'Rectification fictive'}),201);
+  const detail=ok(await m('GET','discipline/'+id));
+  assert.equal(detail.history.length,3);assert.equal(detail.history[2].facts,body.facts);assert.equal(detail.measure.facts,'Faits corrigés fictifs.');
+  const doc=new jsPDF();doc.text('Document fictif pour verification du depot et de la relecture.',15,20);const bytes=Buffer.from(doc.output('arraybuffer'));
+  const digest=createHash('sha256').update(bytes).digest('hex'),upload=randomUUID(),url='discipline/'+id+'/attachments/uploads/'+upload+'?version=3';
+  ok(await m('POST',url,{name:'avis-fictif.pdf',size:bytes.length,sha256:digest}),201);
+  const part=await fetch(f.base+'/api/employee-files/discipline/'+id+'/attachments/uploads/'+upload+'/parts/0',{method:'PUT',headers:{...headers,Cookie:manager,'Content-Type':'application/octet-stream'},body:bytes});assert.equal(part.status,200);
+  const receipt=ok(await m('POST','discipline/'+id+'/attachments/uploads/'+upload+'/complete'),201);
+  assert.equal(ok(await m('POST','discipline/'+id+'/attachments/uploads/'+upload+'/complete'),201).id,receipt.id);
+  const filePath='discipline/'+id+'/attachments/'+receipt.id;
+  const download=await fetch(f.base+'/api/employee-files/'+filePath,{headers:{Cookie:manager}});
+  assert.equal(download.status,200);assert.match(download.headers.get('cache-control'),/no-store/);
+  assert.equal(createHash('sha256').update(Buffer.from(await download.arrayBuffer())).digest('hex'),digest);
+  assert.equal((await m('GET','discipline/'+foreign.id+'/attachments/'+receipt.id)).status,404);
+  assert.equal((await call(employee,'GET',filePath)).status,403);
+  const pdf=await m('GET','discipline/'+id+'/pdf');assert.equal(pdf.status,200);assert.match(pdf.body,/^%PDF-/);
+  // In-place edits and deletion cannot rewrite the historical record.
+  await assert.rejects(f.query('UPDATE employee_file_discipline SET title=$1 WHERE case_id=$2',['Changed',id],{vault:true}),/append-only/);
+  await assert.rejects(f.query('DELETE FROM employee_file_discipline_attachments WHERE id=$1',[receipt.id],{vault:true}),/append-only/);
+  ok(await m('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'}),201);
+  assert.equal(ok(await m('GET','discipline/'+id)).history.length,4);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:4})).status,409);
+  assert.equal((await m('POST','discipline/'+id+'/attachments/uploads/'+randomUUID()+'?version=4',{name:'avis.pdf',size:bytes.length,sha256:digest})).status,409);
+  await f.query('UPDATE schedule_manager_accounts SET active=FALSE WHERE id=$1',[accountId]);
+  assert.equal((await m('GET','discipline/'+id)).status,401);
+  assert.equal((await m('GET',filePath)).status,401);
+ }finally{await f.close();}
+});

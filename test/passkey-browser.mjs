@@ -32,7 +32,7 @@ try{
   assert.match(await director.page.locator('#myDeviceQR').getAttribute('src'),/^data:image\/png;base64,/);
   const phone=await client({width:390,height:844});await phone.page.goto(await director.page.locator('#myDeviceLink').getAttribute('href'));
   assert.match(await phone.page.locator('#intro').innerText(),/Face ID/);
-  await phone.page.locator('#continue').click();await phone.page.waitForURL('**/horaires-departements?vue=magasin');
+  await phone.page.locator('#continue').click();await phone.page.waitForURL('**/index.html');
   assert.equal((await (await phone.page.request.get(f.base+'/api/session')).json()).user.kind,'admin');
   assert.equal((await (await director.page.request.get(f.base+'/api/session')).json()).user.kind,'admin');
   await director.page.locator('#myDeviceResult').evaluate(e=>e.hidden=true);

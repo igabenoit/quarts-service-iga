@@ -79,7 +79,7 @@ test('passkeys: enrollment, real signatures, ownership, recovery and session bou
       alice.cookie=jar(r);
       const session=(await f.query('SELECT person_id FROM schedule_passkey_sessions WHERE hash=$1',[digest(alice.cookie.split('pk_')[1])])).rows[0];assert.equal(Number(session.person_id),2);
       assert.equal((await call('authenticate/verify',{response},jar(opts))).status,400);
-      assert.equal((await f.call('GET','/api/employee-passkeys/admin',{cookie:admin+'; '+alice.cookie})).status,403);
+      assert.equal((await f.call('GET','/api/employee-passkeys/admin',{cookie:admin+'; '+alice.cookie})).status,401); // The employee key cannot borrow a different signed-in identity.
       const expired=ok(await call('authenticate/options',{shared:false}));await f.query("UPDATE schedule_passkey_flows SET expires_at=clock_timestamp()-interval '1 second'");
       assert.equal((await call('authenticate/verify',{response:alice.a.authenticate(expired.body,f.base)},jar(expired))).status,400);
     });
