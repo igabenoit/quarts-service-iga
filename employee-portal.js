@@ -69,5 +69,5 @@ export async function installEmployeePortal(app,pool,{sameOrigin,requireManager}
       res.set('Cache-Control','no-store').json({ok:true});
     } catch {res.status(503).json({error:'Déconnexion non confirmée. Réessayez.'});}
   });
-  return {requireEmployee,login,identity,directionIdentity:passkeys.directionIdentity,logout:passkeys.logout};
+  return {requireEmployee,login,identity,passkeyIdentity:passkeys.sessionIdentity,directionIdentity:passkeys.directionIdentity,logout:passkeys.logout};
 }

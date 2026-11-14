@@ -152,7 +152,10 @@ const directionPasskeysRequired=production||process.env.DIRECTION_PASSKEY_REQUIR
 if(directionPasskeysRequired&&(!['pilot','required'].includes(process.env.EMPLOYEE_PASSKEY_MODE)||!process.env.EMPLOYEE_PASSKEY_ADMIN_IDS))throw Error('Direction passkey configuration is required');
 const managerAccess=await installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,
   allowLegacyAdmin:!directionPasskeysRequired,
-  directionIdentity:req=>employeePortal.directionIdentity(req)});
+  directionIdentity:req=>employeePortal.directionIdentity(req),
+  passkeyIdentity:req=>employeePortal.passkeyIdentity(req)});
+// Navigation preference only: this list never grants a role or a department.
+const indexHomePeople=new Set((process.env.MANAGER_INDEX_HOME_PERSON_IDS||'').split(',').map(Number).filter(id=>Number.isSafeInteger(id)&&id>0));
 function sameOrigin(request, response, next) {
   const origin = request.get("origin");
   if (origin && new URL(origin).host !== request.get("host")) return response.status(403).json({ error: "Requête refusée." });
@@ -604,7 +607,14 @@ app.post("/api/logout", sameOrigin, async (request, response) => {
   } catch { response.status(503).json({error:'Déconnexion non confirmée. Réessayez.'}); }
 });
 app.get("/api/session", async (request, response) => {
-  try { const user=await managerAccess.identity(request);const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];if(user)user.serviceAccess=user.kind==='admin'||user.departments.includes(Number(service?.id));response.set('Cache-Control','no-store').json({role:user?'manager':null,user}); }
+  try {
+    const user=await managerAccess.identity(request);
+    const service=(await pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0];
+    if(user)user.serviceAccess=user.kind==='admin'||user.departments.includes(Number(service?.id));
+    const indexHome=user&&(user.kind==='admin'||user.serviceAccess&&(indexHomePeople.has(user.personId)||user.departments.length>0&&user.departments.every(id=>id===Number(service?.id))));
+    const path=!user?'/horaires-departements?vue=employe':indexHome?'/index.html':'/departements';
+    response.set('Cache-Control','no-store').json({role:user?'manager':null,user,path});
+  }
   catch { response.status(500).json({error:'Impossible de vérifier la connexion.'}); }
 });
 

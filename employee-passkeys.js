@@ -173,7 +173,7 @@ export async function installEmployeePasskeys(app,pool,{requireManager}){
     // Derive the target and authorizing credential from the verified session, never the body.
     const p=req.passkeyAdmin;
     const secret=await transaction(pool,c=>invite(c,{personId:Number(p.id),actor:'direction:'+p.id,reason:'Ajout de mon appareil personnel après confirmation de ma clé existante',addDevice:true,authorizedCredentialId:p.credentialId}));
-    const url=origin+'/connexion-employe?retour=%2Fhoraires-departements%3Fvue%3Dmagasin#activation='+secret;
+    const url=origin+'/connexion-employe#activation='+secret;
     // Encode locally; the bearer link is never sent to an external QR provider.
     res.json({url,qr:await QRCode.toDataURL(url,{width:320,margin:4,errorCorrectionLevel:'M'}),expiresInMinutes:15});
   }));

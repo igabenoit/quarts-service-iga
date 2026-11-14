@@ -1,5 +1,6 @@
 import {originalName,installDocumentUploads,installDocumentUploadSchema} from './document-uploads.js';
 import {sendPrivateBytes} from './private-response.js';
+import {installEmployeeDiscipline} from './employee-discipline.js';
 import {saveDirectionSignature} from './onboarding/ethics-source.js';
 import {installSingleTrial} from './onboarding/single-trial.js';
 import {installOnboarding,onboardingTitle} from './onboarding/routes.js';
@@ -151,6 +152,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   res.json({ok:true});
  }));
  const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,synthetic:storageStatus.synthetic});
+ await installEmployeeDiscipline(app,{pool,auth,origin,wrap,transaction,directory,person,event,date});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));
  app.get(BASE+'/assignments/:id',auth,wrap(async(req,res)=>{const {row}=await assignment(req.ef,req.params.id,await directory());const history=(await pool.query('SELECT action,actor,created_at,data FROM employee_file_events WHERE assignment_id=$1 ORDER BY id',[row.id])).rows;res.json({assignment:row,originals:await originals(row.id),history});}));
