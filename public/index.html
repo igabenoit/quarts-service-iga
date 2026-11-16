@@ -81,7 +81,7 @@
           <label>Ancienneté<input id="employeeSeniority" type="date"></label>
           <label>Rang d’affichage dans la fonction (1 en premier)<input id="employeeDisplayRank" type="number" min="1" max="500" step="1" placeholder="À la suite"></label>
           <label>Priorité des quarts (1 en premier)<input id="employeeAssignmentRank" type="number" min="1" max="500" step="1" placeholder="À la suite"></label>
-          <p class="rank-help">Rang d’affichage : ordre dans chaque fonction, dans la liste et sur l’horaire imprimé. La gérante apparaît toujours avant les superviseurs. Priorité des quarts : ancienneté utilisée pour attribuer les heures souhaitées; un rang modifié passe avant la date d’ancienneté.</p>
+          <p class="rank-help">Rang d’affichage : ordre dans chaque fonction, dans la liste et sur l’horaire imprimé. La gérante apparaît toujours avant les superviseurs. Attribution automatique : classification principale d’abord, puis autres fonctions autorisées. Les plus anciens choisissent les quarts les plus longs selon leurs disponibilités et leurs limites. Le rang départage seulement les dates d’ancienneté identiques.</p>
           <label>Heures souhaitées / semaine<input id="employeeTarget" type="number" min="0" max="50" step="0.25" value="17"></label>
           <label>Maximum / semaine<input id="employeeMax" type="number" min="0" max="60" step="0.25" value="40"></label>
           <label class="employee-option"><input id="employeeMinor" type="checkbox"> 17 ans ou moins (maximum 17 h et 2 jours du lundi au vendredi)</label>

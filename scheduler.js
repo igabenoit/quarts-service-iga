@@ -39,19 +39,26 @@ export function generateAssignments(shifts, employees, existing = []) {
   const load = employee => assigned.filter(a => a.employeeId === employee.id)
     .reduce((sum, a) => {const shift=shifts.find(s=>s.id===a.shiftId);return sum+(shift?shiftWithApprovedLeave(shift,employee.leavePeriods,employee.id).paidMinutes:0);}, 0);
   const rankedEmployees = [...employees].sort((a, b) =>
-    (a.assignmentRank ?? 9999) - (b.assignmentRank ?? 9999)
-    || a.seniority.localeCompare(b.seniority) || a.id - b.id);
-  // Find the combination of available shifts closest to the employee's target.
-  // A greedy pick of three four-hour shifts can leave a three-hour gap even
-  // when another combination would reach the requested hours exactly.
-  function bestShifts(employee, limit) {
+    (a.seniority || '9999-12-31').localeCompare(b.seniority || '9999-12-31')
+    || (a.assignmentRank ?? 9999) - (b.assignmentRank ?? 9999) || a.id - b.id);
+  // Compare longest paid shifts first, then the next longest, within the ceiling.
+  // The senior employee chooses before junior employees in the same pass.
+  function prefer(candidate, best) {
+    const a=candidate.jobs.map(s=>s.paidMinutes).sort((a,b)=>b-a);
+    const b=best.jobs.map(s=>s.paidMinutes).sort((a,b)=>b-a);
+    for(let i=0;i<Math.max(a.length,b.length);i++) {
+      if((a[i]||0)!==(b[i]||0))return (a[i]||0)>(b[i]||0);
+    }
+    return candidate.managerMinutes>best.managerMinutes;
+  }
+  function bestShifts(employee, limit, primaryOnly) {
     if (limit <= 0) return [];
     const currentJobs = assigned.filter(a => a.employeeId === employee.id)
       .map(a => shifts.find(s => s.id === a.shiftId)).filter(Boolean).map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
     const maxDays = employee.allowSixOrSevenDays ? 7 : 5;
     const maxWeekdays = employee.isMinor ? 2 : 5;
     const existingWeekdays = currentJobs.filter(s => s.dayIndex < 5).length;
-    const candidates=open.map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
+    const candidates=open.filter(s=>!primaryOnly || defaultServiceRole(s.role,employee.role)===employee.role).sort((a,b)=>a.dayIndex-b.dayIndex || a.startMinute-b.startMinute || a.id-b.id).map(s=>shiftWithApprovedLeave(s,employee.leavePeriods,employee.id));
     const choices = Array.from({ length: 7 }, (_, day) => candidates.filter(s =>
       s.dayIndex === day && s.paidMinutes <= limit && canAssign(employee, s, shifts, assigned)));
     const memo = new Map();
@@ -68,8 +75,8 @@ export function generateAssignments(shifts, employees, existing = []) {
           const minutes = shift.paidMinutes + rest.minutes;
           // At equal hours, keep the manager on her dedicated copied needs.
           const managerMinutes = rest.managerMinutes + (employee.role==='manager'&&shift.role==='manager'?shift.paidMinutes:0);
-          if (minutes > best.minutes || minutes === best.minutes && managerMinutes > best.managerMinutes)
-            best = { minutes, managerMinutes, jobs: [shift, ...rest.jobs] };
+          const candidate={ minutes, managerMinutes, jobs: [shift, ...rest.jobs] };
+          if (prefer(candidate,best)) best = candidate;
         }
       }
       memo.set(key, best);
@@ -77,12 +84,13 @@ export function generateAssignments(shifts, employees, existing = []) {
     }
     return solve(0, limit, currentJobs.length, existingWeekdays).jobs;
   }
-  // Complete the senior employee's requested hours before moving to the next.
-  for (const extra of [false, true]) for (const employee of rankedEmployees) {
+  // Everyone gets a primary-classification pass before any cross-role filling.
+  // Requested hours for everyone precede optional extra hours.
+  for (const extra of [false, true]) for (const primaryOnly of [true,false]) for (const employee of rankedEmployees) {
     if (extra && !employee.allowExtraHours) continue;
     const ceiling = Math.min(extra ? employee.maxMinutes : employee.targetMinutes,
       employee.maxMinutes, employee.isMinor ? 17 * 60 : Infinity);
-    for (const shift of bestShifts(employee, ceiling - load(employee))) {
+    for (const shift of bestShifts(employee, ceiling - load(employee), primaryOnly)) {
       const assignment = { shiftId: shift.id, employeeId: employee.id };
       assigned.push(assignment);
       assignments.push(assignment);
