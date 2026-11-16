@@ -151,10 +151,13 @@ export const buffetMinutes=row=>minutesOfKind(row,'buffet');
 export const kitchenMinutes=row=>minutesOfKind(row,'kitchen');
 export const mentionMinutes=row=>minutesOfKind(row,'mention');
 export function separateMentionTotals(rows){
-  const totals=new Map();
+  const totals=new Map(),labels=new Map();
   for(const row of rows)for(const cell of [...row.cells,...row.accountingCells||[]]){
     if(hourCategory(cell)!=='mention'||isOutgoing(cell))continue;
-    totals.set(cell.note,(totals.get(cell.note)||0)+(cell.departmentMinutes??cellMinutes(cell)));
+    const label=String(cell.note||'').trim().replace(/\s+/g,' '),key=label.normalize('NFC').toLocaleLowerCase('fr-CA');
+    if(!labels.has(key))labels.set(key,label);
+    const displayLabel=labels.get(key);
+    totals.set(displayLabel,(totals.get(displayLabel)||0)+(cell.departmentMinutes??cellMinutes(cell)));
   }
   return totals;
 }
