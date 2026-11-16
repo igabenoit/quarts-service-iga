@@ -31,7 +31,7 @@ import {recordDeparture} from './employee-status.js';
 import express from "express";
 import pg from "pg";
 import {installCoreSchema} from "./schedule-core-schema.js";
-import {schedulePoolConfig,verifyPreviewDatabase} from "./schedule-database.js";
+import {schedulePoolConfig,verifyPreviewDatabase,releaseStartupConnections} from "./schedule-database.js";
 import {saveEmployeeCode} from './employee-portal.js';
 import {installDepartmentSchedules} from './department-schedules.js';
 import {installLeave, approvedLeave} from "./leave.js";
@@ -875,6 +875,9 @@ export function runPeriodicTasks(executionId) {
 if (preparation) {
   await pool.end();
 } else if (process.env.VERCEL) {
+  await releaseStartupConnections(pool);
+  await releaseStartupConnections(employeeVault.pool);
+  await releaseStartupConnections(employeeVault.trialPool);
   startupPhase('ready');
 } else {
   startupPhase('listen');

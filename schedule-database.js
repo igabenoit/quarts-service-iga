@@ -44,3 +44,14 @@ export async function verifyPreviewDatabase(pool, env) {
     throw new Error('Schéma ou rôle de préversion inattendu.');
   }
 }
+
+// Startup runs outside a Vercel request: waitUntil cannot keep its idle timer alive.
+// Dispose only idle startup connections; the pool remains usable by requests.
+export async function releaseStartupConnections(pool) {
+  if (!pool) return;
+  const idle = pool.idleCount;
+  for (let i=0; i<idle; i++) {
+    const client = await pool.connect();
+    client.release(true);
+  }
+}
