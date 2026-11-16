@@ -517,7 +517,12 @@ $('#buildControl').onclick=async()=>{
     try{
       if(dirty)await saveDraft();
       const departments=scope==='all'?meta.departments.filter(d=>d.active!==false):[current.department];
-      controlReports=await Promise.all(departments.map(d=>api(`/api/departments/${d.id}/weeks/${start}/hours-summary`)));
+      const reports=[];
+      for(const department of departments){
+        $('#controlStatus').textContent=`Chargement du sommaire ${reports.length+1}/${departments.length} · ${department.name}…`;
+        reports.push(await api(`/api/departments/${department.id}/weeks/${start}/hours-summary`));
+      }
+      controlReports=reports;
       renderSummaryTable();refreshSummaryPreview();
       $('#controlStatus').textContent=controlReports.length+' département(s) · sommaire seulement. Les heures réelles sont enregistrées séparément des horaires.';
     }catch(error){invalidateControl();$('#controlStatus').textContent='Le sommaire n’a pas été chargé. '+error.message;}
