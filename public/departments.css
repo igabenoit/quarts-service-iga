@@ -340,3 +340,6 @@ body{background:white}
 
 .theme-cuisine{--accent:#687b28;--pale:#f1f5de}
 .department-sheet .shift-theme-cuisine{--shift-color:#687b28;border-color:#687b28;background:#f1f5de}
+
+/* Keep mention subtotals on the wide label side of the print sheet. */
+.sheet-subtotal .mention-hours{display:inline-block;margin:0 0 0 8pt;font-size:6.8pt;line-height:1.2;white-space:nowrap;overflow-wrap:normal;text-transform:none}

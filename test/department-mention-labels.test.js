@@ -10,6 +10,9 @@ test('print groups inventory labels differing only by case without counting hour
  assert.match(html,/Inventaire : 10 h/);
  assert.doesNotMatch(html,/inventaire : 5 h/);
  assert.match(html,/Grand total : 10 h/);
+ const subtotal=html.match(/<tr class="sheet-subtotal">([\s\S]*?)<\/tr>/)[1];
+ assert.match(subtotal,/<td colspan="9">Sous-total r[^<]+<small class="mention-hours">Inventaire <b>10 h<\/b><\/small><\/td>/);
+ assert.doesNotMatch(subtotal.split('</td><td>')[1],/mention-hours/);
  const other={cells:[{...cell,note:'Inventaire annuel'},{...cell,note:' Inventaire  annuel '},{...cell,note:'Livraison'},{...cell,note:'Inventaire annuel',workDepartment:'pam'}]};
  assert.deepEqual([...separateMentionTotals([other])],[['Inventaire annuel',600],['Livraison',300]]);
 });
