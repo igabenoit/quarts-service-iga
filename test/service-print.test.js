@@ -8,11 +8,11 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 function print(data,options={}){const c=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,});vm.runInContext(source.slice(0,source.indexOf('function render(){')),c);c.options=options;c.data={weekStart:'2026-10-12',employees:[],shifts:[],assignments:[],approvedLeaves:[],timeOff:[],...data};return vm.runInContext('servicePrintHTML(data,options)',c);}
-const person=(id,role='cashier')=>({id,name:'Employ� t�moin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
+const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
 
 test('Thursday bakery-only shift appears in the Service preview without adding its hours to Service totals',()=>{
- const splitDays=[0,1,2,4],employee={...person(1),name:'Employ� partag�',availability:{}};
+ const splitDays=[0,1,2,4],employee={...person(1),name:'Employé partagé',availability:{}};
  const data={weekStart:'2026-11-23',employees:[employee],
   shifts:splitDays.map((dayIndex,id)=>({...shift(id+1,'cashier',dayIndex),startMinute:720,endMinute:960,paidMinutes:240,breakMinutes:0})),
   assignments:splitDays.map((_,id)=>({shiftId:id+1,employeeId:1})),
@@ -24,19 +24,19 @@ test('Thursday bakery-only shift appears in the Service preview without adding i
  assert.equal(days.length,7);
  assert.match(days[3],/assignment-label">Boulangerie/);
  assert.match(days[3],/print-start">07:00/);assert.match(days[3],/print-end">16:00/);
- assert.match(days[3],/Quart complet � 8 h/);assert.match(days[3],/0 Serv\. \/ 8 total/);
+ assert.match(days[3],/Quart complet · 8 h/);assert.match(days[3],/0 Serv\. \/ 8 total/);
  assert.doesNotMatch(days[3],/Indisponible|assignment-label">Service/);
  assert.equal((row.match(/assignment-label">Boulangerie/g)||[]).length,5);
  assert.match(row,/class="sheet-total print-hours">16<\/td>/);
- assert.match(html,/Cette feuille : 16 h/);assert.match(html,/Service � semaine compl�te : 16 h/);
+ assert.match(html,/Cette feuille : 16 h/);assert.match(html,/Service · semaine complète : 16 h/);
  assert.doesNotMatch(print(data,{blank:true}),/Boulangerie|class="print-start"/);
  assert.deepEqual(data,before);
 });
 
 test('manager stays on the first Service sheet with her title and all existing supervision shifts',()=>{
- const html=print({employees:[{...person(1,'manager'),name:'G�rante t�moin'}],shifts:[shift(1,'supervisor'),shift(2,'manager',1)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}]});
+ const html=print({employees:[{...person(1,'manager'),name:'Gérante témoin'}],shifts:[shift(1,'supervisor'),shift(2,'manager',1)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}]});
  const sheets=html.match(/<article[\s\S]*?<\/article>/g);
- assert.equal(sheets.length,3);assert.match(sheets[0],/G�rante t�moin<small class="sheet-job-title">G�rante<\/small><\/div>/);
+ assert.equal(sheets.length,3);assert.match(sheets[0],/Gérante témoin<small class="sheet-job-title">Gérante<\/small><\/div>/);
  assert.equal((html.match(/data-person="1"/g)||[]).length,1);
  assert.equal((sheets[0].match(/class="print-start"/g)||[]).length,2);
  assert.match(sheets[0],/Cette feuille : 14 h/);
@@ -44,7 +44,7 @@ test('manager stays on the first Service sheet with her title and all existing s
 
 test('default manager work prints hours without repeating the title in the shift cells',()=>{
  const html=print({employees:[person(1,'manager')],shifts:[shift(1,'manager')],assignments:[{shiftId:1,employeeId:1}]});
- assert.match(html,/sheet-person-label">Employ� t�moin 1<small class="sheet-job-title">G�rante<\/small><\/div>/);
+ assert.match(html,/sheet-person-label">Employé témoin 1<small class="sheet-job-title">Gérante<\/small><\/div>/);
  assert.doesNotMatch(html,/class="service-role"/);
  assert.equal((html.match(/class="sheet-job-title"/g)||[]).length,1);
  assert.match(html,/class="print-start">08:00/);assert.match(html,/class="print-end">16:00/);
@@ -67,11 +67,11 @@ test('managers print before supervisors regardless of their per-role rank or sen
 test('cross-role assignments and uncovered shifts are printed once and all paid totals reconcile',()=>{
  const data={employees:[person(1,'packer'),person(2,'cashier')],shifts:[shift(1,'cashier'),shift(2,'packer',1),shift(3,'cashier',2)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:2}]};
  const html=print(data),totals=[...html.matchAll(/Cette feuille : ([0-9,]+) h/g)].map(m=>Number(m[1].replace(',','.')));
- assert.equal(totals.reduce((a,b)=>a+b,0),21);assert.equal((html.match(/class="print-start"/g)||[]).length,3);assert.match(html,/class="service-role">Caissi�re/);assert.match(html,/class="service-role">Emballeur/);assert.match(html,/Service � semaine compl�te : 21 h/);assert.match(html,/dont 7 h � couvrir/);
+ assert.equal(totals.reduce((a,b)=>a+b,0),21);assert.equal((html.match(/class="print-start"/g)||[]).length,3);assert.match(html,/class="service-role">Caissière/);assert.match(html,/class="service-role">Emballeur/);assert.match(html,/Service · semaine complète : 21 h/);assert.match(html,/dont 7 h à couvrir/);
 });
 test('two shifts, availability, birthday and partial approved leave all survive in a larger cell',()=>{
  const p={...person(1),birthday:'1995-10-12'};const data={employees:[p],shifts:[{...shift(1),endMinute:600,paidMinutes:120,breakMinutes:0},{...shift(2),startMinute:840,endMinute:960,paidMinutes:120,breakMinutes:0}],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}],approvedLeaves:[{employee_id:1,periods:[{date:'2026-10-12',allDay:false,startMinute:600,endMinute:840}]}]};
- const html=print(data);assert.equal((html.match(/class="print-start"/g)||[]).length,2);assert.match(html,/Bonne f�te !/);assert.match(html,/10:00�14:00/);assert.match(html,/<span>4<\/span><span>8�17<\/span>/);assert.match(html,/data-row-units="(2|3)" data-person="1"/);assert.match(html,/<span>J<\/span>/);assert.doesNotMatch(html,/ style=/);
+ const html=print(data);assert.equal((html.match(/class="print-start"/g)||[]).length,2);assert.match(html,/Bonne fête !/);assert.match(html,/10:00–14:00/);assert.match(html,/<span>4<\/span><span>8–17<\/span>/);assert.match(html,/data-row-units="(2|3)" data-person="1"/);assert.match(html,/<span>J<\/span>/);assert.doesNotMatch(html,/ style=/);
 });
 test('names and department labels are escaped and internal planning notes stay off the printout',()=>{
  const html=print({week:{notes:'Internal planning note'},employees:[{...person(1),name:'<script>alert(1)</script>'}],shifts:[{...shift(1,'support'),sourceDepartment:'<img src=x>'}],assignments:[{shiftId:1,employeeId:1}]});
@@ -81,7 +81,7 @@ test('names and department labels are escaped and internal planning notes stay o
 test('paid rest breaks are never deducted, and only a one-hour meal is deducted from shifts of at least 8 hours',()=>{
  for(const [elapsed,paid] of [[3,3],[4,4],[5,5],[6,6],[7,7],[8,7],[9,8]]){
   const html=print({employees:[person(1)],shifts:[{...shift(1),endMinute:480+elapsed*60,breakMinutes:30,paidMinutes:elapsed*60-30}],assignments:[{shiftId:1,employeeId:1}]});
-  assert.ok(!html.includes('Pause 30 min'));assert.match(html,new RegExp('class="sheet-total print-hours">'+paid+'<'));assert.match(html,new RegExp('Service � semaine compl�te : '+paid+' h'));
+  assert.ok(!html.includes('Pause 30 min'));assert.match(html,new RegExp('class="sheet-total print-hours">'+paid+'<'));assert.match(html,new RegExp('Service · semaine complète : '+paid+' h'));
  }
 });
 
@@ -93,7 +93,7 @@ test('sixteen cashiers and a packer with a partial leave stay on their own singl
  assert.equal((sheets[1].match(/data-person=/g)||[]).length,16);
  assert.equal((sheets[2].match(/data-person=/g)||[]).length,13);
  assert.match(sheets[1],/data-row-unit="36"/);
- assert.match(sheets[2],/� couvrir/);
+ assert.match(sheets[2],/À couvrir/);
  for(const sheet of sheets)assert.match(sheet,/Feuille [123] \/ 3/);
 });
 
@@ -101,9 +101,9 @@ test('blank Service master preserves active roster, order, seniority and availab
  const data={employees:[person(2),person(1,'manager'),{...person(3),active:false}],shifts:[shift(1,'manager'),shift(2),shift(3)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:3}],approvedLeaves:[{employee_id:1,periods:[{date:'2026-10-12',allDay:true}]}],timeOff:[{employeeId:2,dayIndex:1}]};
  const before=structuredClone(data),filled=print(data),html=print(data,{blank:true});
  assert.deepEqual(data,before);
- assert.match(html,/MASTER VIDE/);assert.match(html,/Employ� t�moin 1/);assert.match(html,/Employ� t�moin 2/);
- assert.doesNotMatch(html,/Employ� t�moin 3|class="print-start"|CONG�|Indisponible|� couvrir|Bonne f�te/);
- assert.match(html,/<span>8�17<\/span>/);assert.match(html,/<span>J<\/span>/);
+ assert.match(html,/MASTER VIDE/);assert.match(html,/Employé témoin 1/);assert.match(html,/Employé témoin 2/);
+ assert.doesNotMatch(html,/Employé témoin 3|class="print-start"|CONGÉ|Indisponible|À couvrir|Bonne fête/);
+ assert.match(html,/<span>8–17<\/span>/);assert.match(html,/<span>J<\/span>/);
  assert.match(html,/2020/);assert.match(html,/Cette feuille : ________ h/);
  assert.match(html,/sheet-total print-hours"><\/td>/);assert.equal((html.match(/<article class="service-sheet/g)||[]).length,3);
  assert.equal(print(data),filled,'ordinary print remains unchanged after preparing a blank master');
