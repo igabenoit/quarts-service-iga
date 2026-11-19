@@ -9,13 +9,13 @@ import {relatedFor} from '../department-transfers.js';
 import {plannedSummary} from '../public/department-summary.js';
 import {departmentFixture} from './department-fixture.js';
 
-const person={id:10,serviceEmployeeId:3,name:'Employée exemple',group:'regular',active:true,departments:[6,7],availability:{},seniorityDate:'2020-01-01'};
+const person={id:10,serviceEmployeeId:3,name:'Employ�e exemple',group:'regular',active:true,departments:[6,7],availability:{},seniorityDate:'2020-01-01'};
 const cells=()=>{const c=Array.from({length:7},blankCell);c[0]={kind:'shift',start:420,end:660,breakMinutes:0,note:''};return c;};
 const bakery={key:'boulangerie',department_id:6,draft:{rows:[{personId:10,cells:cells()}]}};
 const service=serviceWeekProjection([{employee_id:3,day_index:0,start_minute:720,end_minute:960}],[person],7);
 const data={weekStart:'2026-10-19',shifts:[{id:1,role:'cashier',dayIndex:0,startMinute:720,endMinute:960,paidMinutes:240}],assignments:[{shiftId:1,employeeId:3}],relatedDepartments:departmentPortionsForService([bakery,service],[person]),employees:[{id:3,name:person.name,active:true,role:'cashier',availability:{},seniority:'2020-01-01'}],timeOff:[],approvedLeaves:[]};
 
-test('7–11 bakery + 12–16 Service is one displayed day, 8 paid hours, 4 in each department',()=>{
+test('7�11 bakery + 12�16 Service is one displayed day, 8 paid hours, 4 in each department',()=>{
   const related=relatedFor([bakery,service],'boulangerie',[person],[person]);
   assert.equal(related.length,1);assert.equal(related[0].sourceDepartment,'service');
   const summary=plannedSummary({department:{id:6,key:'boulangerie'},weekStart:data.weekStart,people:[person],draft:bakery.draft,related,revision:1});
@@ -24,7 +24,20 @@ test('7–11 bakery + 12–16 Service is one displayed day, 8 paid hours, 4 in e
   assert.match(html,/07:00/);assert.match(html,/11:00/);assert.match(html,/12:00/);assert.match(html,/16:00/);assert.match(html,/Boulangerie/);assert.match(html,/Service/);assert.match(html,/Grand total : 4 h/);assert.match(html,/Sem\. 8 h/);
   assert.equal(service.draft.rows[0].cells[0].paidMinutesOverride,240);
   assert.equal(serviceDayPortions(data,3,0).length,1);assert.equal(serviceDayPortions(data,3,1).length,0);
-  assert.equal(serviceDayPortions({...data,assignments:[]},3,0).length,0);
+  assert.equal(serviceDayPortions({...data,assignments:[]},3,0).length,1);
+});
+
+test('a department-only day is shown for the linked employee without creating Service work',()=>{
+  const relatedDepartments=[
+    {employeeId:3,dayIndex:3,startMinute:420,endMinute:960,paidMinutes:480,department:'boulangerie'},
+    {employeeId:4,dayIndex:3,startMinute:480,endMinute:720,paidMinutes:240,department:'poisson'},
+    {employeeId:3,dayIndex:4,startMinute:420,endMinute:660,paidMinutes:240,department:'boulangerie'}
+  ];
+  const fixture={...data,shifts:[],assignments:[],relatedDepartments},before=structuredClone(fixture);
+  assert.deepEqual(serviceDayPortions(fixture,3,3),[{...relatedDepartments[0],external:true,role:'department',sourceDepartment:'Boulangerie'}]);
+  assert.deepEqual(serviceDayPortions(fixture,3,2),[]);
+  assert.deepEqual(serviceDayPortions({...fixture,relatedDepartments:undefined},3,3),[]);
+  assert.deepEqual(fixture,before);
 });
 
 test('explicit linked records match; unrelated equal names do not match and unposted Service stays private',()=>{
@@ -38,11 +51,11 @@ test('explicit linked records match; unrelated equal names do not match and unpo
 
 test('Service printable day includes both portions but Service weekly totals retain only 4 hours',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
-  const context=vm.createContext({serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,roleNames:{cashier:'Caissière'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Caissières',roles:['cashier']},{title:'Autres',roles:[]},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',addDays:(s,d)=>'2026-10-'+(19+d),fixture:data});
+  const context=vm.createContext({serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,roleNames:{cashier:'Caissi�re'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Caissi�res',roles:['cashier']},{title:'Autres',roles:[]},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',addDays:(s,d)=>'2026-10-'+(19+d),fixture:data});
   vm.runInContext(source.slice(source.indexOf('function servicePrintHTML('),source.indexOf('function renderPrint()')),context);
   const html=vm.runInContext('servicePrintHTML(fixture)',context);
   assert.match(html,/07:00/);assert.match(html,/11:00/);assert.match(html,/12:00/);assert.match(html,/16:00/);
-  assert.match(html,/4 Serv\. \/ 8 total/);assert.match(html,/semaine complète : 4 h/);assert.match(html,/Boulangerie/);
+  assert.match(html,/4 Serv\. \/ 8 total/);assert.match(html,/semaine compl�te : 4 h/);assert.match(html,/Boulangerie/);
   if(process.env.WRITE_SHARED_FIXTURE)writeFileSync('shared-service-preview.html','<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/print.css">'+html);
 });
 
