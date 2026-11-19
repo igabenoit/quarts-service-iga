@@ -2,6 +2,26 @@ import {createHmac,createHash} from 'node:crypto';
 export function invitationToken(nonce){
  return createHmac('sha256',process.env.SESSION_SECRET).update('onboarding/'+nonce).digest('base64url');
 }
+const sender=()=>process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM;
+const siteUrl=()=>process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL;
+export function invitationEmailReady(){
+ try{return !!(process.env.RESEND_API_KEY&&sender()&&process.env.SESSION_SECRET&&new URL(siteUrl()).protocol==='https:');}catch{return false;}
+}
+export async function sendInvitation(row,titles,{send,site=siteUrl(),from=sender()}={}){
+ const token=invitationToken(row.nonce);
+ if(!row.token_hash||createHash('sha256').update(token).digest('hex')!==row.token_hash)throw Error('Lien à renouveler');
+ const due=typeof row.due==='string'?row.due.slice(0,10):row.due.toISOString().slice(0,10);
+ const payload={from,to:[row.employee_email],subject:'Vos documents d’embauche · IGA Extra Famille Benoit',
+  text:'Bonjour,\n\nVos documents d’embauche sont prêts à remplir et à signer :\n'+titles.map(title=>'• '+title).join('\n')+'\n\nÉchéance : '+due+'\n\nOuvrir votre dossier : '+new URL(site).origin+'/accueil-employe.html#'+token+'\n\nVous pouvez enregistrer vos réponses et reprendre plus tard avec ce même lien. Ce lien est personnel : ne le transférez pas.\n\nIGA Extra Famille Benoit'};
+ const id=createHash('sha256').update(JSON.stringify([row.employee_key,row.generation,payload])).digest('hex');
+ if(send)await send(payload,id);
+ else{
+  if(!invitationEmailReady())throw Error('Envoi de courriel non configuré');
+  const r=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':id},body:JSON.stringify(payload)});
+  if(!r.ok)throw Error('Courriel non accepté');
+ }
+ return {status:'sent',email:row.employee_email};
+}
 export async function sendPending(pool,{send,trial=null,site=process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL}={}){
  if(!site)return;
  const root=new URL(site).origin;
