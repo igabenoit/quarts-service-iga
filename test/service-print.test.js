@@ -11,6 +11,28 @@ function print(data,options={}){const c=vm.createContext({serviceDayPortions,shi
 const person=(id,role='cashier')=>({id,name:'Employé témoin '+id,role,active:true,displayRank:id,seniority:'2020-01-01',availability:{0:[[480,1020]],1:[[0,1440]]}});
 const shift=(id,role='cashier',dayIndex=0)=>({id,role,dayIndex,startMinute:480,endMinute:960,breakMinutes:60,paidMinutes:420});
 
+test('Thursday bakery-only shift appears in the Service preview without adding its hours to Service totals',()=>{
+ const splitDays=[0,1,2,4],employee={...person(1),name:'Employé partagé',availability:{}};
+ const data={weekStart:'2026-11-23',employees:[employee],
+  shifts:splitDays.map((dayIndex,id)=>({...shift(id+1,'cashier',dayIndex),startMinute:720,endMinute:960,paidMinutes:240,breakMinutes:0})),
+  assignments:splitDays.map((_,id)=>({shiftId:id+1,employeeId:1})),
+  relatedDepartments:[...splitDays.map(dayIndex=>({employeeId:1,dayIndex,startMinute:420,endMinute:660,paidMinutes:240,department:'boulangerie'})),
+   {employeeId:1,dayIndex:3,startMinute:420,endMinute:960,paidMinutes:480,department:'boulangerie'}]};
+ const before=structuredClone(data),html=print(data);
+ const row=html.match(/<tr class="sheet-person"[^>]*data-person="1">[\s\S]*?<\/tr>/)[0];
+ const days=[...row.matchAll(/<td class="sheet-day[^\"]*">[\s\S]*?<\/td>/g)].map(m=>m[0]);
+ assert.equal(days.length,7);
+ assert.match(days[3],/assignment-label">Boulangerie/);
+ assert.match(days[3],/print-start">07:00/);assert.match(days[3],/print-end">16:00/);
+ assert.match(days[3],/Quart complet · 8 h/);assert.match(days[3],/0 Serv\. \/ 8 total/);
+ assert.doesNotMatch(days[3],/Indisponible|assignment-label">Service/);
+ assert.equal((row.match(/assignment-label">Boulangerie/g)||[]).length,5);
+ assert.match(row,/class="sheet-total print-hours">16<\/td>/);
+ assert.match(html,/Cette feuille : 16 h/);assert.match(html,/Service · semaine complète : 16 h/);
+ assert.doesNotMatch(print(data,{blank:true}),/Boulangerie|class="print-start"/);
+ assert.deepEqual(data,before);
+});
+
 test('manager stays on the first Service sheet with her title and all existing supervision shifts',()=>{
  const html=print({employees:[{...person(1,'manager'),name:'Gérante témoin'}],shifts:[shift(1,'supervisor'),shift(2,'manager',1)],assignments:[{shiftId:1,employeeId:1},{shiftId:2,employeeId:1}]});
  const sheets=html.match(/<article[\s\S]*?<\/article>/g);

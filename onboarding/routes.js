@@ -1,6 +1,6 @@
 import {blankEthics,ethicsKeys,signedEthics} from './ethics.js';
 import {signedRetirement,retirementKeys} from './retirement.js';
-import {sendPending,invitationToken} from './mail.js';
+import {sendPending,invitationToken,sendInvitation,invitationEmailReady} from './mail.js';
 import {runsInWebProcess} from '../scheduled-work.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {signedTuac,tuacFields} from './tuac.js';
@@ -14,11 +14,12 @@ const blankFor=kind=>kind==='sst'?blankAnnex():kind==='sst_general'?blankGeneral
 const base='/api/employee-files/onboarding';
 const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics},sst:{title:'Accusé de réception – Programme d’accueil général SST (ancien modèle)',fields:annexKeys,render:signedAnnex},sst_general:{title:'Programme d’accueil général SST – 2026',fields:generalSstFields,render:signedGeneralSst,category:'sst'}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
+export const onboardingDefaults=['tuac','retraite','urgence','ethique','sst_general'];
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 
-export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,trial=null,synthetic=false}){
+export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,trial=null,synthetic=false,event=null}){
  if(!pool)return;
  if(!process.env.VERCEL)await pool.query(`CREATE TABLE IF NOT EXISTS onboarding_cases(employee_key text PRIMARY KEY ${trial?"CHECK(employee_key='trial:unique')":''}, nonce text, token_hash text UNIQUE, generation integer NOT NULL DEFAULT 0, invited_at timestamptz, activity timestamptz, due date, reminder_at timestamptz, reminded boolean DEFAULT false, completed_at timestamptz, notified boolean DEFAULT false, employee_email text, manager_email text);
  CREATE TABLE IF NOT EXISTS onboarding_docs(employee_key text REFERENCES onboarding_cases, kind text, draft jsonb DEFAULT '{}', version integer DEFAULT 0, original_id uuid REFERENCES employee_file_originals, PRIMARY KEY(employee_key,kind));
@@ -31,46 +32,73 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(trial)return key===trial.key;
   const [kind,id]=key.split(':');
   const table=kind==='service'?'schedule_employees':'schedule_store_people';
-  return (await sourcePool.query('SELECT onboarding_new FROM '+table+' WHERE id=$1',[id])).rows[0]?.onboarding_new===true;
+  return (await sourcePool.query('SELECT onboarding_new FROM '+table+' WHERE id=$1',[id])).rows[0]?.onboarding_new===true || !!(await pool.query('SELECT 1 FROM onboarding_cases WHERE employee_key=$1',[key])).rowCount;
  }
  async function manager(req){
   const e=person(req.ef,await directory(),req.query.key);
   if(!['direction','gerant'].includes(req.ef.view)||!content(req.ef,e,'rh'))fail(403,'Accès RH requis.');
   return e;
  }
- const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>d.kind==='urgence'&&!allowedMedical?{...d,done:!!d.original_id,original_id:null,restricted:true}:{...d,done:!!d.original_id});
+ const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id,invited FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>d.kind==='urgence'&&!allowedMedical?{...d,done:!!d.original_id,original_id:null,restricted:true}:{...d,done:!!d.original_id});
  app.get(base+'/modele/sst-general',auth,wrap(async(req,res)=>{
   if(!['direction','gerant'].includes(req.ef.view))fail(403,'Accès réservé à la gestion.');
   res.set('Cache-Control','no-store').type('pdf').send(await blankGeneralSst());
  }));
  app.get(base,auth,wrap(async(req,res)=>{
   const e=await manager(req);
-  if(!await eligible(e.key))return res.json({eligible:false});
+  if(!await eligible(e.key))return res.json({eligible:false,canStart:e.active&&!e.issue});
   await pool.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);
-  const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
-  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,employee_email,manager_email,generation,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
+  const lastDelivery=event?(await pool.query("SELECT created_at,data->>'status' AS status,data->>'email' AS email FROM employee_file_events WHERE action IN ('onboarding.delivery','onboarding.invite','onboarding.renew') AND data->>'employeeKey'=$1 ORDER BY id DESC LIMIT 1",[e.key])).rows[0]:null;
+  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;
-  if(!await eligible(e.key)||!e.active||e.issue)fail(409,'Vérifiez la fiche de cette nouvelle embauche.');
+  if(!e.active||e.issue)fail(409,'Vérifiez le matricule et le statut actif de cette fiche.');
+  if(op==='start'){
+   if(trial&&e.key!==trial.key)fail(403,'Fiche hors essai.');
+   await transaction(async db=>{await db.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);if(event)await event(db,req.ef,'onboarding.started',{employeeKey:e.key});});
+   return res.json({ok:true});
+  }
+  if(!await eligible(e.key))fail(409,'Ouvrez d’abord le dossier d’embauche.');
+  async function delivery(){
+   return transaction(async db=>{
+    const row=(await db.query('SELECT * FROM onboarding_cases WHERE employee_key=$1 FOR UPDATE',[e.key])).rows[0];
+    if(!row?.invited_at||!row.token_hash||row.completed_at)fail(409,'Le lien est révoqué ou le dossier est complet.');
+    if(trial&&(row.employee_email!==trial.employeeEmail||row.manager_email!==trial.managerEmail))fail(403,'Destinataires hors essai.');
+    const items=(await docs(db,e.key)).filter(d=>d.invited);
+    let result;
+    if(synthetic||!invitationEmailReady())result={status:'unavailable',email:row.employee_email};
+    else try{result=await sendInvitation(row,items.map(d=>catalog[d.kind].title));}catch{result={status:'failed',email:row.employee_email};}
+    if(event)await event(db,req.ef,'onboarding.delivery',{employeeKey:e.key,generation:row.generation,...result});
+    return {delivery:result,path:'/accueil-employe.html#'+invitationToken(row.nonce)};
+   });
+  }
+  if(op==='send')return res.json(await delivery());
   const result=await transaction(async db=>{
    const row=(await db.query('SELECT * FROM onboarding_cases WHERE employee_key=$1 FOR UPDATE',[e.key])).rows[0];
-   if(!row||row.completed_at)fail(409,'Dossier indisponible.');
+   if(!row)fail(409,'Dossier indisponible.');
    if(op==='revoke'){await db.query('UPDATE onboarding_cases SET token_hash=NULL WHERE employee_key=$1',[e.key]);return {};}
-   const nonce=randomBytes(32).toString('hex'), token=invitationToken(nonce);
-   if(op==='invite'&&!row.invited_at){
+   let nonce=row.nonce,token;
+   if(op==='invite'){
     const b=req.body;
     if(trial && (b.email!==trial.employeeEmail||b.managerEmail!==trial.managerEmail||b.approvedPolicy!==trial.policyId))fail(400,'Vérifiez les destinataires et approuvez la politique de cet essai.');
     if(!await publishedPolicy(db))fail(428,'Publiez la politique de confidentialité avant l’invitation.');
     if(!Array.isArray(b.documents)||!b.documents.length||b.documents.some(k=>!Object.hasOwn(catalog,k))||!mail(b.email)||!mail(b.managerEmail)||!date(b.due)||!Number.isInteger(b.days)||b.days<1||b.days>365)fail(400,'Vérifiez les documents, les courriels, l’échéance et le délai.');
     for(const k of new Set(b.documents))await db.query('INSERT INTO onboarding_docs(employee_key,kind) VALUES($1,$2) ON CONFLICT(employee_key,kind) DO UPDATE SET invited=true',[e.key,k]);
     if(!(await db.query('SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND original_id IS NULL LIMIT 1',[e.key])).rowCount)fail(409,'Les formulaires sélectionnés sont déjà signés.');
-    await db.query("UPDATE onboarding_cases SET invited_at=now(),due=$2,reminder_at=now()+$3::int*interval '1 day',employee_email=$4,manager_email=$5 WHERE employee_key=$1",[e.key,b.due,b.days,b.email,b.managerEmail]);
-   }else if(op!=='renew'||!row.invited_at)fail(409,'Actualisez le dossier.');
-   await db.query('UPDATE onboarding_cases SET token_hash=$2,nonce=$3,generation=generation+1 WHERE employee_key=$1',[e.key,digest(token),nonce]);
+    await db.query("UPDATE onboarding_cases SET invited_at=COALESCE(invited_at,now()),due=$2,reminder_at=now()+$3::int*interval '1 day',employee_email=$4,manager_email=$5,completed_at=NULL,notified=false,reminded=false WHERE employee_key=$1",[e.key,b.due,b.days,b.email,b.managerEmail]);
+    // A corrected recipient must not leave the previous recipient's link active.
+    if(row.employee_email&&row.employee_email!==b.email)nonce=null;
+   }else if(op!=='renew'||!row.invited_at||row.completed_at)fail(409,'Actualisez le dossier.');
+   if(op==='renew'||!row.token_hash||!nonce){
+    nonce=randomBytes(32).toString('hex');token=invitationToken(nonce);
+    await db.query('UPDATE onboarding_cases SET token_hash=$2,nonce=$3,generation=generation+1 WHERE employee_key=$1',[e.key,digest(token),nonce]);
+   }else token=invitationToken(nonce);
+   if(event)await event(db,req.ef,'onboarding.'+op,{employeeKey:e.key,documents:req.body?.documents});
    return {path:'/accueil-employe.html#'+token};
   });
-  res.json(result);
+  res.json(op==='invite'&&req.body.delivery==='email'?await delivery():result);
  }));
  async function updateDocument(db,req,row,policy,action,onsite){
    const key=row.employee_key;

@@ -151,7 +151,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   await saveDirectionSignature(req.body?.strokes,req.ef.audit);
   res.json({ok:true});
  }));
- const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,synthetic:storageStatus.synthetic});
+ const reminders=await installOnboarding(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,person,content,saveOriginal,publishedPolicy,date,synthetic:storageStatus.synthetic,event});
  await installEmployeeDiscipline(app,{pool,auth,origin,wrap,transaction,directory,person,event,date});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));

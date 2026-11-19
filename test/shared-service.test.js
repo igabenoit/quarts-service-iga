@@ -24,7 +24,20 @@ test('7–11 bakery + 12–16 Service is one displayed day, 8 paid hours, 4 in e
   assert.match(html,/07:00/);assert.match(html,/11:00/);assert.match(html,/12:00/);assert.match(html,/16:00/);assert.match(html,/Boulangerie/);assert.match(html,/Service/);assert.match(html,/Grand total : 4 h/);assert.match(html,/Sem\. 8 h/);
   assert.equal(service.draft.rows[0].cells[0].paidMinutesOverride,240);
   assert.equal(serviceDayPortions(data,3,0).length,1);assert.equal(serviceDayPortions(data,3,1).length,0);
-  assert.equal(serviceDayPortions({...data,assignments:[]},3,0).length,0);
+  assert.equal(serviceDayPortions({...data,assignments:[]},3,0).length,1);
+});
+
+test('a department-only day is shown for the linked employee without creating Service work',()=>{
+  const relatedDepartments=[
+    {employeeId:3,dayIndex:3,startMinute:420,endMinute:960,paidMinutes:480,department:'boulangerie'},
+    {employeeId:4,dayIndex:3,startMinute:480,endMinute:720,paidMinutes:240,department:'poisson'},
+    {employeeId:3,dayIndex:4,startMinute:420,endMinute:660,paidMinutes:240,department:'boulangerie'}
+  ];
+  const fixture={...data,shifts:[],assignments:[],relatedDepartments},before=structuredClone(fixture);
+  assert.deepEqual(serviceDayPortions(fixture,3,3),[{...relatedDepartments[0],external:true,role:'department',sourceDepartment:'Boulangerie'}]);
+  assert.deepEqual(serviceDayPortions(fixture,3,2),[]);
+  assert.deepEqual(serviceDayPortions({...fixture,relatedDepartments:undefined},3,3),[]);
+  assert.deepEqual(fixture,before);
 });
 
 test('explicit linked records match; unrelated equal names do not match and unposted Service stays private',()=>{

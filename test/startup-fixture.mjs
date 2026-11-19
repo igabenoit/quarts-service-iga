@@ -4,6 +4,16 @@ import {EventEmitter} from 'node:events';
 import pg from 'pg';
 import {PGlite} from '@electric-sql/pglite';
 if(!process.env.TEST_STARTUP_DB||process.env.NODE_ENV!=='test')throw Error('Isolated test environment required');
+const invitationMessages=[];let emailFailure=false;
+if(process.env.TEST_ONBOARDING_EMAIL==='yes'){
+ process.env.RESEND_API_KEY='fiction-only';process.env.RESEND_FROM_EMAIL='rh@example.invalid';process.env.PUBLIC_BASE_URL='https://portail.example.invalid';
+ const actualFetch=globalThis.fetch;
+ globalThis.fetch=async(url,options)=>{
+  if(url!=='https://api.resend.com/emails')return actualFetch(url,options);
+  invitationMessages.push({payload:JSON.parse(options.body),id:options.headers['Idempotency-Key']});
+  return new Response('{}',{status:emailFailure?503:200});
+ };
+}
 let primary,employeeVaultPool;
 class TestPool extends EventEmitter{
   constructor(options={}){super();const vault=options.connectionString==='postgres://employee-files.test/test';if(!vault)primary=this;else employeeVaultPool=this;this.db=new PGlite(process.env.TEST_STARTUP_DB+(vault?'-employee-vault':''));this.ready=vault?this.db.exec(options.options==='-c search_path=employee_files_single_trial'?'SET search_path=employee_files_single_trial':'SET search_path=employee_files_private'):Promise.resolve();this.waiting=Promise.resolve();this.failSchema=vault&&process.env.TEST_EMPLOYEE_SCHEMA_FAILURE==='yes';}
@@ -25,7 +35,10 @@ class TestPool extends EventEmitter{
 pg.Pool=TestPool;
 await import('../start.js');
 
-process.on("message",async m=>{try{if(m.onboardingMail){
+process.on("message",async m=>{try{if(m.invitationMessages){
+ if(typeof m.fail==='boolean')emailFailure=m.fail;
+ process.send({id:m.id,result:invitationMessages.splice(0)});return;
+}if(m.onboardingMail){
  const {sendPending}=await import('../onboarding/mail.js');
  const messages=[];
  if(m.advance)await employeeVaultPool.query("UPDATE onboarding_cases SET reminder_at=now()-interval '1 minute'");

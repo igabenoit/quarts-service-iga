@@ -28,8 +28,7 @@ export function departmentPortionsForService(weeks,people){
   return result;
 }
 export function serviceDayPortions(data,employeeId,day){
-  const ids=new Set(data.assignments.filter(a=>a.employeeId===employeeId).map(a=>a.shiftId));
-  const own=data.shifts.filter(s=>ids.has(s.id)&&s.dayIndex===day);
-  if(!own.length)return [];
+  // A department-only day still belongs on the employee's Service overview.
+  // Keep it external so the Service hour totals continue to count only its own shifts.
   return (data.relatedDepartments||[]).filter(p=>p.employeeId===employeeId&&p.dayIndex===day).map(p=>({...p,external:true,role:'department',sourceDepartment:p.label||departmentLabel(p.department)}));
 }
