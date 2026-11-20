@@ -11,7 +11,7 @@ const css=document.createElement('link');
 css.rel='stylesheet';css.href='/manager-nav.css';document.head.append(css);
 
 function navigation(items,context){
- const current=items.find(([,url])=>{
+ const current=items.find(([,url])=>new URL(url,location.origin).hash&&location.hash.startsWith(new URL(url,location.origin).hash))||items.find(([,url])=>{
   const target=new URL(url,location.origin);
   return target.pathname===path;
  });
@@ -50,7 +50,7 @@ if(path==='/horaire-famille'){
  const user=session?.user;
  if(user){
   const admin=user.kind==='admin';
-  const items=[['Dossiers d’employés','/dossiers-employes'],['Horaires des départements','/departements'],
+  const items=[['Dossiers d’employés','/dossiers-employes'],['Mesures disciplinaires','/dossiers-employes#mesures'],['Horaires des départements','/departements'],
    ['Gestion des congés','/conges-gestion'],['Gestion des disponibilités','/disponibilites-gestion']];
   if(!admin)items.push(['Horaires de mon département','/horaires-departements?vue=gerant']);
   if(admin)items.push(['Commande de numéraire','/numeraire'],['Santé et sécurité','/sst'],['Horaires du magasin','/horaires-departements?vue=magasin'],

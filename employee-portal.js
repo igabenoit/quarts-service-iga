@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {activePersonSQL,beforeDepartureSQL,installEmployeeRevocation} from './employee-access.js';
 import {installEmployeePasskeys} from './employee-passkeys.js';
@@ -19,12 +20,12 @@ export async function saveEmployeeCode(client,personId,value,{initialOnly=false}
 }
 export const employeePersonIds=employee=>employee?.portalPersonIds||[Number(employee?.id)];
 export async function installEmployeePortal(app,pool,{sameOrigin,requireManager}){
-  await pool.query(`ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS employee_code TEXT;
+  if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS employee_code TEXT;
     ALTER TABLE schedule_store_people ADD COLUMN IF NOT EXISTS portal_person_id BIGINT REFERENCES schedule_store_people(id) CHECK(portal_person_id<>id);
     CREATE INDEX IF NOT EXISTS schedule_portal_person_link ON schedule_store_people(portal_person_id) WHERE portal_person_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS schedule_employee_code_unique ON schedule_store_people(employee_code) WHERE employee_code IS NOT NULL;
     CREATE TABLE IF NOT EXISTS schedule_department_views(department_id BIGINT NOT NULL,week_start DATE NOT NULL,person_id BIGINT NOT NULL,published_at TIMESTAMPTZ NOT NULL,first_viewed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),view_count INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(department_id,week_start,person_id,published_at));`);
-  await installEmployeeRevocation(pool);
+  if (needsSchema(pool)) await installEmployeeRevocation(pool);
   const passkeys=await installEmployeePasskeys(app,pool,{requireManager});
   const sign=s=>crypto.createHmac('sha256',process.env.SESSION_SECRET).update(s).digest('base64url');
   const equal=(a,b)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);};
@@ -68,5 +69,5 @@ export async function installEmployeePortal(app,pool,{sameOrigin,requireManager}
       res.set('Cache-Control','no-store').json({ok:true});
     } catch {res.status(503).json({error:'Déconnexion non confirmée. Réessayez.'});}
   });
-  return {requireEmployee,login,identity,directionIdentity:passkeys.directionIdentity,logout:passkeys.logout};
+  return {requireEmployee,login,identity,passkeyIdentity:passkeys.sessionIdentity,directionIdentity:passkeys.directionIdentity,logout:passkeys.logout};
 }

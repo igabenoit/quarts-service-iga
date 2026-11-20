@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 import crypto from 'node:crypto';
 import {promisify} from 'node:util';
 import {activePersonSQL,activeManagerSQL} from './employee-access.js';
@@ -18,15 +19,15 @@ export async function passwordMatches(password,encoded){
 }
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||500).json({error:error.status?error.message:'Impossible de gérer les accès. Réessayez.'});}};
 
-export async function installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,credentialSecret=process.env.SESSION_SECRET,directionIdentity=async()=>null,allowLegacyAdmin=!production}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_manager_accounts(
+export async function installManagerAccess(app,pool,{readSession,issueSession,sameOrigin,production,credentialSecret=process.env.SESSION_SECRET,directionIdentity=async()=>null,passkeyIdentity=async()=>null,allowLegacyAdmin=!production}){
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_manager_accounts(
     id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,login TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,
     departments JSONB NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp());
     ALTER TABLE schedule_manager_accounts ADD COLUMN IF NOT EXISTS password_encrypted TEXT;
     ALTER TABLE schedule_manager_accounts ADD COLUMN IF NOT EXISTS person_id BIGINT;`);
   async function installEmployeeLinks(){
-    await pool.query(`DO $$ BEGIN
+    if (needsSchema(pool)) await pool.query(`DO $$ BEGIN
       IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='schedule_manager_accounts'::regclass AND conname='schedule_manager_person_fk') THEN
         ALTER TABLE schedule_manager_accounts ADD CONSTRAINT schedule_manager_person_fk FOREIGN KEY(person_id) REFERENCES schedule_store_people(id);
       END IF;
@@ -37,6 +38,18 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
   async function identity(req){
     const direction=await directionIdentity(req);
     if(direction)return direction;
+    const person=await passkeyIdentity(req);
+    if(person){
+      // Only a verified personal key can use this link. Read the current account
+      // and its department scope on every request; never infer authority from a name.
+      const rows=(await pool.query(`SELECT a.id,a.name,a.departments,a.person_id
+        FROM schedule_manager_accounts a WHERE a.person_id=$1 AND a.active
+        AND ${activeManagerSQL()} ORDER BY a.id LIMIT 2`,[person.id])).rows;
+      // Ambiguous links fail closed. Do not borrow a different browser account.
+      if(rows.length!==1)return null;
+      const row=rows[0];
+      return {kind:'account',id:Number(row.id),name:row.name,departments:row.departments,personId:Number(row.person_id),authentication:'passkey'};
+    }
     let session;try{session=readSession(req);}catch{return null;}
     if(!session)return null;
     if(!session.accountId)return allowLegacyAdmin?{kind:'admin',name:'Administration'}:null;

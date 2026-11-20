@@ -1,6 +1,27 @@
 import JSZip from 'jszip';
+import {get} from '@vercel/blob';
 import {deflateSync} from 'node:zlib';
 import {totals} from './public/numeraire-calcul.js';
+
+async function loadCashTemplate(locker) {
+ const path = 'numeraire/casier-' + locker + '.xlsx';
+ if (process.env.VERCEL_ENV === 'production' || process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID) {
+  const result = await get(path, {access: 'private'});
+  if (result?.statusCode !== 200) throw Error('Modèle de numéraire indisponible pour le casier ' + locker);
+  return Buffer.from(await new Response(result.stream).arrayBuffer());
+ }
+ const encoded = process.env['CASH_TEMPLATE_' + locker];
+ if (!encoded) throw Error('Modèle de numéraire absent pour le casier ' + locker);
+ return Buffer.from(encoded, 'base64');
+}
+
+export async function orderWorkbooks(order) {
+ return Promise.all(order.lockers.map(async (quantities, index) => {
+  if (!quantities.some(Boolean)) return null;
+  const locker = 24 + index;
+  return orderXlsx(order, locker, await loadCashTemplate(locker));
+ }));
+}
 
 const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 function cell(sheet,address,value,formula){

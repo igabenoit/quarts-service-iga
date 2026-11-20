@@ -1,3 +1,4 @@
+import {needsSchema} from '../preview-schema.js';
 const expected='2ae98cd7cd73c4da36a4de104f5365de098b481e55968e039abb95d2c7e9ab3a';
 let db;
 const annexHash="9be2e26f3a496fdc4fae57a3da5552a6ecb4d0d5ab638c5ff6f155359af24506";
@@ -10,6 +11,7 @@ async function source(hash){
 }
 export async function installEthicsSource(app,pool){
  db=pool;
+ if (!needsSchema(pool)) return;
  // Managed PostgreSQL may grant access to a provisioned schema without database-wide CREATE.
  const schema=await pool.query("SELECT to_regnamespace('onboarding_private') AS existing");
  if (!schema.rows[0].existing) await pool.query('CREATE SCHEMA IF NOT EXISTS onboarding_private');

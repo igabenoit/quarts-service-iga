@@ -1,6 +1,6 @@
+import {installCoreSchema} from '../schedule-core-schema.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {installLeave} from '../leave.js';
@@ -14,8 +14,7 @@ test('prises de connaissance : trois courriels, clic explicite, historique et ab
   pool.connect=async()=>pool;
   const key=process.env.RESEND_API_KEY;process.env.RESEND_API_KEY='';
   try{
-    const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
-    await new Function('pool','return (async()=>{'+source.slice(source.indexOf('await pool.query(`'),source.indexOf('app.disable('))+'})();')(pool);
+    await installCoreSchema(pool);
     const routes=new Map(),app={use(){}};for(const method of ['get','post','put','patch'])app[method]=(path,...handlers)=>routes.set(method+' '+path,handlers);
     const manager=()=>{},origin=()=>{},timer=globalThis.setInterval;
     globalThis.setInterval=()=>({unref(){}});

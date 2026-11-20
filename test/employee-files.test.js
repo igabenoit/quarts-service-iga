@@ -97,11 +97,43 @@ test('dossiers employés : parcours réel, permissions, originaux et confidentia
  });
  async function upload(cookie,view,id,version,bytes,extra={}){const url=f.base+'/api/employee-files/assignments/'+id+'/originals?'+new URLSearchParams({view,version,provenance:'Archive papier fictive',signed:'true',...extra});const r=await fetch(url,{method:'POST',headers:{cookie,...headers,'Content-Type':'application/octet-stream','X-Filename':'Fichier-test.pdf'},body:bytes});return {status:r.status,body:await r.json()};}
  await t.test('papier : provenance, date inconnue, déduplication et un original partagé avec SST',async()=>{
-  const bytes=Buffer.from('%PDF-1.4\nPIECE FICTIVE SST\n%%EOF');const r=must(await upload(admin,'direction',aliceSST.id,1,bytes),201),d=must(await a('GET','assignments/'+aliceSST.id));assert.equal(d.originals[0].document_date,null);assert.equal(d.originals[0].provenance,'Archive papier fictive');assert.equal(d.assignment.status,'review');assert.equal(d.originals[0].sst_document_id,null);
-  const shared=await fetch(f.base+'/api/sst/documents/'+d.originals[0].id,{headers:{cookie:admin}});assert.deepEqual(Buffer.from(await shared.arrayBuffer()),bytes);
+  const bytes=Buffer.concat([Buffer.from('%PDF-1.4\n%'),Buffer.alloc(5*1024*1024,65),Buffer.from('\n%%EOF')]);const r=must(await upload(admin,'direction',aliceSST.id,1,bytes),201),d=must(await a('GET','assignments/'+aliceSST.id));assert.equal(d.originals[0].document_date,null);assert.equal(d.originals[0].provenance,'Archive papier fictive');assert.equal(d.assignment.status,'review');assert.equal(d.originals[0].sst_document_id,null);
+  for(const path of ['/api/sst/documents/'+r.id,'/api/employee-files/originals/'+r.id+'?view=direction&download=1']){
+   const original=await fetch(f.base+path,{headers:{cookie:admin}});
+   assert.equal(original.status,200);assert.equal(original.headers.get('content-type'),'application/pdf');
+   assert.equal(original.headers.get('cache-control'),'private, no-store');assert.equal(original.headers.get('content-length'),null);
+   assert.equal(original.headers.get('x-content-type-options'),'nosniff');
+   assert.match(original.headers.get('content-disposition'),path.includes('download=1')?/^attachment;/:/^inline;/);
+   assert.equal(createHash('sha256').update(Buffer.from(await original.arrayBuffer())).digest('hex'),d.originals[0].sha256);
+  }
+  assert.equal((await call(bobCookie,'employe','GET','originals/'+r.id)).status,404);
   assert.equal((await upload(admin,'direction',aliceSST.id,2,bytes)).status,400);
   const duplicate=must(await upload(admin,'direction',aliceSST.id,2,bytes,{reason:'Même pièce vérifiée'}),201);assert.equal(duplicate.id,r.id);
-  const rhFile=must(await upload(admin,'direction',aliceRH.id,1,Buffer.from('%PDF-1.4\nRH SECRET FICTIF\n%%EOF')),201);
+  // Both module endpoints must retain the original category, authorization and digest.
+  async function segmented(path,header,label) {
+    const bytes=Buffer.alloc(12*1024*1024,65);bytes.write('%PDF-1.4\n'+label);
+    const sha256=createHash('sha256').update(bytes).digest('hex'),url=new URL(f.base+path);
+    url.pathname+='/uploads/'+crypto.randomUUID();
+    const hit=(method,suffix,body,type,who=admin)=>{const u=new URL(url);u.pathname+=suffix;return fetch(u,{method,headers:{Cookie:who,Origin:f.base,[header]:'1',...(type?{'Content-Type':type}:{})},body});};
+    const meta=JSON.stringify({name:'Temoin.pdf',size:bytes.length,sha256});
+    assert.ok([401,403,404].includes((await hit('POST','',meta,'application/json',bobCookie)).status));
+    assert.equal((await hit('POST','',meta,'application/json')).status,201);
+    assert.equal((await hit('POST','/complete')).status,409);
+    for(let offset=0;offset<bytes.length;offset+=2*1024*1024){
+      const block=bytes.subarray(offset,offset+2*1024*1024);
+      assert.equal((await hit('PUT','/parts/'+offset,block,'application/octet-stream')).status,200);
+      if(!offset)assert.equal((await hit('PUT','/parts/0',block,'application/octet-stream')).status,200);
+    }
+    const finish=await hit('POST','/complete');assert.equal(finish.status,201);
+    const result=await finish.json();assert.deepEqual(await (await hit('POST','/complete')).json(),result);
+    return {...result,sha256};
+  }
+  const rhFile=await segmented('/api/employee-files/assignments/'+aliceRH.id+'/originals?view=direction&version=1&provenance=essai','X-Employee-Files','RH');
+  const safety=await segmented('/api/sst/documents','X-SST-Request','SST');
+  for(const [url,hash] of [['/api/employee-files/originals/'+rhFile.id+'?view=direction',rhFile.sha256],['/api/sst/documents/'+safety.id,safety.sha256]]){
+    const opened=await fetch(f.base+url,{headers:{Cookie:admin}});
+    assert.equal(opened.status,200);assert.equal(createHash('sha256').update(Buffer.from(await opened.arrayBuffer())).digest('hex'),hash);
+  }
   assert.equal((await m('GET','originals/'+rhFile.id)).status,403);
   assert.equal((await f.call('GET','/api/sst/documents/'+rhFile.id,{cookie:admin})).status,404);
   const sstExport=must(await f.call('GET','/api/sst/export',{cookie:admin}));assert.ok(!sstExport.documents.some(d=>d.id===rhFile.id));

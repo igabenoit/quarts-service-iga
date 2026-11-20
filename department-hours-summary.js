@@ -1,9 +1,10 @@
+import {needsSchema} from './preview-schema.js';
 import {assertDepartment} from './manager-access.js';
 import {plannedSummary,normalizeSummaryActual} from './public/department-summary.js';
 import {serviceShiftTiming} from './public/service-rules.js';
 
 export async function installDepartmentHoursSummary(app,pool,{requireManager,sameOrigin,getWeek,departmentFor,weekFor}){
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_department_hour_summaries(department_id BIGINT NOT NULL REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,actual JSONB NOT NULL,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(department_id,week_start))`);
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_department_hour_summaries(department_id BIGINT NOT NULL REFERENCES schedule_leave_departments(id),week_start DATE NOT NULL,actual JSONB NOT NULL,version INTEGER NOT NULL DEFAULT 1,updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(department_id,week_start))`);
   const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||400).json({error:error.code?'Le sommaire n’a pas pu être enregistré.':error.message});}};
   async function planned(req){
     const department=await departmentFor(req.params.id),start=weekFor(req.params.week);assertDepartment(req,department.id);

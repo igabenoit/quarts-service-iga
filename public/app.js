@@ -11,7 +11,7 @@ const employeeRoles=["manager","supervisor","cashier","packer","orders"];
 function canWorkRole(employee,role){return employee.role==='manager'&&role==='supervisor'||(employee.roles||[employee.role]).includes(role);}
 function compareDisplayOrder(a,b){return Number(b.role==='manager')-Number(a.role==='manager')||(a.displayRank??9999)-(b.displayRank??9999)||(a.seniority||'9999').localeCompare(b.seniority||'9999')||a.id-b.id;}
 const scheduleGroups=[{title:"Gérante et superviseurs",roles:["manager","supervisor"]},{title:"Caissières",roles:["cashier","support"]},{title:"Emballeurs",roles:["packer"]},{title:"Commandes téléphoniques",roles:["orders"]}];
-const state={weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],approvedLeaves:[],dayExceptions:[],saving:null,sharePath:null,revision:null};
+const state={storeId:null,weekStart:null,week:null,shifts:[],employees:[],assignments:[],timeOff:[],approvedLeaves:[],dayExceptions:[],saving:null,sharePath:null,revision:null};
 const $=selector=>document.querySelector(selector);
 const fmtDate=new Intl.DateTimeFormat("fr-CA",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
 
@@ -41,7 +41,7 @@ function protectAction(action,{flush=true}={}){return async function(event){
 async function api(url,options={}){
   const write=options.method&&options.method!=='GET'&&/^\/api\/(weeks\/|shifts\/|employees(?:\/|$))/.test(url),week=state.weekStart;
   if(write&&!state.revision)throw Error('Actualisez la semaine avant de modifier la feuille.');
-  const response=await undoControl.request(url,{...options,headers:{'Content-Type':'application/json',...(options.undoGroup?{'X-Undo-Group':options.undoGroup}:{}),...(write?{'X-Service-Week':week,'X-Service-Revision':state.revision}:{}),...(options.headers||{})}});
+  const response=await undoControl.request(url,{...options,headers:{'Content-Type':'application/json',...(state.storeId?{'X-Service-Store':state.storeId}:{}),...(options.undoGroup?{'X-Undo-Group':options.undoGroup}:{}),...(write?{'X-Service-Week':week,'X-Service-Revision':state.revision}:{}),...(options.headers||{})}});
   const body=await response.json().catch(()=>({}));
   if(!response.ok){if(write&&response.status===409)state.revision=null;throw Error(body.error||'Une erreur est survenue.');}
   if(write&&state.weekStart===week&&response.headers.get('X-Service-Revision'))state.revision=response.headers.get('X-Service-Revision');
@@ -111,15 +111,21 @@ function servicePrintHTML(data,{blank=false}={}){
 function renderPrint(){if($('#printPreview').open)refreshServicePreview();else $('#printSheet').innerHTML=servicePrintHTML(state);}
 
 function render(){$("#weekLabel").textContent=formatWeek(state.weekStart);$("#weekPicker").value=state.weekStart;$("#weekNotes").value=state.week.notes||"";renderSummary();renderBoard("front","#frontBoard");renderBoard("packer","#packerBoard");renderWarnings();renderPrint();renderSchedule();}
-async function loadWeek(start){
+async function loadWeek(start,store=state.storeId){
   if(serviceDirty)await saveWeek();
   const turn=++weekLoadSequence,next=mondayOf(new Date(`${start}T12:00:00Z`));
   return withServiceLock(async()=>{
     $('#saveStatus').textContent='Chargement…';
     try{
-      const data=await api(`/api/weeks/${next}`);if(turn!==weekLoadSequence)return;
+      const data=await api(`/api/weeks/${next}`,{headers:store?{'X-Service-Store':store}:{}});if(turn!==weekLoadSequence)return;
       if(data.week.weekStart!==next||!data.revision)throw Error('La réponse ne correspond pas à la semaine demandée. Actualisez.');
-      Object.assign(state,{weekStart:next,week:data.week,shifts:data.shifts,employees:data.employees,assignments:data.assignments,timeOff:data.timeOff,dayExceptions:data.dayExceptions,approvedLeaves:data.approvedLeaves,relatedDepartments:data.relatedDepartments||[],sharePath:data.sharePath,revision:data.revision});
+      if(data.stores){
+        const picker=$('#serviceStore');
+        picker.replaceChildren(...data.stores.map(id=>new Option(id,id)));
+        picker.value=data.week.storeId;
+        $('#serviceStoreLabel').hidden=data.stores.length<2;
+      }
+      Object.assign(state,{storeId:data.week.storeId,weekStart:next,week:data.week,shifts:data.shifts,employees:data.employees,assignments:data.assignments,timeOff:data.timeOff,dayExceptions:data.dayExceptions,approvedLeaves:data.approvedLeaves,relatedDepartments:data.relatedDepartments||[],sharePath:data.sharePath,revision:data.revision});
       $('#assignmentMessage').hidden=true;$('#assignmentMessage').textContent='';
       renderEmployees();renderShareLink();resetForm();resetEmployeeForm();render();
       loadScheduleViews().catch(showError);void salesForecasts.load(next);
@@ -127,7 +133,7 @@ async function loadWeek(start){
     }catch(error){if(turn===weekLoadSequence){state.revision=null;$('#weekPicker').value=state.weekStart||'';showError(error);}throw error;}
   });
 }
-async function loadScheduleViews(){const week=state.weekStart;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
+async function loadScheduleViews(){const week=state.weekStart,store=state.storeId;$("#scheduleViews").textContent="Chargement…";const {employees}=await api(`/api/weeks/${week}/schedule-views`);if(week!==state.weekStart||store!==state.storeId)return;const viewed=employees.filter(person=>person.last_viewed_at).length;const formatted=value=>new Intl.DateTimeFormat("fr-CA",{dateStyle:"medium",timeStyle:"short"}).format(new Date(value));$("#scheduleViews").innerHTML=`<p><strong>${viewed} sur ${employees.length}</strong> horaires ouverts</p>${employees.length?`<div class="view-list">${employees.map(person=>`<div class="view-row"><span>${escapeHtml(person.name)}</span><span>${person.last_viewed_at?`Ouvert le ${escapeHtml(formatted(person.last_viewed_at))} · ${person.view_count} consultation${person.view_count>1?"s":""}`:"Pas encore ouvert"}</span></div>`).join("")}</div>`:"<p>Aucun employé n’a de quart cette semaine.</p>"}`;}
 $("#refreshScheduleViews").onclick=()=>loadScheduleViews().catch(showError);
 function renderShareLink(){const active=!!state.sharePath;$('#resendScheduleNotice').hidden=!active;void loadPushStatus();$("#createShareLink").hidden=false;$("#createShareLink").textContent=active?'Publier les modifications':'Publier cette semaine';$("#revokeShareLink").hidden=!active;$("#shareLinkDisplay").textContent=(active?'Une version de cette semaine est publiée. Les modifications restent privées jusqu’à une nouvelle publication. ':'Semaine non publiée. ')+formatWeek(state.weekStart)+' · Portail permanent : '+location.origin+'/horaires-departements';}
 
@@ -287,6 +293,9 @@ function editShift(id){const s=state.shifts.find(x=>x.id===id);if(!s)return;$("#
 
 $("#loginForm").onsubmit=async event=>{event.preventDefault();try{await api("/api/login",{method:"POST",body:JSON.stringify({code:$("#loginCode").value})});location.reload();}catch(error){$("#loginError").textContent=error.message;}};
 $("#logoutBtn").onclick=async()=>{await api("/api/logout",{method:"POST"});location.reload();};
+$('#serviceStore').onchange=protectAction(async()=>{
+  try{await loadWeek(state.weekStart,$('#serviceStore').value);}finally{$('#serviceStore').value=state.storeId;}
+});
 $("#prevWeek").onclick=()=>loadWeek(addDays(state.weekStart,-7)).catch(showError);$("#nextWeek").onclick=()=>loadWeek(addDays(state.weekStart,7)).catch(showError);$("#weekPicker").onchange=e=>loadWeek(e.target.value).catch(showError);
 $("#copyPrevious").onclick=async()=>{if(!confirm("Copier tous les quarts et budgets de la semaine précédente?"))return;try{await api(`/api/weeks/${state.weekStart}/copy-previous`,{method:"POST"});await loadWeek(state.weekStart);toast("Semaine précédente copiée");}catch(error){showError(error);}};
 async function loadPushStatus(){
@@ -416,6 +425,7 @@ $("#regenerateSchedule").onclick=async()=>{
 };
 const salesForecasts=createSalesForecastDisplay();
 const undoControl=window.createUndoControl({
+  storeHeaders:()=>state.storeId?{'X-Service-Store':state.storeId}:{},
   beforeUndo:async()=>{if(!serviceDirty)return false;await saveWeek();return true;},
   onUndo:async action=>{clearTimeout(state.saving);state.saving=null;await loadEmployees();await loadWeek(action.week_start?String(action.week_start).slice(0,10):state.weekStart);toast('Dernière action annulée');}
 });

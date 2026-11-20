@@ -1,3 +1,4 @@
+import {depositPhoto} from './department-photo-upload.js';
 import {cuisineCell} from './cuisine-routing.js';
 import {createSalesForecastDisplay} from './sales-forecast.js';
 const salesForecasts=createSalesForecastDisplay();
@@ -336,9 +337,23 @@ $('#printSheet').onclick=async()=>{
   finally{button.disabled=false;$('#managerContent').inert=false;}
 };
 async function loadPhotos(){const sequence=loadSequence;const result=await api(`/api/departments/photos?departmentId=${selectedDepartment}&weekStart=${current.weekStart}`);if(sequence!==loadSequence)return;$('#photoList').innerHTML=result.photos.map(p=>`<button class="quiet" data-photo="${p.id}">${e(p.name)}${p.analyzed?' · transcription disponible':''}</button>`).join('')||'<p>Aucune photo pour cette semaine.</p>';$('#photoList').querySelectorAll('button').forEach(b=>b.onclick=()=>openPhoto(Number(b.dataset.photo)));$('#visionStatus').textContent=meta.visionConfigured?'La lecture automatique utilise OpenAI. En choisissant « Proposer une transcription », vous lui transmettez cette photo et les noms de l’équipe pour préparer un brouillon à vérifier.':'Le dépôt et la comparaison des photos sont disponibles. La transcription automatique attend la configuration de la connexion IA sur le serveur.';renderPhotoState();}
-$('#photoInput').onchange=async event=>{const file=event.target.files[0];if(!file||weekLocks||weekLoading)return;if(file.size>8*1024*1024){$('#photoStatus').textContent='Photo trop lourde : choisissez une image de moins de 8 Mo.';event.target.value='';return;}const departmentId=current.department.id,weekStart=current.weekStart;await withWeekLock(async()=>{try{$('#photoStatus').textContent='Enregistrement de la photo…';const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});const result=await post('/api/departments/photos',{departmentId,weekStart,name:file.name,dataUrl});await loadPhotos();await openPhoto(result.id);$('#photoStatus').textContent='Photo enregistrée. Vérifiez qu’elle montre toute la feuille, y compris les noms et les dates.';}catch(err){$('#photoStatus').textContent=err.message;}finally{event.target.value='';}});};
+$('#photoInput').onchange=async event=>{
+  const input=event.target,file=input.files[0];
+  if(!file || weekLocks || weekLoading) return;
+  const {department,weekStart}=current;
+  await withWeekLock(async()=>{
+    try {
+      $('#photoStatus').textContent='Enregistrement de la photo…';
+      const {id}=await depositPhoto(file,department.id,weekStart);
+      await loadPhotos();
+      if(await openPhoto(id)) $('#photoStatus').textContent='Photo enregistrée. Vérifiez qu’elle montre toute la feuille, y compris les noms et les dates.';
+    } catch(error) {
+      $('#photoStatus').textContent=error.message;
+    } finally { input.value=''; }
+  });
+};
 let photoLoadSequence=0,photoPollTimer;
-async function openPhoto(id){const sequence=++photoLoadSequence;try{const photo=await api('/api/departments/photos/'+id);if(sequence!==photoLoadSequence)return;activePhoto=photo;$('#photoReview').hidden=false;$('#photoImage').src=activePhoto.dataUrl;$('#largePhoto').src=activePhoto.dataUrl;$('#photoStatus').textContent='';renderCandidate();renderPhotoState();}catch(err){if(sequence===photoLoadSequence)$('#photoStatus').textContent=err.message;}}
+async function openPhoto(id){const sequence=++photoLoadSequence;try{const photo=await api('/api/departments/photos/'+id);if(sequence!==photoLoadSequence)return;activePhoto=photo;$('#photoReview').hidden=false;$('#photoImage').src=activePhoto.dataUrl;$('#largePhoto').src=activePhoto.dataUrl;$('#photoStatus').textContent='';renderCandidate();renderPhotoState();return true;}catch(err){if(sequence===photoLoadSequence)$('#photoStatus').textContent=err.message;}}
 function renderPhotoState(){
   const p=activePhoto,busy=analyzingPhotoId===p?.id||p?.busy;
   $('#analyzePhoto').disabled=!meta.visionConfigured||!p||busy||p.remainingAttempts===0;

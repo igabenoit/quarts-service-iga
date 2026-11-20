@@ -31,4 +31,4 @@ process.on("message",async m=>{try{if(m.onboardingMail){
  if(m.advance)await employeeVaultPool.query("UPDATE onboarding_cases SET reminder_at=now()-interval '1 minute'");
  await sendPending(employeeVaultPool,{site:'https://portail.example.invalid',send:async(payload,id)=>messages.push({payload,id})});
  process.send({id:m.id,result:messages});return;
-}const result=await primary.query(m.sql,m.args);process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});
+}const result=await (m.vault?employeeVaultPool:primary).query(m.sql,m.args);process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});

@@ -1,3 +1,4 @@
+import {needsSchema} from './preview-schema.js';
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 function messageIds(value){
   if(!Array.isArray(value)||!value.length||value.length>50||value.some(id=>typeof id!=='string'||!/^[1-9]\d{0,17}$/.test(id)))fail('Messages invalides (maximum 50).');
@@ -10,7 +11,7 @@ export async function installChatReceipts(app,pool,{auth,sameOrigin,endpoint}){
     const messages=privateChat?'schedule_service_private_messages':'schedule_service_messages';
     const views=privateChat?'schedule_service_private_views':'schedule_service_message_views';
     const path='/api/service-chat'+(privateChat?'/private':'')+'/views';
-    await pool.query(`CREATE TABLE IF NOT EXISTS ${views}(
+    if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS ${views}(
       message_id BIGINT NOT NULL REFERENCES ${messages}(id) ON DELETE CASCADE,
       viewer_key TEXT NOT NULL,viewer_name TEXT NOT NULL,viewed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
       PRIMARY KEY(message_id,viewer_key));`);

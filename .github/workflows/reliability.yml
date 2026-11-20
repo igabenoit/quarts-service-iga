@@ -15,5 +15,7 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Vérifier le verrou des fonctions Vercel
+        run: npx --yes pnpm@10.34.9 install --lockfile-only --frozen-lockfile --ignore-scripts
       - run: npm ci
       - run: node --test --test-concurrency=2 test/*.test.js

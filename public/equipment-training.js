@@ -1,3 +1,4 @@
+import {depositDocument} from './file-blocks.js';
 import {emailPaper} from './sst-email-paper.js';
 import {openTrainingForm,canLeaveForm,clearForm,trainingFormPaper} from './training-form.js';
 import {trainingTasks,trainingSheetHTML} from './equipment-training-sheet.js';
@@ -101,7 +102,7 @@ function assign(){
  root.querySelector('[name=searchPeople]').addEventListener('input',e=>root.querySelectorAll('[data-name]').forEach(x=>x.hidden=!x.dataset.name.includes(e.target.value.toLowerCase())));
 }
 function docSelect(selected=''){return `<label>Original dans la bibliothèque<select name="documentId">${opt('','Choisir une pièce',selected)}${state.documents.filter(d=>!d.archived_at).map(d=>opt(d.id,d.name,selected)).join('')}</select></label><label>Ou déposer un original (12 Mo maximum)<input type="file" name="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.pptx"></label>`;}
-async function upload(fd){const file=fd.get('file');if(!file?.size)return fd.get('documentId');if(file.size>12*1024*1024)throw Error('Le fichier dépasse 12 Mo.');const r=await fetch('/api/sst/documents?recordId='+selection.equipment,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/octet-stream','X-SST-Request':'1','X-Filename':encodeURIComponent(file.name)},body:file});const d=await r.json();if(!r.ok)throw Error(d.error||'Dépôt impossible.');return d.id;}
+async function upload(fd){const file=fd.get('file');if(!file?.size)return fd.get('documentId');if(file.size>12*1024*1024)throw Error('Le fichier dépasse 12 Mo.');const d=await depositDocument(file,'/api/sst/documents?recordId='+selection.equipment,'X-SST-Request');return d.id;}
 function procedureSelect(selected=''){return `<label>Fiche de référence ou procédure<select name="procedureId" required>${opt('','Choisir la version',selected)}${procedures().map(p=>opt(p.id,p.data.title+' · '+p.data.version+' · '+p.data.model,selected)).join('')}</select></label>`;}
 function edit(kind,prior=null){
  const d=prior?.data||{},sc=prior?{employeeKeys:d.employeeKeys,tasks:d.tasks}:scope();let html=`<p>${esc(equipment()?.title)} · ${sc.tasks.map(esc).join(', ')}${kind==='procedure'?'':' · '+sc.employeeKeys.map(k=>esc(name(k))).join(', ')}</p>`;

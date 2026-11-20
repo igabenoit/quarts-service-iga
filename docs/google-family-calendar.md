@@ -8,7 +8,11 @@ URI de redirection autorisée pour le service principal :
 
 `https://quarts-service-iga.onrender.com/api/family-portal/google/callback`
 
-Ajouter uniquement dans les secrets Render du service principal :
+Pour la préversion, utiliser un client Web dédié, l’adresse stable du portail familial comme origine et un agenda réservé aux données fictives. Enregistrer son URI de retour exacte dans Google Cloud :
+
+`https://quart-service-jalon3-igabenoit-8334.vercel.app/api/family-portal/google/callback`
+
+Configurer les variables suivantes dans l’environnement correspondant (Preview dans Vercel ou service principal dans Render) :
 
 - `GOOGLE_CALENDAR_CLIENT_ID`
 - `GOOGLE_CALENDAR_CLIENT_SECRET`
@@ -20,7 +24,7 @@ Depuis `/horaire-famille`, se connecter avec l’accès familial, choisir **Conn
 
 ## Comportement
 
-Le serveur vérifie les horaires publiés toutes les deux minutes, même lorsque le portail est fermé. Un processus web doit rester actif. Les quarts des enfants rattachés à l’accès familial, y compris leurs fiches liées et les quarts du Service, sont lus par la même fonction que le portail. Les congés et les brouillons ne créent pas d’événement. Les événements portent les heures de présence et le fuseau `America/Toronto`, avec passage au lendemain si nécessaire.
+Sur Render, un processus web actif vérifie les horaires publiés toutes les deux minutes. En Preview, Vercel exécute cette vérification pendant les passages de la tâche `quart-periodique` lorsqu’elle est activée. Le bouton de synchronisation du portail permet aussi de lancer un passage. Les quarts des enfants rattachés à l’accès familial, y compris leurs fiches liées et les quarts du Service, sont lus par la même fonction que le portail. Les congés et les brouillons ne créent pas d’événement. Les événements portent les heures de présence et le fuseau `America/Toronto`, avec passage au lendemain si nécessaire.
 
 Tous les quarts publiés à partir d’aujourd’hui sont synchronisés. Les jours passés sont conservés. Une modification actualise le même événement; un retrait dans la source supprime l’événement futur associé. Les identifiants sont conservés avant les écritures Google afin de reprendre une requête interrompue sans doublon. Aucun événement étranger à cette synchronisation n’est modifié ou supprimé. Les suppressions n’ont lieu qu’après une lecture complète des sources. Les accès familiaux désactivés ne sont plus synchronisés.
 

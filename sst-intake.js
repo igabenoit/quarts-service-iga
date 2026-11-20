@@ -26,11 +26,16 @@ export function validateSSTIntake(payload){
  return {records,documents,digest:createHash('sha256').update(JSON.stringify(payload)).digest('hex')};
 }
 export async function importSSTIntake(pool,payload){
- const {records,documents,digest}=validateSSTIntake(payload),db=await pool.connect();
+ const db=await pool.connect();
  try{
-  await db.query('BEGIN');await db.query('SELECT pg_advisory_xact_lock(835107)');
+  await db.query('BEGIN');const result=await storeIntake(db,payload);await db.query('COMMIT');return result;
+ }catch(error){await db.query('ROLLBACK');throw error}finally{db.release()}
+}
+async function storeIntake(db,payload){
+  const {records,documents,digest}=validateSSTIntake(payload);
+  await db.query('SELECT pg_advisory_xact_lock(835107)');
   const old=(await db.query('SELECT * FROM sst_imports WHERE id=$1',[payload.id])).rows[0];
-  if(old){if(old.digest!==digest)invalid();await db.query('COMMIT');return {...old,alreadyImported:true}}
+  if(old){if(old.digest!==digest)invalid();return {...old,alreadyImported:true}}
   const departments=(await db.query('SELECT id,code,schedule_key FROM schedule_leave_departments')).rows;
   const ids=new Map(records.map(r=>[r.key,randomUUID()])),reused=new Set();
   // Reuse an already prepared visit without changing any of its user-entered fields.
@@ -43,13 +48,19 @@ export async function importSSTIntake(pool,payload){
   const actor='Import documentaire demandé par l’administration';
   for(const r of records){if(reused.has(r.key))continue;const id=ids.get(r.key);if(r.relatedKey)await db.query('UPDATE sst_records SET related_id=$2 WHERE id=$1',[id,ids.get(r.relatedKey)]);const after=(await db.query('SELECT * FROM sst_records WHERE id=$1',[id])).rows[0];await db.query("INSERT INTO sst_events(record_id,actor,action,after_value) VALUES($1,$2,'record.created',$3)",[id,actor,JSON.stringify(after)])}
   for(const d of documents){const id=randomUUID(),recordId=ids.get(records.find(r=>r.files.includes(d.key)).key);await db.query('INSERT INTO sst_documents(id,record_id,name,mime,size,sha256,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,recordId,d.name,d.mime,d.data.length,d.sha256,d.data]);await db.query("INSERT INTO sst_events(record_id,document_id,actor,action,after_value) VALUES($1,$2,$3,'document.added',$4)",[recordId,id,actor,JSON.stringify({id,name:d.name,mime:d.mime,size:d.data.length,sha256:d.sha256})])}
-  const result=(await db.query('INSERT INTO sst_imports(id,digest,label,record_count,document_count,report_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[payload.id,digest,payload.label,created,documents.length,ids.get('bilan')||null])).rows[0];await db.query('COMMIT');return {...result,alreadyImported:false};
- }catch(error){await db.query('ROLLBACK');throw error}finally{db.release()}
+  const result=(await db.query('INSERT INTO sst_imports(id,digest,label,record_count,document_count,report_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[payload.id,digest,payload.label,created,documents.length,ids.get('bilan')||null])).rows[0];return {...result,alreadyImported:false};
 }
-export function installSSTIntake(app,pool,{admin,origin,route}){
+const summary=result=>({alreadyImported:result.alreadyImported,records:result.record_count,documents:result.document_count,reportId:result.report_id,label:result.label});
+export function installSSTIntake(app,pool,{admin,origin,route,installImport}){
+ installImport('/api/sst/import',async(db,_req,bytes)=>{
+  let payload;
+  try{payload=JSON.parse(bytes.toString('utf8'))}catch{throw Object.assign(Error('Choisissez le fichier de lot SST au format JSON.'),{status:400})}
+  try{const result=await storeIntake(db,payload);return {id:result.id,...summary(result)}}
+  catch(e){if(e.message==='SST_INTAKE_INVALID'||e instanceof TypeError||e.status===400)throw Object.assign(Error('Vérifiez le fichier de lot SST, les formats et les départements.'),{status:400});throw e}
+ });
  app.post('/api/sst/import',admin,origin,express.raw({type:'application/octet-stream',limit:'16mb'}),route(async(req,res)=>{
   let payload;try{if(!Buffer.isBuffer(req.body))throw Error();payload=JSON.parse(req.body.toString('utf8'))}catch{return res.status(400).json({error:'Choisissez le fichier de lot SST au format JSON.'})}
   let result;try{result=await importSSTIntake(pool,payload)}catch{return res.status(400).json({error:'Le lot n’a pas été importé. Vérifiez le fichier, les formats et les départements. Les dossiers existants sont conservés.'})}
-  res.status(result.alreadyImported?200:201).json({alreadyImported:result.alreadyImported,records:result.record_count,documents:result.document_count,reportId:result.report_id,label:result.label});
+  res.status(result.alreadyImported?200:201).json(summary(result));
  }));
 }

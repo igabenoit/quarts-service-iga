@@ -1,3 +1,5 @@
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 import {conditionalPayload} from './leave-conditional-payload.js';
 import {leaveMailFrame,leavePeriodPanel,acknowledgementText} from './leave-mail-layout.js';
@@ -86,7 +88,7 @@ export async function queueEmployeeNotice(client,id,kind){
 
 // No historical backfill. Late notices state a submission fact; other notices follow the decision version.
 export async function installEmployeeNotices(pool,{autoStart=true,fetchImpl=fetch}={}){
-  await installEmployeeNoticeSchema(pool);
+  if (needsSchema(pool)) await installEmployeeNoticeSchema(pool);
   let running=false;
   async function run(){
     if(running||!process.env.RESEND_API_KEY)return;
@@ -143,6 +145,6 @@ export async function installEmployeeNotices(pool,{autoStart=true,fetchImpl=fetc
       }
     }finally{running=false;}
   }
-  if(autoStart){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_notice',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_notice',code:errorCode(error)},'error'));}
+  if(autoStart&&runsInWebProcess()){const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_notice',code:errorCode(error)},'error')),30000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_notice',code:errorCode(error)},'error'));}
   return {run,queue:queueEmployeeNotice};
 }

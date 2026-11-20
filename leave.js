@@ -1,3 +1,5 @@
+import {runsInWebProcess} from './scheduled-work.js';
+import {needsSchema} from './preview-schema.js';
 import {employeeRequestSecurity} from './employee-request-security.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 import {beginUndo} from "./undo.js";
@@ -13,13 +15,13 @@ import {installContacts} from './employee-contacts.js';
 import {normalizeLeave, earliestLeaveDate, addDays, isDate, leaveStatistics, uncoveredLeavePeriods, LATE_MESSAGE} from './leave-rules.js';
 import {applyApprovedLeave} from './leave-schedule.js';
 
-export async function approvedLeave(pool, weekStart) {
+export async function approvedLeave(pool, weekStart, storeId=null) {
   const result = await pool.query(`SELECT employee_id, COALESCE(effective_periods, periods) AS periods FROM schedule_leave_requests
-    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`, [weekStart,addDays(weekStart,6)]);
+    WHERE status='approved' AND is_test=FALSE AND archived_at IS NULL AND first_date<=$2 AND last_date>=$1 AND department_id=(SELECT id FROM schedule_leave_departments WHERE code='service')`+(storeId?' AND employee_id IN(SELECT id FROM schedule_employees WHERE store_id=$3)':''), [weekStart,addDays(weekStart,6),...(storeId?[storeId]:[])]);
   return result.rows;
 }
 export async function installLeave(app, pool, {requireManager,sameOrigin,employeeIdentity}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_requests (
     id BIGSERIAL PRIMARY KEY, submission_key UUID NOT NULL UNIQUE,
     employee_id BIGINT REFERENCES schedule_employees(id), employee_name TEXT NOT NULL,
     email TEXT NOT NULL, reason TEXT NOT NULL, periods JSONB NOT NULL,
@@ -51,7 +53,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   const approvalMail=await installApprovalMail(pool);
   const employeeNotices=await installEmployeeNotices(pool);
   await installContacts(app,pool,{requireManager,sameOrigin});
-  await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
+  const availabilityMail=await installAvailability(app,pool,{requireManager,sameOrigin,requireStaff:requireStoreStaff});
   async function staff(request,response,next) {
     try {
       if (!/^[A-Za-z0-9_-]{43}$/.test(request.params.token)) return response.status(404).json({error:'Lien invalide.'});
@@ -63,7 +65,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   const noStore=(_req,res,next)=>{res.set('Cache-Control','no-store');next();};
   app.use('/api/leave', noStore);
   const ownRequest=employeeRequestSecurity(pool);
-  await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
+  if (needsSchema(pool)) await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS person_id BIGINT');
   const formInfo = (test,store=false) => async (_req,res)=>{
     try {
       const clock = (await pool.query('SELECT clock_timestamp() AS now')).rows[0].now;
@@ -109,8 +111,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       if(saved.rowCount)await mail.queue(client,row.id);
       if(saved.rowCount&&row.status==='late')await employeeNotices.queue(client,row.id,'late');
       await client.query('COMMIT');
-      mail.run().catch(()=>{});
-      employeeNotices.run().catch(()=>{});
+      if (runsInWebProcess()) mail.run().catch(()=>{});
+      if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.set('Cache-Control','no-store').status(row.status==='late'?422:201).json({id:row.id,submittedAt:row.submitted_at,status:row.status,isTest,
         message:row.status==='late'?LATE_MESSAGE+' Un avis de retard est en attente d’envoi à votre adresse courriel.':'Votre demande a été reçue. Elle doit être approuvée par votre gérante.'});
     } catch(error) {
@@ -144,7 +146,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   });
   app.get('/api/leave/week/:weekStart',requireManager,async(req,res)=>{
     if(!isDate(req.params.weekStart))return res.status(400).json({error:'Semaine invalide.'});
-    try {res.json({leaves:await approvedLeave(pool,req.params.weekStart)});}catch{res.status(500).json({error:'Impossible de charger les congés approuvés.'});}
+    try {res.json({leaves:await approvedLeave(pool,req.params.weekStart,req.storeId)});}catch{res.status(500).json({error:'Impossible de charger les congés approuvés.'});}
   });
   app.patch('/api/leave/requests/:id',requireManager,sameOrigin,async(req,res)=>{
     const client=await pool.connect();
@@ -203,8 +205,8 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       if(b.status==='approved')await approvalMail.queue(client,row.id);
       if(['refused','conditional'].includes(b.status))await employeeNotices.queue(client,row.id,b.status);
       await client.query('COMMIT');
-      approvalMail.run().catch(()=>{});
-      employeeNotices.run().catch(()=>{});
+      if (runsInWebProcess()) approvalMail.run().catch(()=>{});
+      if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.json({ok:true,corrected:correction,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length,confirmationQueued:['approved','refused','conditional'].includes(b.status)});
     } catch(error){await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’enregistrer la décision.'});}finally{client.release();}
   });
@@ -216,7 +218,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       const row=(await client.query('SELECT * FROM schedule_leave_requests WHERE id=$1 FOR UPDATE',[req.params.id])).rows[0];
       if(!row||row.archived_at||row.status!=='late'||row.version!==req.body.version){await client.query('ROLLBACK');return res.status(409).json({error:'La demande a changé. Actualisez le suivi.'});}
       const queued=await employeeNotices.queue(client,row.id,'late');
-      await client.query('COMMIT');employeeNotices.run().catch(()=>{});
+      await client.query('COMMIT');if (runsInWebProcess()) employeeNotices.run().catch(()=>{});
       res.json({ok:true,queued});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible de préparer l’avis de retard.'});}finally{client.release();}
   });
@@ -228,11 +230,13 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(8675309)');
       await beginUndo(client,'Appliquer les congés approuvés',weekStart,req);
-      const changes=await applyApprovedLeave(client,{weekStart});
+      const changes=await applyApprovedLeave(client,{weekStart,store:req.storeId});
       await client.query('COMMIT');res.json({ok:true,releasedShifts:changes.released.length,adjustedShifts:changes.adjusted.length});
     }catch{await client.query('ROLLBACK').catch(()=>{});res.status(500).json({error:'Impossible d’appliquer les congés. Aucun changement enregistré.'});}
     finally{client.release();}
   });
   app.get('/h/:token/conges',(_req,res)=>res.set({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow'}).sendFile('conges.html',{root:'public'}));
-  return {requireStaff:requireStoreStaff};
+  return {requireStaff:requireStoreStaff, periodic:{
+    leave_manager:mail.run,leave_approval:approvalMail.run,leave_notice:employeeNotices.run,availability:availabilityMail.run
+  }};
 }

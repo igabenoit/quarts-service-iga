@@ -33,7 +33,7 @@ test('proxy keeps the credential server-side, validates source and degrades with
   const call=async(weekStart='2026-10-19')=>{const res={code:200,set(k,v){this[k]=v;return this;},status(code){this.code=code;return this;},json(body){this.body=body;}};await handler({params:{weekStart}},res);return res;};
   const good=await call();assert.equal(good.code,200);assert.equal(good['Cache-Control'],'no-store');
   assert.deepEqual(good.body,fixture());assert.equal(options.headers.Authorization,'Bearer '+token);assert.equal(options.redirect,'error');
-  assert.equal(url,'https://releve-quotidien-iga.onrender.com/api/integrations/quarts-service/initial-sales/2026-10-19');
+  assert.equal(url,'https://releve-quotidien-iga.vercel.app/api/integrations/quarts-service/initial-sales/2026-10-19');
   assert.equal((await call('2026-10-20')).code,400);assert.equal(calls,1);
   for(const result of [{ok:false},response(fixture('2026-10-26')),response({...fixture(),basis:'revised'})]){
     installSalesForecasts(app,{requireManager,token,fetchImpl:async()=>result});assert.equal((await call()).code,503);

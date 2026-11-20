@@ -1,5 +1,6 @@
+import {needsSchema} from './preview-schema.js';
 export async function installLeaveArchive(app,pool,{requireManager,sameOrigin}){
- await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
+ if (needsSchema(pool)) await pool.query('ALTER TABLE schedule_leave_requests ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ');
  app.get('/api/leave/reset-preview',requireManager,async(_req,res)=>{
  const rows=(await pool.query('SELECT id,is_test,status FROM schedule_leave_requests WHERE archived_at IS NULL ORDER BY id')).rows;
  res.set('Cache-Control','no-store').json({ids:rows.map(r=>String(r.id)),total:rows.length,real:rows.filter(r=>!r.is_test).length,tests:rows.filter(r=>r.is_test).length,allowed:rows.every(r=>r.is_test||!['pending','approved','conditional'].includes(r.status))});

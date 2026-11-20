@@ -4,7 +4,7 @@ import {saveShiftLeave} from './approved-shift-leave.js';
 
 // Call inside a transaction holding the scheduler's advisory lock (8675309).
 // Keep shift requirements and every unaffected assignment intact.
-export async function applyApprovedLeave(client, {weekStart=null, requestId=null,previousPeriods=[]}={}) {
+export async function applyApprovedLeave(client, {weekStart=null, store=null, requestId=null,previousPeriods=[]}={}) {
   if (!weekStart && !requestId) throw new Error('Une semaine ou une demande est requise.');
   const candidates=(await client.query(`SELECT s.id, s.week_start, s.day_index,
     s.start_minute, s.end_minute, s.absence, a.employee_id, r.id AS request_id, COALESCE(r.effective_periods, r.periods, '[]'::jsonb) AS periods
@@ -14,12 +14,13 @@ export async function applyApprovedLeave(client, {weekStart=null, requestId=null
       AND r.status='approved' AND r.is_test=FALSE AND r.archived_at IS NULL
       AND r.first_date<=s.week_start+6 AND r.last_date>=s.week_start
     WHERE ($1::date IS NULL OR s.week_start=$1::date)
+      ${store?'AND s.store_id=$4':''}
       AND ($2::bigint IS NULL OR EXISTS (SELECT 1 FROM schedule_leave_requests requested
         WHERE requested.id=$2 AND requested.employee_id=a.employee_id
           AND EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(requested.effective_periods,requested.periods) || $3::jsonb) p
             WHERE p->>'date'=to_char(s.week_start+s.day_index,'YYYY-MM-DD')
               AND (p->>'startMinute')::integer<s.end_minute AND (p->>'endMinute')::integer>s.start_minute)))
-    FOR UPDATE OF a`,[weekStart,requestId,JSON.stringify(previousPeriods)])).rows;
+    FOR UPDATE OF a`,[weekStart,requestId,JSON.stringify(previousPeriods),...(store?[store]:[])])).rows;
   const grouped=new Map();
   for(const row of candidates){
     const key=String(row.id);

@@ -14,6 +14,7 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
   try{
     await installServiceChat(f.app,f.pool,{employeePortal:{},managerAccess:{},sameOrigin(){}});
     await installServicePublications(f.pool);
+    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB,person_id BIGINT)');
     const week='2026-10-26';
     await f.pool.query('INSERT INTO schedule_weeks(week_start) VALUES($1)',[week]);
     await f.pool.query("INSERT INTO schedule_public_links(week_start,token,access_code_hash) VALUES($1,$2,'')",[week,'a'.repeat(43)]);
@@ -30,9 +31,9 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     }
     const jobs=async()=>Number((await f.pool.query('SELECT count(*) AS n FROM schedule_service_schedule_push_jobs')).rows[0].n);
     const publish=async()=>{const kind=await publishServiceWeek(f.pool,week);if(kind)await workers[0].enqueueSchedule(f.pool,week,kind);return kind;};
-    await f.pool.query('BEGIN');assert.equal(await publish(),'published');assert.equal(await jobs(),6);await f.pool.query('ROLLBACK');assert.equal(await jobs(),0);
-    assert.equal(await publish(),'published');assert.equal(await publish(),null);assert.equal(await jobs(),6);
-    await workers[0].drain();assert.equal(sent.length,2,'active Service employee and administrator, on this origin');assert.equal(await jobs(),3);
+    await f.pool.query('BEGIN');assert.equal(await publish(),'published');assert.equal(await jobs(),4);await f.pool.query('ROLLBACK');assert.equal(await jobs(),0);
+    assert.equal(await publish(),'published');assert.equal(await publish(),null);assert.equal(await jobs(),4);
+    await workers[0].drain();assert.equal(sent.length,2,'active Service employee and administrator, on this origin');assert.equal(await jobs(),2);
     assert.equal(sent[0].payload.kind,'schedule-published');assert.equal(sent[0].payload.week,week);assert.doesNotMatch(JSON.stringify(sent),/Employé fictif|123456/);
     await workers[1].drain();assert.equal(sent.length,4);assert.equal(await jobs(),0);
     assert.ok(await workers[0].credential('employee:'+guest.id),'guest retains chat notifications');
@@ -49,9 +50,8 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     const pass=(_q,_s,next)=>next();
     await installScheduleNotifications(f.app,f.pool,{requireManager:pass,sameOrigin:pass,push:workers[0]});
     const inventory=await f.call('get','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
-    assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:1,pending:0,recipients:[{name:'Employé fictif',kind:'employee',devices:1},{name:'Accès gestionnaire partagé',kind:'manager',devices:1}],published:true});
+    assert.equal(inventory.code,200);assert.deepEqual(inventory.body,{employees:1,managers:1,inactive:0,pending:0,recipients:[{name:'Employé fictif',kind:'employee',devices:1},{name:'Accès gestionnaire partagé',kind:'manager',devices:1}],published:true});
     // Same employee on two devices is one person; manager names are separate.
-    await f.pool.query('CREATE TABLE schedule_manager_accounts(id BIGINT PRIMARY KEY,name TEXT,version INTEGER,active BOOLEAN,departments JSONB,person_id BIGINT)');
     const service=(await f.pool.query("SELECT id FROM schedule_leave_departments WHERE code='service'")).rows[0].id;
     const managerPerson=(await f.pool.query("INSERT INTO schedule_store_people(name) VALUES('Gestionnaire exemple') RETURNING id")).rows[0].id;
     await f.pool.query("INSERT INTO schedule_manager_accounts VALUES(7,'Gestionnaire exemple',1,TRUE,$1,$2)",[JSON.stringify([Number(service)]),managerPerson]);
@@ -74,7 +74,7 @@ test('schedule alerts: publication, changes, rollback, scope, membership, retrie
     const oldKick=workers[0].kick;workers[0].kick=()=>{};
     const before=(await f.pool.query('SELECT snapshot,published_at FROM schedule_service_publications WHERE week_start=$1',[week])).rows[0];
     const resent=await f.call('post','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});
-    assert.equal(resent.code,200);assert.equal(resent.body.queued,3);
+    assert.equal(resent.code,200);assert.equal(resent.body.queued,2);
     const repeat=await f.call('post','/api/weeks/:weekStart/notifications',{params:{weekStart:week}});assert.equal(repeat.code,429);
     assert.deepEqual((await f.pool.query('SELECT snapshot,published_at FROM schedule_service_publications WHERE week_start=$1',[week])).rows[0],before);
     workers[0].kick=oldKick;

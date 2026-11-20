@@ -2,7 +2,7 @@ import {assertDepartment} from './manager-access.js';
 import {normalizeDepartmentBudget} from './public/department-budget.js';
 import {forecastWeekDates,normalizeInitialForecasts} from './public/sales-forecast.js';
 
-const SOURCE='https://releve-quotidien-iga.onrender.com';
+const SOURCE='https://releve-quotidien-iga.vercel.app';
 export function installSalesForecasts(app,{requireManager,pool,fetchImpl=fetch,token=process.env.SCHEDULE_FORECAST_TOKEN,timeoutMs=15000}){
   app.get('/api/sales-forecasts/:weekStart',requireManager,async(req,res)=>{
     res.set('Cache-Control','no-store');

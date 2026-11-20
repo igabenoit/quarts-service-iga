@@ -1,6 +1,7 @@
+import {needsSchema} from './preview-schema.js';
 import {ownsDepartment,isScoped} from './manager-access.js';
 export async function installDepartments(app,pool,{requireManager,sameOrigin}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_departments (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_departments (
     id BIGSERIAL PRIMARY KEY, code TEXT UNIQUE, name TEXT NOT NULL,
     recipient TEXT NOT NULL DEFAULT '', mail_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     active BOOLEAN NOT NULL DEFAULT TRUE

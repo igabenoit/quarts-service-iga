@@ -1,7 +1,10 @@
+import {publicOrigin} from './public-origin.js';
+import {needsSchema} from './preview-schema.js';
+import {runsInWebProcess} from './scheduled-work.js';
 import {errorCode,logEvent,mailResult} from './runtime-diagnostics.js';
 // Department recipients and copies are kept in the private database. Tests never use department recipients.
 export async function installNotifications(app,pool,{requireManager,sameOrigin}) {
-  await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_mail_settings (
+  if (needsSchema(pool)) await pool.query(`CREATE TABLE IF NOT EXISTS schedule_leave_mail_settings (
     id INTEGER PRIMARY KEY CHECK(id=1), test_recipient TEXT NOT NULL DEFAULT ''
   );
   ALTER TABLE schedule_leave_mail_settings ADD COLUMN IF NOT EXISTS copy_recipient TEXT NOT NULL DEFAULT '';
@@ -23,7 +26,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
     if(copy!==undefined&&(typeof copy!=='string'||copy.length>254||(copy.trim()&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(copy.trim()))))return res.status(400).json({error:'Adresse de copie invalide.'});
     await pool.query('UPDATE schedule_leave_mail_settings SET test_recipient=$1,copy_recipient=COALESCE($2,copy_recipient) WHERE id=1',[email,copy===undefined?null:copy.trim()]);
     res.json({ok:true,configured:configured()});
-    run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+    if (runsInWebProcess()) run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
   });
   async function queue(client,id) {
     await client.query(`INSERT INTO schedule_leave_mail (request_id) VALUES ($1) ON CONFLICT DO NOTHING`,[id]);
@@ -50,7 +53,7 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
           ...(!job.is_test&&copy&&copy.toLowerCase()!==to.toLowerCase()?{cc:[copy]}:{}),
           reply_to:job.email,
           subject:`${job.is_test?'[TEST] ':''}Demande de congé n° ${job.request_id} — ${job.department_name}`,
-          text:`${job.is_test?'DEMANDE DE TEST — aucun effet sur les horaires.\n\n':''}Département : ${job.department_name}\nEmployé : ${job.employee_name}\nCourriel : ${job.email}\nRéférence : ${job.request_id}\nRemise : ${new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(job.submitted_at))} (Québec)\n\nDATES ET HEURES\n${periods}\n\nMOTIF\n${job.reason}\n\n${job.request_status==='late'?'Demande hors délai — l’employé doit s’adresser à sa gérante.':'La demande doit être évaluée par le responsable.'}\n\nSuivi central (accès gestionnaire requis) : https://quarts-service-iga.onrender.com/conges-gestion\nLe nom et le département sont déclarés par l’employé.`};
+          text:`${job.is_test?'DEMANDE DE TEST — aucun effet sur les horaires.\n\n':''}Département : ${job.department_name}\nEmployé : ${job.employee_name}\nCourriel : ${job.email}\nRéférence : ${job.request_id}\nRemise : ${new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(job.submitted_at))} (Québec)\n\nDATES ET HEURES\n${periods}\n\nMOTIF\n${job.reason}\n\n${job.request_status==='late'?'Demande hors délai — l’employé doit s’adresser à sa gérante.':'La demande doit être évaluée par le responsable.'}\n\nSuivi central (accès gestionnaire requis) : ${publicOrigin()}/conges-gestion\nLe nom et le département sont déclarés par l’employé.`};
         const claimed=(await pool.query(`UPDATE schedule_leave_mail SET status='sending',attempts=attempts+1,
           first_attempt_at=COALESCE(first_attempt_at,clock_timestamp()),last_attempt_at=clock_timestamp(),payload=COALESCE(payload,$2::jsonb)
           WHERE request_id=$1 AND (status IN ('pending','error') OR (status='sending' AND last_attempt_at<clock_timestamp()-interval '2 minutes')) RETURNING payload`,[job.request_id,JSON.stringify(payload)])).rows[0];
@@ -64,6 +67,8 @@ export async function installNotifications(app,pool,{requireManager,sameOrigin})
       }
     }finally{running=false;}
   }
-  const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+  if (runsInWebProcess()) {
+    const timer=setInterval(()=>run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error')),60000);timer.unref();run().catch(error=>logEvent('mail_worker_failed',{component:'leave_manager',code:errorCode(error)},'error'));
+  }
   return {queue,run};
 }
