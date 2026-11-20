@@ -36,7 +36,7 @@ test('Cuisine print employee total and subtotal explicitly show PAM hours; other
 test('Cuisine editor puts PAM hours in the existing total column',()=>{
  const own=row([shift({kind:'kitchen'}),shift({post:'bbq',workDepartment:'pam'})]);
  const elements=new Map();const $=key=>{if(!elements.has(key))elements.set(key,{querySelectorAll:()=>[]});return elements.get(key);};
- const context=vm.createContext({...core,e:core.escapeHTML,$,current:{department:{key:'cuisine'},weekStart:'2026-11-23',people:[person],draft:{rows:[own]},incoming:[]},displayDraft:()=>({rows:[own]}),sharedDisplay:()=>({related:[]}),renderCopyBar(){},sharedDepartmentDay:()=>'',copiedShift:null,salesForecasts:{dayHTML:()=>''},formatCell:()=>''});
+ const context=vm.createContext({...core,e:core.escapeHTML,$,current:{department:{key:'cuisine'},weekStart:'2026-11-23',people:[person],draft:{rows:[own]},incoming:[]},displayDraft:()=>({rows:[own]}),sharedDisplay:()=>({related:[]}),renderCopyBar(){},sharedDepartmentDay:()=>'',approvedBadge:()=>'',copiedShift:null,salesForecasts:{dayHTML:()=>''},formatCell:()=>''});
  const source=readFileSync(new URL('../public/departments.js',import.meta.url),'utf8');
  vm.runInContext(source.slice(source.indexOf('function renderSchedule(){'),source.indexOf('function openCell('))+'\nrenderSchedule();',context);
  assert.match($('#scheduleGrid').innerHTML,/<td class="editor-total"><strong>8 h<\/strong><small>Comptabilisées au PAM<\/small>/);
