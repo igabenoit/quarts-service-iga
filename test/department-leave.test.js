@@ -26,7 +26,7 @@ test('congé : limites exactes, nuits, absences manuelles et heures convenues',(
   assert.deepEqual(leaveSpans([period(next,0,120)],'2030-10-20',1320,1830),[[1440,1560]]);
   assert.throws(()=>assertLeaveCell(night,[period(next,0,120)],'2030-10-20'),/congé approuvé/);
   assert.equal(cellMinutes(projectLeaveCell(night,[period(next,0,120)],'2030-10-20')),360);
-  assert.match(leaveLabel([period()],week),/journée bloquée/);
+  assert.equal(leaveLabel([period()],week),'Congé demandé');
 });
 
 test('congé : identités explicites, fiches liées et homonymes',()=>{

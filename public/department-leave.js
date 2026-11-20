@@ -12,8 +12,8 @@ export function leaveSpans(periods,date,start=0,end=1440){
 }
 export function leaveLabel(periods,date){
   const spans=leaveSpans(periods,date);
-  return !spans.length?'':spans.length===1&&spans[0][0]===0&&spans[0][1]===1440?'Congé approuvé · journée bloquée':
-    'Congé approuvé · '+spans.map(([a,b])=>timeLabel(a)+'–'+timeLabel(b)).join(', ');
+  return !spans.length?'':spans.length===1&&spans[0][0]===0&&spans[0][1]===1440?'Congé demandé':
+    'Congé demandé · '+spans.map(([a,b])=>timeLabel(a)+'–'+timeLabel(b)).join(', ');
 }
 export function assertLeaveCell(cell,periods,date,name='Cet employé'){
   if(!isTimedCell(cell))return;
