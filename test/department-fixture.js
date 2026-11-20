@@ -12,6 +12,6 @@ export async function departmentFixture({fetchImpl,photoTimeoutMs}={}){
   try{await installLeave(app,pool,{requireManager:manager,sameOrigin:origin,hasStaffAccess:()=>false});await installUndoSchema(pool);}finally{globalThis.setInterval=timer;if(oldKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=oldKey;}
   const options={requireManager:manager,sameOrigin:origin,requireStaff:staff,fetchImpl,photoTimeoutMs};
   const service=await installDepartmentSchedules(app,pool,options);
-  const call=async(method,path,req={})=>{const res={code:200,body:null,set(){return this;},status(n){this.code=n;return this;},json(body){this.body=body;return this;}};await routes.get(method+' '+path).at(-1)({body:{},params:{},query:{},headers:{},...req},res);return res;};
+  const call=async(method,path,req={})=>{const res={code:200,body:null,set(){return this;},status(n){this.code=n;return this;},json(body){this.body=body;return this;}};await routes.get(method+' '+path).at(-1)({storeId:'principal',body:{},params:{},query:{},headers:{},...req},res);return res;};
   return {db,pool,routes,app,options,service,call};
 }

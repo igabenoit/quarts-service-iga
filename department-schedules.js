@@ -255,8 +255,8 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
       WHERE a.shift_id=s.id AND a.employee_id=p.service_employee_id AND p.id=ANY($1::bigint[]) AND s.week_start+s.day_index::int >= $2::date`,[ids,date]);
     const serviceIds=new Set(group.filter(p=>ids.includes(p.id)&&p.serviceEmployeeId).map(p=>p.serviceEmployeeId));
     if(serviceIds.size){
-      const publications=(await client.query('SELECT week_start,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
-      for(const {week_start,snapshot} of publications){
+      const publications=(await client.query('SELECT week_start,store_id,snapshot FROM schedule_service_publications WHERE week_start >= $1',[monday(date)])).rows;
+      for(const {week_start,store_id,snapshot} of publications){
         const start=iso(week_start);
         const employees=snapshot.employees.filter(e=>start<date||!serviceIds.has(Number(e.id)));
         let changed=employees.length!==snapshot.employees.length;
@@ -264,7 +264,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
           if(!serviceIds.has(Number(shift.employee_id))||addDays(start,Number(shift.day_index))<date)return shift;
           changed=true;return {...shift,employee_id:null};
         });
-        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1',[start,JSON.stringify({...snapshot,employees,shifts})]);
+        if(changed)await client.query('UPDATE schedule_service_publications SET snapshot=$2 WHERE week_start=$1 AND store_id=$3',[start,JSON.stringify({...snapshot,employees,shifts}),store_id]);
       }
     }
     await finishDueDepartures(client);
