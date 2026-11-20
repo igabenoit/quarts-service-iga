@@ -90,8 +90,12 @@ test('PostgreSQL : congés bloquants, publications, copies, historique et annula
       assert.equal((await save(current.draft,5)).code,200);
       const overlapping=structuredClone(current.draft);delete overlapping.rows[0].cells[0].absence;
       assert.equal((await save(overlapping,6)).code,409);
+      current.draft.rows[0].cells[0].end=1020;
+      assert.equal((await save(current.draft,6)).code,200);
+      assert.equal(totalMinutes((await get()).draft.rows[0]),360,'editing the shift retains the approved exclusion');
       await pool.query("UPDATE schedule_leave_requests SET status='cancelled' WHERE id=$1",[request]);
-      current=await get();assert.equal(totalMinutes(current.draft.rows[0]),420);assert.equal(current.draft.rows[0].cells[0].absence,undefined);
+      current=await get();assert.equal(totalMinutes(current.draft.rows[0]),480);assert.equal(current.draft.rows[0].cells[0].absence,undefined);
+      assert.equal(current.draft.rows[0].cells[0].end,1020,'cancellation preserves the manager’s new end time');
       assert.equal(totalMinutes((await pub()).schedule.rows[0]),420);
     });
   }finally{await f.db.close();}

@@ -53,6 +53,14 @@ export function preserveLeaveBases(draft,stored,leaves,weekStart){
   return {...draft,rows:draft.rows.map(row=>({...row,cells:row.cells.map((cell,day)=>{
     const base=stored?.rows.find(r=>r.personId===row.personId)?.cells[day];if(!base)return cell;
     const projected=projectLeaveCell(base,leaves[row.personId],addDays(weekStart,day));
-    return JSON.stringify(normalizeCell(cell))===JSON.stringify(normalizeCell(projected))?base:cell;
+    if(JSON.stringify(normalizeCell(cell))===JSON.stringify(normalizeCell(projected)))return base;
+    // Editing the end time, assignment or note must not turn an unchanged
+    // automatic absence into a permanent manual absence after cancellation.
+    if(isTimedCell(cell)&&projected.absence&&JSON.stringify(cell.absence)===JSON.stringify(projected.absence)){
+      const edited={...cell};delete edited.absence;
+      if(base.absence)edited.absence=base.absence;
+      return normalizeCell(edited);
+    }
+    return cell;
   })}))};
 }
