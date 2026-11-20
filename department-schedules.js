@@ -3,7 +3,8 @@ import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
 import {installCuisineMigration,membershipsAt} from './cuisine-migration.js';
 import {cuisineDraft,CUISINE_START} from './public/cuisine-routing.js';
-import {workingIntervals} from './public/shift-absence.js';
+import {approvedDepartmentLeaves} from './department-leave.js';
+import {assertDepartmentLeave,projectDepartmentLeave,preserveLeaveBases} from './public/department-leave.js';
 import {installDepartmentHoursSummary} from './department-hours-summary.js';
 import {prepareSharedDraft} from './public/department-buffet.js';
 import {installDepartmentMail} from './department-mail.js';
@@ -27,6 +28,7 @@ const iso=v=>v instanceof Date?v.toISOString().slice(0,10):v?.slice(0,10)||'';
 const integer=v=>Number.isSafeInteger(Number(v))&&Number(v)>0?Number(v):fail('Identifiant invalide.');
 const week=v=>isDate(v)&&monday(v)===v?v:fail('Choisissez le lundi de la semaine.');
 const endpoint=fn=>async(req,res)=>{try{await fn(req,res);}catch(error){res.status(error.status||400).json({error:error.status||!error.code?error.message:'Cette opération n’a pas pu être enregistrée.'});}};
+const storedWeek=Symbol('storedWeek');
 
 export async function installDepartmentSchedules(app,pool,{requireManager,sameOrigin,requireStaff,fetchImpl=fetch,photoTimeoutMs=PHOTO_ANALYSIS_TIMEOUT_MS+5000}){
   if (needsSchema(pool)) await pool.query(`ALTER TABLE schedule_leave_departments ADD COLUMN IF NOT EXISTS schedule_key TEXT UNIQUE;
@@ -115,12 +117,18 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   const emptyDraft=people=>({manager:'',notes:'',rows:people.filter(p=>p.active).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
   const transferWeeks=async(start,client=pool)=>{
     const weeks=(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
+    const people=await directory(client,start),leaves=await approvedDepartmentLeaves(client,start,people);
+    for(const row of weeks){
+      Object.defineProperty(row,storedWeek,{value:{draft:row.draft,published:row.published}});
+      row.draft=projectDepartmentLeave(row.draft,leaves,start);row.published=projectDepartmentLeave(row.published,leaves,start);
+    }
     const service=(await listDepartments(client)).find(d=>d.key==='service');
     if(service){
       const shifts=(await client.query('SELECT s.*,a.employee_id FROM schedule_shifts s JOIN schedule_assignments a ON a.shift_id=s.id WHERE s.week_start=$1',[start])).rows;
-      const publication=await readServicePublication(client,start),people=await directory(client,start);
+      const publication=await readServicePublication(client,start);
       const projection=serviceWeekProjection(shifts,people,service.id);
       if(publication){projection.published=serviceWeekProjection(publication.snapshot.shifts,people,service.id).draft;projection.published_at=publication.published_at;}
+      projection.draft=projectDepartmentLeave(projection.draft,leaves,start);projection.published=projectDepartmentLeave(projection.published,leaves,start);
       weeks.push(projection);
     }
     return weeks;
@@ -130,7 +138,10 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const incoming=incomingFor(weeks,d.key),guestIds=new Set(incoming.map(i=>i.personId)),people=[...members];
     if(guestIds.size)for(const p of await directory(client,start))if(guestIds.has(p.id)&&!people.some(m=>m.id===p.id))people.push({...p,visiting:true});
     const related=relatedFor(weeks,d.key,await directory(client,start),people);
-    return {department:d,weekStart:start,people,incoming,related,draft:row?.draft||applyDepartures(emptyDraft(members),start,members),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
+    const approvedLeaves=await approvedDepartmentLeaves(client,start,await directory(client,start));
+    const stored=row?.[storedWeek]||{draft:applyDepartures(emptyDraft(members),start,members),published:null};
+    const current={department:d,weekStart:start,people,incoming,related,approvedLeaves:Object.fromEntries(people.filter(p=>approvedLeaves[p.id]).map(p=>[p.id,approvedLeaves[p.id]])),draft:row?.draft||projectDepartmentLeave(stored.draft,approvedLeaves,start),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
+    Object.defineProperty(current,storedWeek,{value:stored});return current;
   }
   async function transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(8675309)');const result=await fn(client);await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
   async function finishDueDepartures(client){
@@ -143,14 +154,24 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   async function saveWeek(client,current,draft,action,published=current.published){
     const departures=await directory(client,current.weekStart);
+    const leaves=await approvedDepartmentLeaves(client,current.weekStart,departures),stored=current[storedWeek];
+    // Copy/restore are trusted saved plans: apply the target week's leave. All
+    // user-entered changes must already respect the freshly approved periods.
+    if(!['copy','restore'].includes(action)){
+      assertDepartmentLeave(draft,leaves,current.weekStart,departures);
+      draft=preserveLeaveBases(draft,stored.draft,leaves,current.weekStart);
+    }
+    published=action==='publish'?publicSnapshot(draft,current.people,current.department.id,current.department.key):action==='unpublish'?null:stored.published;
     draft=applyDepartures(draft,current.weekStart,departures);published=applyDepartures(published,current.weekStart,departures);
     draft=cuisineDraft(draft,current.department.key,current.weekStart);
     if(action==='publish')published=cuisineDraft(published,current.department.key,current.weekStart);
     for(const row of draft.rows)for(const cell of row.cells)validateAssignment(cell,current.department.key);
-    const weeks=await transferWeeks(current.weekStart,client),changed={department_id:current.department.id,key:current.department.key,draft,published};
+    const weeks=await transferWeeks(current.weekStart,client),changed={department_id:current.department.id,key:current.department.key,draft:projectDepartmentLeave(draft,leaves,current.weekStart),published:projectDepartmentLeave(published,leaves,current.weekStart)};
+    assertDepartmentLeave(changed.draft,leaves,current.weekStart,departures);
+    assertDepartmentLeave(changed.published,leaves,current.weekStart,departures);
     assertTransferSlots([...weeks.filter(w=>Number(w.department_id)!==current.department.id),changed]);
     const revision=current.revision+1;
-    if(current.revision)await client.query('INSERT INTO schedule_department_history(department_id,week_start,revision,draft,published,action) VALUES($1,$2,$3,$4,$5,$6)',[current.department.id,current.weekStart,current.revision,JSON.stringify(current.draft),JSON.stringify(current.published),action]);
+    if(current.revision)await client.query('INSERT INTO schedule_department_history(department_id,week_start,revision,draft,published,action) VALUES($1,$2,$3,$4,$5,$6)',[current.department.id,current.weekStart,current.revision,JSON.stringify(stored.draft),JSON.stringify(stored.published),action]);
     await client.query(`INSERT INTO schedule_department_weeks(department_id,week_start,draft,revision,published,published_at) VALUES($1,$2,$3,$4,$5,$6)
       ON CONFLICT(department_id,week_start) DO UPDATE SET draft=EXCLUDED.draft,revision=EXCLUDED.revision,published=EXCLUDED.published,published_at=EXCLUDED.published_at,updated_at=clock_timestamp()`,[current.department.id,current.weekStart,JSON.stringify(draft),revision,published?JSON.stringify(published):null,action==='publish'?new Date():action==='unpublish'?null:current.publishedAt]);
     return {revision};
@@ -165,17 +186,12 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const previous=addDays(current.weekStart,-7),next=addDays(current.weekStart,7);
     const others=(await client.query('SELECT d.name,d.schedule_key AS key,w.week_start,w.draft,w.published FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE week_start BETWEEN $1 AND $2 AND (week_start<>$3 OR department_id<>$4)',[previous,next,current.weekStart,current.department.id])).rows;
     warnings.push(...crossDepartmentWarnings(current,display,others,await directory(client,current.weekStart)));
-    const relevantKeys=[...new Set([current.department.key,...display.rows.flatMap(r=>r.cells.flatMap(c=>[c.workDepartment,c.sourceDepartment].filter(Boolean)))])];
-    const leaves=(await client.query("SELECT l.employee_name,l.periods,l.effective_periods,d.schedule_key AS key FROM schedule_leave_requests l JOIN schedule_leave_departments d ON d.id=l.department_id WHERE d.schedule_key=ANY($1::text[]) AND l.status='approved' AND l.is_test=FALSE AND l.archived_at IS NULL AND l.first_date<=$3 AND l.last_date>=$2",[relevantKeys,current.weekStart,next])).rows;
     const assignments=(await client.query('SELECT a.employee_id,s.week_start,s.day_index,s.start_minute,s.end_minute FROM schedule_assignments a JOIN schedule_shifts s ON s.id=a.shift_id WHERE s.week_start BETWEEN $1 AND $2',[previous,next])).rows;
     for(const row of display.rows){
       const p=current.people.find(p=>p.id===row.personId);if(!p)continue;
       for(let day=0;day<7;day++){
         const c=row.cells[day];if(!isTimedCell(c))continue;
         const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
-        for(const leave of leaves.filter(l=>nameKey(l.employee_name)===nameKey(p.name)&&[current.department.key,c.workDepartment,c.sourceDepartment].includes(l.key)))for(const period of leave.effective_periods||leave.periods){
-          if(workingIntervals(c.start,c.end,c.absence).some(([a,b])=>overlaps(minute(date,a),minute(date,b),minute(period.date,period.startMinute),minute(period.date,period.endMinute))))warnings.push(p.name+' : congé approuvé à vérifier le '+period.date+'.');
-        }
         if(p.serviceEmployeeId&&assignments.some(a=>Number(a.employee_id)===p.serviceEmployeeId&&overlaps(start,end,minute(a.week_start,a.day_index*1440+a.start_minute),minute(a.week_start,a.day_index*1440+a.end_minute))))warnings.push(p.name+' : chevauchement avec un quart du Service, le '+date+'.');
       }
     }
@@ -354,6 +370,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const id=integer(req.params.id),targetWeek=week(req.params.week),sourceWeek=week(req.body.sourceWeek);
     if(sourceWeek===targetWeek)fail('Choisissez une semaine différente de la semaine à copier.');
     const source=await getWeek(id,sourceWeek,client);
+    source.draft=source[storedWeek].draft;
     if(!source.revision)fail('Enregistrez la semaine à copier avant de continuer.');
     if(!Number.isInteger(req.body.sourceRevision)||source.revision!==req.body.sourceRevision)fail('La semaine à copier a changé. Rechargez-la avant de recommencer.',409);
     const target=await getWeek(id,targetWeek,client);checkRevision(req.body,target);

@@ -87,7 +87,8 @@ test('API : sauvegarde, publication, copie, conflits du lendemain et de la semai
     await pool.query("INSERT INTO schedule_leave_requests(submission_key,employee_name,email,reason,periods,first_date,last_date,status,department_id,department_name) VALUES('00000000-0000-4000-8000-000000000999','Camille Nuit','test@example.com','Test',$1,'2030-10-15','2030-10-15','approved',$2,'Épicerie')",[JSON.stringify([{date:'2030-10-15',startMinute:0,endMinute:400}]),dept.id]);
     saved=(await call('get',route,{params})).body;
     assert.ok(saved.warnings.some(w=>w.includes('chevauchement avec Viande')));
-    assert.ok(saved.warnings.some(w=>w.includes('congé approuvé')&&w.includes('2030-10-15')));
+    assert.deepEqual(saved.draft.rows[0].cells[0].absence,{start:1440,end:1830,includesMeal:false});
+    assert.equal(cellMinutes(saved.draft.rows[0].cells[0]),90,'leave after midnight is excluded from the night shift');
     // Sunday is stored on the starting week; Monday conflicts are checked in both directions.
     draft.rows[0].cells=cells(night(),6);
     assert.equal((await call('put',route,{params,body:{revision:2,draft}})).code,200);

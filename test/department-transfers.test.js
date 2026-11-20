@@ -42,8 +42,11 @@ test('PostgreSQL : quarts reçus liés à la source, copies, conflits, publicati
       assert.equal((await pub(meat)).code,404);assert.equal((await pub(fish)).code,404);
       assert.deepEqual((await call('get','/api/departments/meta')).body.people[0].departments,[fish.id]);
       await f.pool.query("INSERT INTO schedule_leave_requests(submission_key,employee_name,email,reason,periods,first_date,last_date,status,department_id,department_name) VALUES('00000000-0000-4000-8000-000000000601','Camille Transfert','private@example.com','Privé',$1,$2,$2,'approved',$3,'Viande')",[JSON.stringify([{date:week,startMinute:0,endMinute:1440}]),week,meat.id]);
-      assert.ok((await get(fish)).warnings.some(w=>w.includes('congé approuvé')));
-      assert.equal((await call('post',route+'/publish',{params:{id:fish.id,week},body:{revision:1,verified:true}})).code,400);
+      await f.pool.query("UPDATE schedule_leave_requests SET person_id=$1 WHERE submission_key='00000000-0000-4000-8000-000000000601'",[id]);
+      assert.equal(totalMinutes((await get(fish)).draft.rows[0]),0);
+      assert.equal((await get(meat)).incoming.length,0,'approved leave also removes the receiving projection');
+      assert.equal((await save(fish,draft,1)).code,409,'acknowledging warnings cannot permit an overlapping shift');
+      await f.pool.query("UPDATE schedule_leave_requests SET status='cancelled' WHERE submission_key='00000000-0000-4000-8000-000000000601'");
       assert.equal((await publish(fish,1)).code,200);
       const published=(await pub(meat)).body;
       assert.equal(totalMinutes(published.schedule.rows[0]),450);assert.equal(published.schedule.rows[0].cells[0].sourceDepartment,'poissonnerie');
