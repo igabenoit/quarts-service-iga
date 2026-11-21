@@ -24,7 +24,8 @@ export const availabilityCode=v=>{const raw=String(v??'').trim().toUpperCase();r
 export const availabilityLabel=v=>availabilityCode(v).replace(/\b(\d{2}):(\d{2})/g,(_m,h,m)=>Number(h)+(m==='00'?'':'h'+m)).replaceAll('-','–');
 export const hoursLabel=v=>new Intl.NumberFormat('fr-CA',{maximumFractionDigits:2}).format(v/60);
 export function tenure(date,asOf=today()){
-  if(!isDate(date)||!isDate(asOf)||date>asOf)return 'À compléter';
+  if(!isDate(date)||!isDate(asOf))return 'À compléter';
+  if(date>asOf)return 'À venir';
   const [y,m,d]=date.split('-').map(Number),[ay,am,ad]=asOf.split('-').map(Number);
   const months=(ay-y)*12+am-m-(ad<d?1:0),years=Math.floor(months/12),rest=months%12;
   return [years?`${years} an${years>1?'s':''}`:'',rest?`${rest} mois`:''].filter(Boolean).join(' ')||'Moins d’un mois';
@@ -83,6 +84,15 @@ export const BAKERY_POSTS=Object.freeze({bakery_oven:'Four',bakery_cakes:'Gâtea
 export const COMMON_POSTS=Object.freeze({night:'Nuit'});
 export const assignmentPost=c=>c.post||(c.kind==='kitchen'&&/\bsalades?\b/i.test(c.note||'')?'kitchen_salads':'');
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
+export const beforeStartDate=(person,date)=>isDate(person?.seniorityDate)&&date<person.seniorityDate;
+export function assertStartDate(cell,person,date){
+  if(isTimedCell(cell)&&beforeStartDate(person,date))throw Object.assign(Error(`${person.name} : l’entrée est prévue le ${dateLabel(person.seniorityDate)}. Aucun quart ne peut commencer le ${dateLabel(date)}, avant cette date.`),{status:409});
+}
+export function assertEmploymentStart(draft,weekStart,people){
+  for(const row of draft?.rows||[]){const person=people.find(p=>p.id===Number(row.personId));
+    row.cells.forEach((cell,day)=>assertStartDate(cell,person,addDays(weekStart,day)));
+  }
+}
 export const isNightShift=(start,end,post)=>post==='night'||Number.isFinite(start)&&Number.isFinite(end)&&(end>1440||end<start);
 export function automaticBreakMinutes(start,end,post){
   if(!Number.isFinite(start)||!Number.isFinite(end))return 0;
@@ -228,7 +238,7 @@ export function publicSnapshot(draft,people,departmentId,departmentKey){
 }
 export function sheetHTML({department,weekStart,people,draft,blank=false,related=[]}){
   const e=escapeHTML,style=DEPARTMENT_STYLES.find(d=>d.key===department.key)||DEPARTMENT_STYLES[1];
-  let rows=blank?people.filter(p=>p.active!==false).map(person=>({person,cells:Array.from({length:7},blankCell)})):draft.rows.map(r=>({...r,person:people.find(p=>p.id===r.personId)})).filter(r=>r.person);
+  let rows=blank?people.filter(p=>p.active!==false&&!beforeStartDate(p,addDays(weekStart,6))).map(person=>({person,cells:Array.from({length:7},blankCell)})):draft.rows.map(r=>({...r,person:people.find(p=>p.id===r.personId)})).filter(r=>r.person);
   if(!blank)for(const item of related){
     if(!rows.some(r=>r.personId===item.personId)){const person=people.find(p=>p.id===item.personId);if(person)rows.push({personId:person.id,person,cells:Array.from({length:7},blankCell)});}
   }

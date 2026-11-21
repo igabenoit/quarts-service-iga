@@ -17,7 +17,7 @@ import {employeeAvailability} from './availability-rules.js';
 import {serviceWeekProjection,departmentPortionsForService} from './public/shared-service.js';
 import {installServicePublications,readServicePublication} from './service-publication.js';
 import {normalizeEmail,loadContactDirectory} from './employee-contacts.js';
-import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment} from './public/departments-core.js';
+import {comparePeople,DEPARTMENT_STYLES,nameKey,isDate,monday,today,addDays,normalizeAvailability,normalizeDraft,blankCell,draftWarnings,publicSnapshot,totalMinutes,isTimedCell,mergeIncoming,validateAssignment,beforeStartDate,assertEmploymentStart} from './public/departments-core.js';
 import {incomingFor,assertTransferSlots,relatedFor,crossDepartmentWarnings} from './department-transfers.js';
 import {validatePhoto,transcribePhoto,applyPhotoRules,PHOTO_ANALYSIS_TIMEOUT_MS} from './department-photo.js';
 import {installPhotoUploads} from './department-photo-uploads.js';
@@ -114,7 +114,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     return people;
   }
   const peopleFor=async(id,client=pool,weekStart)=>(await directory(client,weekStart)).filter(p=>p.departments.includes(Number(id))).sort((a,b)=>comparePeople(a,b,id));
-  const emptyDraft=people=>({manager:'',notes:'',rows:people.filter(p=>p.active).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
+  const emptyDraft=(people,start)=>({manager:'',notes:'',rows:people.filter(p=>p.active&&!beforeStartDate(p,addDays(start,6))).map(p=>({personId:p.id,cells:Array.from({length:7},blankCell)}))});
   const transferWeeks=async(start,client=pool)=>{
     const weeks=(await client.query('SELECT w.*,d.schedule_key AS key,d.name FROM schedule_department_weeks w JOIN schedule_leave_departments d ON d.id=w.department_id WHERE w.week_start=$1',[start])).rows;
     const people=await directory(client,start),leaves=await approvedDepartmentLeaves(client,start,people);
@@ -139,7 +139,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     if(guestIds.size)for(const p of await directory(client,start))if(guestIds.has(p.id)&&!people.some(m=>m.id===p.id))people.push({...p,visiting:true});
     const related=relatedFor(weeks,d.key,await directory(client,start),people);
     const approvedLeaves=await approvedDepartmentLeaves(client,start,await directory(client,start));
-    const stored=row?.[storedWeek]||{draft:applyDepartures(emptyDraft(members),start,members),published:null};
+    const stored=row?.[storedWeek]||{draft:applyDepartures(emptyDraft(members,start),start,members),published:null};
     const current={department:d,weekStart:start,people,incoming,related,approvedLeaves:Object.fromEntries(people.filter(p=>approvedLeaves[p.id]).map(p=>[p.id,approvedLeaves[p.id]])),draft:row?.draft||projectDepartmentLeave(stored.draft,approvedLeaves,start),revision:row?.revision||0,publishedAt:row?.published_at||null,published:row?.published||null};
     Object.defineProperty(current,storedWeek,{value:stored});return current;
   }
@@ -154,6 +154,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   }
   async function saveWeek(client,current,draft,action,published=current.published){
     const departures=await directory(client,current.weekStart);
+    if(action!=='unpublish')assertEmploymentStart(action==='publish'?mergeIncoming(draft,current.incoming):draft,current.weekStart,departures);
     const leaves=await approvedDepartmentLeaves(client,current.weekStart,departures),stored=current[storedWeek];
     // Copy/restore are trusted saved plans: apply the target week's leave. All
     // user-entered changes must already respect the freshly approved periods.
@@ -319,8 +320,17 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const specification=(specValue||'').trim().replace(/\s+/g,' ');
     if(specification.length>80)fail('La spécification doit contenir au plus 80 caractères.');
     const seniority=body.seniorityDate||'',birthday=body.birthday||'';
-    if([seniority,birthday].some(v=>v&&(!isDate(v)||v>today()||v<'1900-01-01')))fail('Indiquez des dates réelles, non futures.');
+    if(seniority&&(!isDate(seniority)||seniority<'1900-01-01'))fail('Indiquez une date d’ancienneté ou d’entrée valide.');
+    if(birthday&&(!isDate(birthday)||birthday>today()||birthday<'1900-01-01'))fail('Indiquez une date de naissance réelle, non future.');
     if(seniority&&!previous?.serviceEmployeeId&&(!source||body.seniorityVerified!==true))fail('Confirmez la date d’ancienneté et indiquez sa source.');
+    if(previous&&!previous.serviceEmployeeId&&seniority&&seniority!==previous.seniorityDate){
+      // A date correction must not make an existing assignment precede hiring.
+      // Check both drafts and publications under the same scheduling lock.
+      const weeks=(await client.query(`SELECT week_start,draft,published FROM schedule_department_weeks
+        WHERE week_start<$1 AND ((draft->'rows') @> $2::jsonb OR (published->'rows') @> $2::jsonb)`,[seniority,JSON.stringify([{personId:id}])])).rows;
+      for(const saved of weeks)for(const schedule of [saved.draft,saved.published])
+        assertEmploymentStart(schedule,iso(saved.week_start),[{...previous,seniorityDate:seniority}]);
+    }
     if(!['regular','part_time'].includes(body.group)||typeof body.active!=='boolean')fail('Statut d’emploi invalide.');
     const departments=await listDepartments(client),ids=Array.isArray(body.departments)?[...new Set(body.departments.map(Number))]:[];
     if(!ids.length||ids.some(id=>!departments.some(d=>d.id===id)))fail('Choisissez au moins un département.');
