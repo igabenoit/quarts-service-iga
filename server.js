@@ -718,11 +718,12 @@ app.get("/api/weeks/:weekStart", requireManager, async (request, response) => {
     const timeOff=(await client.query('SELECT employee_id,day_index FROM schedule_time_off WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows.map(r=>({employeeId:Number(r.employee_id),dayIndex:Number(r.day_index)}));
     const dayExceptions=(await client.query('SELECT employee_id FROM schedule_day_exceptions WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows.map(r=>Number(r.employee_id));
     const approvedLeaves=await approvedLeave(client,weekStart,request.storeId),relatedDepartments=await departmentService.serviceRelated(weekStart,client);
+    const departmentSupport=request.storeId==='principal'?await departmentService.serviceSupport(weekStart,client):[];
     const relatedForStore=relatedDepartments.filter(p=>employees.some(e=>e.id===Number(p.employeeId)));
     const link=(await client.query('SELECT token FROM schedule_public_links WHERE week_start=$1 AND store_id=$2',[weekStart,request.storeId])).rows[0];
     const revision=await serviceRevision(client,weekStart,request.storeId);
     await client.query('COMMIT');
-    response.set({'Cache-Control':'no-store','X-Service-Revision':revision}).json({stores:request.serviceStores,week:mapWeek(week),shifts,employees,assignments,timeOff,dayExceptions,approvedLeaves,relatedDepartments:relatedForStore,sharePath:link?'/h/'+link.token:null,revision});
+    response.set({'Cache-Control':'no-store','X-Service-Revision':revision}).json({stores:request.serviceStores,week:mapWeek(week),shifts,employees,assignments,timeOff,dayExceptions,approvedLeaves,relatedDepartments:relatedForStore,departmentSupport,sharePath:link?'/h/'+link.token:null,revision});
   }catch(error){await client.query('ROLLBACK').catch(()=>{});logEvent('week_read_failed',{code:errorCode(error)},'error');response.status(500).json({error:'Impossible de charger la semaine. Réessayez.'});}
   finally{client.release();}
 });

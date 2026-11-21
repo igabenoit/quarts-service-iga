@@ -1,3 +1,4 @@
+import {departmentServiceSupport} from './public/department-service-support.js';
 import {needsSchema} from './preview-schema.js';
 import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
@@ -526,6 +527,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
   installStorePortal(app,pool,{requireManager,directory,listDepartments,readPublishedWeek});
   const familyPortal=await installFamilyPortal(app,pool,{requireManager,sameOrigin,directory,readPublishedWeek});
   const serviceRelated=async(start,client=pool)=>departmentPortionsForService(await transferWeeks(start,client),await directory(client,start));
-  return {finishDueDepartures:()=>transaction(finishDueDepartures),directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
+  const serviceSupport=async(start,client=pool)=>departmentServiceSupport(await transferWeeks(start,client),await directory(client,start));
+  return {serviceSupport,finishDueDepartures:()=>transaction(finishDueDepartures),directory,getWeek,warningsFor,employeePortal,familyPortal,serviceRelated};
 }
 

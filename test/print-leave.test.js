@@ -1,3 +1,4 @@
+import {supportPrintHTML,supportBoardHTML} from '../public/department-service-support.js';
 import {serviceDayPortions} from '../public/shared-service.js';
 import {shiftWithApprovedLeave} from '../public/approved-shift-leave.js';
 import {absenceLabel,workingIntervals} from '../public/shift-absence.js';
@@ -10,7 +11,7 @@ import vm from 'node:vm';
 const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'');
 function render({periods=[],manual=false,shift=false}={}) {
   const sheet={innerHTML:''};
-  const context=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:()=>sheet}});
+  const context=vm.createContext({supportPrintHTML,supportBoardHTML,serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:()=>sheet}});
   vm.runInContext(app.slice(0,app.indexOf('function render(){')),context);
   vm.runInContext(app.match(/^function approvedForDay[^\n]+/m)[0],context);
   context.fixture={periods,manual,shift};

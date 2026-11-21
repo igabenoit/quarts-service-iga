@@ -82,6 +82,7 @@ export const PAM_POSTS=Object.freeze({sandwiches:'Sandwichs',bbq:'BBQ',rs_ss:'Co
 export const KITCHEN_POSTS=Object.freeze({kitchen_salads:'Cuisine Salades'});
 export const BAKERY_POSTS=Object.freeze({bakery_oven:'Four',bakery_cakes:'Gâteaux',bakery_production:'Production',bakery_floor:'Plancher'});
 export const COMMON_POSTS=Object.freeze({night:'Nuit'});
+export const SERVICE_ASSIGNMENTS=Object.freeze({service:'Service',delivery:'Livraison'});
 export const assignmentPost=c=>c.post||(c.kind==='kitchen'&&/\bsalades?\b/i.test(c.note||'')?'kitchen_salads':'');
 export const isTimedCell=c=>['shift','training','buffet','kitchen'].includes(c?.kind);
 export const beforeStartDate=(person,date)=>isDate(person?.seniorityDate)&&date<person.seniorityDate;
@@ -116,6 +117,11 @@ export function cellTone(c){
 }
 export function normalizeCell(value){
   const c=value||{},kind=String(c.kind||'blank');
+  if(c.serviceAssignment!==undefined){
+    if(!Object.hasOwn(SERVICE_ASSIGNMENTS,c.serviceAssignment)||kind!=='shift'||c.post||c.workDepartment||c.trainingMinutes||c.trainingMention)throw Error('Choisissez Service ou Livraison pour un quart sans autre affectation.');
+    const {serviceAssignment,...rest}=c;
+    return {...normalizeCell({...rest,mentionHours:'separate',note:SERVICE_ASSIGNMENTS[serviceAssignment]}),serviceAssignment};
+  }
   if(!['blank','shift','training','buffet','kitchen','off','vacation','mobile','requested','sick','note','review'].includes(kind))throw Error('Type de case invalide.');
   const note=String(c.note||'').trim();if(note.length>100)throw Error('Le texte d’une case est limité à 100 caractères.');
   if(c.mentionHours!==undefined&&(kind!=='shift'||!['regular','separate'].includes(c.mentionHours)||!note||c.post))throw Error('Choisissez un total pour les heures et inscrivez le texte de la mention.');

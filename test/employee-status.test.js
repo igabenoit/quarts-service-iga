@@ -1,3 +1,4 @@
+import {supportPrintHTML,supportBoardHTML} from '../public/department-service-support.js';
 import {serviceDayPortions} from '../public/shared-service.js';
 import {shiftWithApprovedLeave} from '../public/approved-shift-leave.js';
 import {absenceLabel,workingIntervals} from '../public/shift-absence.js';
@@ -10,7 +11,7 @@ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').re
 
 test('gérante avant superviseurs, avec des rangs séparés par fonction dans la liste',()=>{
   const list={innerHTML:''};
-  const context=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:()=>list,querySelectorAll:()=>[]}});
+  const context=vm.createContext({supportPrintHTML,supportBoardHTML,serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:()=>list,querySelectorAll:()=>[]}});
   vm.runInContext(source.slice(0,source.indexOf('function render(){')),context);
   vm.runInContext(source.slice(source.indexOf('function renderEmployees(){'),source.indexOf('async function loadEmployees()')),context);
   vm.runInContext(`state.employees=[
@@ -25,7 +26,7 @@ test('gérante avant superviseurs, avec des rangs séparés par fonction dans la
 });
 test('inactif visible, départ retiré de la liste, anciens horaires conservés',()=>{
   const elements=new Map();
-  const context=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:key=>{if(!elements.has(key))elements.set(key,{innerHTML:''});return elements.get(key);},querySelectorAll:()=>[]}});
+  const context=vm.createContext({supportPrintHTML,supportBoardHTML,serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming,document:{querySelector:key=>{if(!elements.has(key))elements.set(key,{innerHTML:''});return elements.get(key);},querySelectorAll:()=>[]}});
   vm.runInContext(source.slice(0,source.indexOf('function render(){')),context);
   vm.runInContext(source.slice(source.indexOf('function renderEmployees(){'),source.indexOf('async function loadEmployees()')),context);
   vm.runInContext(source.match(/^function approvedForDay[^\n]+/m)[0],context);
