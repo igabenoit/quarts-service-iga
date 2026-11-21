@@ -1,3 +1,4 @@
+import {cellParts} from './departments-core.js';
 import {prepareSharedDraft} from './department-buffet.js';
 import {escapeHTML as e,DAY_NAMES,dateLabel,addDays,timeLabel,hoursLabel,cellMinutes,cellBreakMinutes,isTimedCell,isOutgoing,cellLabel,cellDetail,departmentLabel,mergeIncoming,orderDraft,hourCategory,grandMinutes} from './departments-core.js';
 
@@ -12,7 +13,7 @@ export function controlReport(data){
     const person=data.people.find(p=>p.id===row.personId);
     if(!person)throw Error('Une fiche employé est manquante. Actualisez la liste avant de préparer le contrôle.');
     const days=row.cells.map((cell,day)=>{
-      const entries=[cell,...prepared.related.filter(item=>item.personId===row.personId&&item.day===day&&row.accountingCells.includes(item.cell)).map(item=>item.cell)];
+      const entries=[...cellParts(cell),...prepared.related.filter(item=>item.personId===row.personId&&item.day===day&&row.accountingCells.includes(item.cell)).map(item=>item.cell)];
       const totals=zero();for(const c of entries)if(isTimedCell(c)){const paid=charged(c),partial=Math.min(c.departmentTrainingMinutes??c.trainingMinutes??0,paid);totals[hourCategory(c)]+=paid-partial;totals.training+=partial;}
       return {entries,totals,total:Object.values(totals).reduce((a,b)=>a+b,0)};
     });

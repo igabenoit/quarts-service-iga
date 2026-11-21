@@ -1,0 +1,60 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {normalizeCell,blankCell,totalMinutes,mentionMinutes,grandMinutes,dayMinutes,sheetHTML,draftWarnings} from '../public/departments-core.js';
+import {departmentServiceSupport} from '../public/department-service-support.js';
+import {plannedSummary} from '../public/department-summary.js';
+import {controlReport} from '../public/department-control.js';
+import {personalDays} from '../public/portal-weeks.js';
+import {assertLeaveCell,projectLeaveCell,preserveLeaveBases} from '../public/department-leave.js';
+import {crossDepartmentWarnings} from '../department-transfers.js';
+import {departmentFixture} from './department-fixture.js';
+const week='2026-11-23';
+const split=()=>normalizeCell({kind:'shift',start:480,end:720,breakMinutes:0,servicePortion:{kind:'shift',serviceAssignment:'delivery',start:780,end:1020,breakMinutes:0}});
+const draft=cell=>({manager:'',notes:'',rows:[{personId:1,cells:[cell,...Array.from({length:6},blankCell)]}]});
+test('same day: department morning and delivery afternoon count once in all views',()=>{
+  const cell=split(),row=draft(cell).rows[0],person={id:1,name:'Test',active:true,group:'regular',availability:{0:'08:00-12:00, 13:00-17:00'}};
+  assert.deepEqual(normalizeCell(cell),cell);
+  assert.equal(totalMinutes(row),240);assert.equal(mentionMinutes(row),240);assert.equal(grandMinutes(row),480);assert.equal(dayMinutes(cell),480);
+  const data={department:{id:1,key:'epicerie',name:'Épicerie'},weekStart:week,people:[person],draft:draft(cell),revision:1};
+  assert.equal(plannedSummary(data).total,480);assert.equal(controlReport(data).days[0].shift,240);assert.equal(controlReport(data).days[0].mention,240);
+  const html=sheetHTML(data);for(const time of ['08:00','12:00','13:00','17:00'])assert.match(html,new RegExp(time));
+  assert.match(html,/Livraison/);assert.match(html,/Quart complet · 8 h/);
+  const support=departmentServiceSupport([{key:'epicerie',department_id:1,draft:data.draft}],[person]);
+  assert.equal(support.length,1);assert.equal(support[0].startMinute,780);assert.equal(support[0].paidMinutes,240);
+  const days=personalDays(week,[{kind:'department',data:{...data,schedule:data.draft}}]);assert.equal(days[0].entries.length,2);assert.equal(days[0].entries.reduce((n,c)=>n+c.minutes,0),480);
+  assert.deepEqual(draftWarnings(data.draft,[person]),[]);
+  assert.ok(draftWarnings(data.draft,[{...person,availability:{0:'08:00-12:00'}}]).some(w=>w.includes('disponibilité')));
+  assert.throws(()=>normalizeCell({...cell,servicePortion:{...cell.servicePortion,start:700}}),/chevaucher/);
+  assert.throws(()=>normalizeCell({...cell,servicePortion:{...cell.servicePortion,serviceAssignment:'bad'}}));
+  const withBreak=normalizeCell({...cell,servicePortion:{...cell.servicePortion,breakMinutes:30}});assert.equal(dayMinutes(withBreak),450);
+});
+test('afternoon leave and cross-department overlaps are checked; cancellation restores both portions',()=>{
+  const cell=split(),leave=[{date:week,startMinute:900,endMinute:960}];
+  assert.throws(()=>assertLeaveCell(cell,leave,week),/congé approuvé/);
+  const projected=projectLeaveCell(cell,leave,week);assert.equal(dayMinutes(projected),420);assert.equal(projected.start,480);
+  const edited={...projected,end:690};
+  const saved=preserveLeaveBases(draft(edited),draft(cell),{1:leave},week).rows[0].cells[0];
+  assert.equal(saved.end,690);assert.equal(saved.servicePortion.absence,undefined);assert.equal(dayMinutes(projectLeaveCell(saved,[],week)),450);
+  const fullAfternoon=projectLeaveCell(cell,[{date:week,startMinute:780,endMinute:1020}],week);assert.equal(fullAfternoon.servicePortion,undefined);assert.equal(dayMinutes(fullAfternoon),240);
+  const fullMorning=projectLeaveCell(cell,[{date:week,startMinute:480,endMinute:720}],week);assert.equal(fullMorning.serviceAssignment,'delivery');assert.equal(dayMinutes(fullMorning),240);
+  const others=[{key:'fruits',week_start:week,draft:draft(normalizeCell({kind:'shift',start:840,end:900}))}];
+  assert.equal(crossDepartmentWarnings({weekStart:week,department:{key:'epicerie'}},draft(cell),others,[{id:1,name:'Test'}]).length,1);
+});
+test('save, publish, copy and remove afternoon keep the morning and separate Service projection',async()=>{
+  const f=await departmentFixture();try{
+    const dep=(await f.call('get','/api/departments/meta')).body.departments.find(d=>d.key==='epicerie');
+    const person=(await f.call('post','/api/departments/people',{body:{name:'Split Test',active:true,group:'regular',departments:[dep.id],availability:{}}})).body;
+    const route='/api/departments/:id/weeks/:week',params={id:dep.id,week};const d=draft(split());d.rows[0].personId=person.id;
+    assert.equal((await f.call('put',route,{params,body:{revision:0,draft:d}})).code,200);
+    assert.equal((await f.call('post',route+'/publish',{params,body:{revision:1,verified:true,warningsReviewed:true}})).code,200);
+    const pub=(await f.call('get','/api/leave/department-schedules/:id/:week',{params})).body.schedule;
+    assert.deepEqual(pub.rows[0].cells[0],split());
+    const target={...params,week:'2026-11-30'};
+    assert.equal((await f.call('post',route+'/copy',{params:target,body:{revision:0,sourceWeek:week,sourceRevision:2}})).code,200);
+    assert.equal((await f.service.serviceSupport(target.week))[0].paidMinutes,240);
+    delete d.rows[0].cells[0].servicePortion;
+    assert.equal((await f.call('put',route,{params:target,body:{revision:1,draft:d}})).code,200);
+    assert.deepEqual(await f.service.serviceSupport(target.week),[]);
+    assert.equal((await f.service.getWeek(dep.id,target.week)).draft.rows[0].cells[0].end,720);
+  }finally{await f.db.close();}
+});

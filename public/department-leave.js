@@ -1,4 +1,4 @@
-import {addDays,isTimedCell,normalizeCell,blankCell,cellMinutes,cellBreakMinutes,timeLabel} from './departments-core.js';
+import {cellParts,addDays,isTimedCell,normalizeCell,blankCell,cellMinutes,cellBreakMinutes,timeLabel} from './departments-core.js';
 import {workingIntervals} from './shift-absence.js';
 
 const minute=date=>Date.parse(date+'T00:00:00Z')/60000;
@@ -16,6 +16,7 @@ export function leaveLabel(periods,date){
     'Congé demandé · '+spans.map(([a,b])=>timeLabel(a)+'–'+timeLabel(b)).join(', ');
 }
 export function assertLeaveCell(cell,periods,date,name='Cet employé'){
+  if(cell.servicePortion){for(const part of cellParts(cell))assertLeaveCell(part,periods,date,name);return;}
   if(!isTimedCell(cell))return;
   const spans=leaveSpans(periods,date,cell.start,cell.end);
   if(workingIntervals(cell.start,cell.end,cell.absence).some(([a,b])=>spans.some(([s,e])=>a<e&&s<b)))
@@ -27,6 +28,10 @@ export function assertDepartmentLeave(draft,leaves,weekStart,people){
 // Project approved absences without altering the saved plan. Cancellation and
 // corrections can then restore it, including a manager's original exception.
 export function projectLeaveCell(cell,periods,date){
+  if(cell.servicePortion){
+    const [first,second]=cellParts(cell).map(part=>projectLeaveCell(part,periods,date));
+    return isTimedCell(first)?(isTimedCell(second)?{...first,servicePortion:second}:first):isTimedCell(second)?second:first;
+  }
   if(!isTimedCell(cell)){
     const spans=leaveSpans(periods,date);
     return cell.kind==='blank'&&spans.length===1&&spans[0][0]===0&&spans[0][1]===1440?{...blankCell(),kind:'note',note:'Congé approuvé'}:cell;
@@ -49,18 +54,21 @@ export const projectDepartmentLeave=(draft,leaves,weekStart)=>draft?{...draft,ro
 
 // Only the freshly read server copy supplies the base; client metadata is never
 // trusted. Edits outside the automatic adjustment remain ordinary saved edits.
+function preserveLeaveCell(cell,base,periods,date){
+  if(!base)return cell;
+  const projected=projectLeaveCell(base,periods,date);
+  if(JSON.stringify(normalizeCell(cell))===JSON.stringify(normalizeCell(projected)))return base;
+  if(cell.servicePortion&&base.servicePortion){
+    const [first,second]=cellParts(cell),[baseFirst,baseSecond]=cellParts(base);
+    return normalizeCell({...preserveLeaveCell(first,baseFirst,periods,date),servicePortion:preserveLeaveCell(second,baseSecond,periods,date)});
+  }
+  if(isTimedCell(cell)&&projected.absence&&JSON.stringify(cell.absence)===JSON.stringify(projected.absence)){
+    const edited={...cell};delete edited.absence;
+    if(base.absence)edited.absence=base.absence;
+    return normalizeCell(edited);
+  }
+  return cell;
+}
 export function preserveLeaveBases(draft,stored,leaves,weekStart){
-  return {...draft,rows:draft.rows.map(row=>({...row,cells:row.cells.map((cell,day)=>{
-    const base=stored?.rows.find(r=>r.personId===row.personId)?.cells[day];if(!base)return cell;
-    const projected=projectLeaveCell(base,leaves[row.personId],addDays(weekStart,day));
-    if(JSON.stringify(normalizeCell(cell))===JSON.stringify(normalizeCell(projected)))return base;
-    // Editing the end time, assignment or note must not turn an unchanged
-    // automatic absence into a permanent manual absence after cancellation.
-    if(isTimedCell(cell)&&projected.absence&&JSON.stringify(cell.absence)===JSON.stringify(projected.absence)){
-      const edited={...cell};delete edited.absence;
-      if(base.absence)edited.absence=base.absence;
-      return normalizeCell(edited);
-    }
-    return cell;
-  })}))};
+  return {...draft,rows:draft.rows.map(row=>({...row,cells:row.cells.map((cell,day)=>preserveLeaveCell(cell,stored?.rows.find(r=>r.personId===row.personId)?.cells[day],leaves[row.personId],addDays(weekStart,day)))}))};
 }

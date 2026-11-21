@@ -1,3 +1,4 @@
+import {cellParts} from './departments-core.js';
 import {blankCell,isTimedCell,cellMinutes,departmentLabel,shiftAssignment} from './departments-core.js';
 import {serviceShiftTiming} from './service-rules.js';
 
@@ -18,12 +19,12 @@ export function departmentPortionsForService(weeks,people){
   for(const week of weeks.filter(w=>w.key!=='service'))for(const row of week.draft?.rows||[]){
     const source=people.find(p=>p.id===row.personId);if(!source)continue;
     const service=people.find(p=>p.serviceEmployeeId&&canonical(p)===canonical(source));if(!service)continue;
-    row.cells.forEach((c,day)=>{
+    row.cells.forEach((dayCell,day)=>cellParts(dayCell).forEach(c=>{
       if(!isTimedCell(c))return;
       const department=c.workDepartment||week.key,id=JSON.stringify([service.serviceEmployeeId,day,c.start,c.end,department]);
       if(seen.has(id))return;seen.add(id);
       result.push({employeeId:service.serviceEmployeeId,dayIndex:day,startMinute:c.start,endMinute:c.end,paidMinutes:cellMinutes(c),department,kind:c.kind,post:c.post,label:shiftAssignment(c,week.key)});
-    });
+    }));
   }
   return result;
 }

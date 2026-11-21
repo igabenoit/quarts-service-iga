@@ -1,4 +1,5 @@
 import {departmentServiceSupport} from './public/department-service-support.js';
+import {cellParts} from './public/departments-core.js';
 import {needsSchema} from './preview-schema.js';
 import {storeDateSQL} from './employee-access.js';
 import {applyDepartures} from './department-departures.js';
@@ -192,9 +193,9 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     for(const row of display.rows){
       const p=current.people.find(p=>p.id===row.personId);if(!p)continue;
       for(let day=0;day<7;day++){
-        const c=row.cells[day];if(!isTimedCell(c))continue;
+        for(const c of cellParts(row.cells[day])){if(!isTimedCell(c))continue;
         const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
-        if(p.serviceEmployeeId&&assignments.some(a=>Number(a.employee_id)===p.serviceEmployeeId&&overlaps(start,end,minute(a.week_start,a.day_index*1440+a.start_minute),minute(a.week_start,a.day_index*1440+a.end_minute))))warnings.push(p.name+' : chevauchement avec un quart du Service, le '+date+'.');
+        if(p.serviceEmployeeId&&assignments.some(a=>Number(a.employee_id)===p.serviceEmployeeId&&overlaps(start,end,minute(a.week_start,a.day_index*1440+a.start_minute),minute(a.week_start,a.day_index*1440+a.end_minute))))warnings.push(p.name+' : chevauchement avec un quart du Service, le '+date+'.');}
       }
     }
     return [...new Set(warnings)];

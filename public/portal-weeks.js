@@ -1,3 +1,4 @@
+import {cellParts} from './departments-core.js';
 import {absenceLabel} from './shift-absence.js';
 import {addDays,monday,today,isDate,DAY_NAMES,departmentLabel,isTimedCell,cellDetail,cellMinutes,cellLabel,timeLabel} from './departments-core.js';
 import {serviceShiftTiming} from './service-rules.js';
@@ -30,7 +31,7 @@ export function personalDays(week,results,allowedDepartments=null){
     if(result.kind==='service'){
       for(const person of data.employees)for(const s of person.shifts)days[s.dayIndex].entries.push({department:'Service',departmentKeys:['service'],hours:`${timeLabel(s.startMinute)} – ${timeLabel(s.endMinute)}`,detail:[roles[s.role]||s.role,s.training?"Formation"+(s.trainingMinutes!=null?" "+(s.trainingMinutes/60).toLocaleString("fr-CA")+" h":""):"",absenceLabel(s.absence)].filter(Boolean).join(' · '),minutes:serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes,start:s.startMinute,end:s.endMinute,birthday:person.birthdayMonthDay});
     }else{
-      for(const row of data.schedule.rows)row.cells.forEach((c,index)=>{
+      for(const row of data.schedule.rows)row.cells.forEach((dayCell,index)=>cellParts(dayCell).forEach(c=>{
         if(c.sourceDepartment&&origins.has(c.sourceDepartment)||c.kind==='blank')return;
         if(c.buffetAllocation){if(seenBuffet.has(c.buffetAllocation.key))return;seenBuffet.add(c.buffetAllocation.key);}
         const timed=isTimedCell(c);
@@ -40,7 +41,7 @@ export function personalDays(week,results,allowedDepartments=null){
         if(!departmentKeys.length)return;
         const visibleMinutes=c.buffetAllocation&&allowedDepartments?departmentKeys.reduce((sum,key)=>sum+c.buffetAllocation[key],0):timed?cellMinutes(c):null;
         days[index].entries.push({department:allowedDepartments?departmentKeys.map(departmentLabel).join(' / '):department,departmentKeys,hours:timed?`${timeLabel(c.start)} – ${timeLabel(c.end)}`:c.kind==='off'?'Congé':cellLabel(c),detail:timed?(c.post==='cut_fruit'?'Fruits coupés':cellDetail({...c,workDepartment:undefined})):'',minutes:visibleMinutes,birthday:row.birthdayMonthDay,start:c.start,end:c.end});
-      });
+      }));
     }
   }
   for(const day of days){

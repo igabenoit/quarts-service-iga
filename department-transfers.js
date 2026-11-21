@@ -1,4 +1,4 @@
-import {DAY_NAMES,departmentLabel,isTimedCell,shiftAssignment,timeLabel,addDays} from './public/departments-core.js';
+import {cellParts,DAY_NAMES,departmentLabel,isTimedCell,shiftAssignment,timeLabel,addDays} from './public/departments-core.js';
 import {buffetKey,usesBuffetRule} from './public/department-buffet.js';
 
 // Use explicit identity links, never a name match, to join an employee's records.
@@ -9,11 +9,11 @@ export function relatedFor(weeks,key,people,members,{published=false}={}){
     if(source.key===key)continue;
     for(const row of (published?source.published:source.draft)?.rows||[]){
       const person=members.find(p=>personIdentity(p.id,people)===personIdentity(row.personId,people));if(!person)continue;
-      row.cells.forEach((cell,day)=>{
+      row.cells.forEach((dayCell,day)=>cellParts(dayCell).forEach(cell=>{
         // Incoming transfers already appear once through mergeIncoming.
         if(!isTimedCell(cell)||cell.workDepartment===key)return;
         related.push({personId:person.id,day,cell,sourceDepartment:source.key,sourceDepartmentId:Number(source.department_id)});
-      });
+      }));
     }
   }
   return related;
@@ -21,7 +21,7 @@ export function relatedFor(weeks,key,people,members,{published=false}={}){
 
 export function crossDepartmentWarnings(current,display,others,people){
   const minute=(date,n=0)=>Date.parse(String(date instanceof Date?date.toISOString():date).slice(0,10)+'T00:00:00Z')/60000+Number(n),warnings=new Set();
-  for(const row of display.rows)row.cells.forEach((c,day)=>{
+  for(const row of display.rows)row.cells.forEach((dayCell,day)=>cellParts(dayCell).forEach(c=>{
     if(!isTimedCell(c))return;
     const date=addDays(current.weekStart,day),start=minute(date,c.start),end=minute(date,c.end);
     for(const other of others){
@@ -30,7 +30,7 @@ export function crossDepartmentWarnings(current,display,others,people){
       const seen=new Set();
       for(const [state,schedule] of [['brouillon',other.draft],['publié',other.published]])for(const match of schedule?.rows||[]){
         if(personIdentity(match.personId,people)!==personIdentity(row.personId,people))continue;
-        match.cells.forEach((cell,d)=>{
+        match.cells.forEach((otherCell,d)=>cellParts(otherCell).forEach(cell=>{
           if(!isTimedCell(cell))return;
           const person=people.find(p=>p.id===row.personId);
           if(otherWeek===current.weekStart&&usesBuffetRule(person,c,current.department.key)&&usesBuffetRule(person,cell,other.key)&&buffetKey(row.personId,day,c)===buffetKey(row.personId,d,cell))return;
@@ -38,10 +38,10 @@ export function crossDepartmentWarnings(current,display,others,people){
           if(start>=minute(otherWeek,d*1440+cell.end)||minute(otherWeek,d*1440+cell.start)>=end)return;
           const name=people.find(p=>p.id===row.personId)?.name||'Employé retiré';
           warnings.add(`${name} : chevauchement avec ${departmentLabel(cell.workDepartment||other.key)}, le ${date} — ${shiftAssignment(c,current.department.key)} (${timeLabel(c.start)}–${timeLabel(c.end)}) et ${shiftAssignment(cell,other.key)} (${timeLabel(cell.start)}–${timeLabel(cell.end)}, ${state} du ${addDays(otherWeek,d)}).`);
-        });
+        }));
       }
     }
-  });
+  }));
   return [...warnings];
 }
 

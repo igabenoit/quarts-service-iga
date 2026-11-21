@@ -1,3 +1,4 @@
+import {cellParts} from './departments-core.js';
 import {SERVICE_ASSIGNMENTS,DAY_NAMES,isTimedCell,cellMinutes,cellBreakMinutes,departmentLabel,escapeHTML as e,timeLabel,hoursLabel,dateLabel} from './departments-core.js';
 
 // A projection of the source schedule, never a second editable/paid shift.
@@ -7,10 +8,10 @@ export function departmentServiceSupport(weeks,people,{published=false}={}){
     if(week.key==='service')continue;
     for(const row of (published?week.published:week.draft)?.rows||[]){
       const person=people.find(p=>p.id===row.personId);
-      row.cells.forEach((cell,dayIndex)=>{
+      row.cells.forEach((dayCell,dayIndex)=>cellParts(dayCell).forEach(cell=>{
         if(!isTimedCell(cell)||!Object.hasOwn(SERVICE_ASSIGNMENTS,cell.serviceAssignment))return;
         result.push({personId:row.personId,name:published?row.name:person?.name||'Employé retiré',sourceDepartment:week.key,sourceDepartmentId:Number(week.department_id),dayIndex,assignment:cell.serviceAssignment,startMinute:cell.start,endMinute:cell.end,paidMinutes:cellMinutes(cell),breakMinutes:cellBreakMinutes(cell),cell});
-      });
+      }));
     }
   }
   return result.sort((a,b)=>a.dayIndex-b.dayIndex||a.startMinute-b.startMinute||a.name.localeCompare(b.name));

@@ -117,6 +117,13 @@ export function cellTone(c){
 }
 export function normalizeCell(value){
   const c=value||{},kind=String(c.kind||'blank');
+  if(c.servicePortion!==undefined){
+    const {servicePortion,...rest}=c;
+    if(!isTimedCell(c)||c.serviceAssignment||c.workDepartment||servicePortion?.servicePortion||!servicePortion?.serviceAssignment)throw Error('La deuxième plage doit être au Service ou à la Livraison, après le quart du département.');
+    const first=normalizeCell(rest),second=normalizeCell(servicePortion);
+    if(second.start<first.end)throw Error('Les deux plages de la journée ne doivent pas se chevaucher.');
+    return {...first,servicePortion:second};
+  }
   if(c.serviceAssignment!==undefined){
     if(!Object.hasOwn(SERVICE_ASSIGNMENTS,c.serviceAssignment)||kind!=='shift'||c.post||c.workDepartment||c.trainingMinutes||c.trainingMention)throw Error('Choisissez Service ou Livraison pour un quart sans autre affectation.');
     const {serviceAssignment,...rest}=c;
@@ -154,7 +161,9 @@ export function normalizeDraft(value,people){
   return {rows,notes,manager};
 }
 export const hourCategory=c=>c.mentionHours==='separate'?'mention':c.kind;
-const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].reduce((sum,cell)=>{
+export const cellParts=c=>c?.servicePortion?[Object.fromEntries(Object.entries(c).filter(([key])=>key!=='servicePortion')),c.servicePortion]:[c];
+export const dayMinutes=c=>cellParts(c).reduce((n,part)=>n+cellMinutes(part),0);
+const minutesOfKind=(row,kind)=>[...row.cells,...row.accountingCells||[]].flatMap(cellParts).reduce((sum,cell)=>{
   const category=hourCategory(cell);
   if(category!==kind && !(kind==='training' && cell.trainingMinutes))return sum;
   const paid=cell.departmentMinutes??(!isOutgoing(cell)?cellMinutes(cell):0);
@@ -168,7 +177,7 @@ export const kitchenMinutes=row=>minutesOfKind(row,'kitchen');
 export const mentionMinutes=row=>minutesOfKind(row,'mention');
 export function separateMentionTotals(rows){
   const totals=new Map(),labels=new Map();
-  for(const row of rows)for(const cell of [...row.cells,...row.accountingCells||[]]){
+  for(const row of rows)for(const cell of [...row.cells,...row.accountingCells||[]].flatMap(cellParts)){
     if(hourCategory(cell)!=='mention'||isOutgoing(cell))continue;
     const label=String(cell.note||'').trim().replace(/\s+/g,' '),key=label.normalize('NFC').toLocaleLowerCase('fr-CA');
     if(!labels.has(key))labels.set(key,label);
@@ -201,6 +210,7 @@ export function pamAccountedMinutes(row,related=[]){
   return minutes;
 }
 export function validateAssignment(c,departmentKey){
+  if(c.servicePortion&&c.workDepartment)throw Error('La première plage doit rester dans ce département.');
   const target=c.workDepartment||departmentKey;
   if(c.workDepartment===departmentKey)throw Error('Choisissez un autre département pour une affectation interdépartements.');
   if(c.post==='cut_fruit'&&target!=='fruits')throw Error('Le poste Fruits coupés appartient aux Fruits & Légumes.');
@@ -228,12 +238,12 @@ export function draftWarnings(draft,people){
     const c=row.cells[d];if(c.kind==='review')warnings.push(`${p.name}, ${DAY_NAMES[d]} : lecture à corriger.`);
     if(!isTimedCell(c))continue;
     if(!p.active)warnings.push(`${p.name} : fiche inactive.`);
-    const parts=[{day:d,start:c.start,end:Math.min(c.end,1440)},...(c.end>1440?[{day:(d+1)%7,start:0,end:c.end-1440}]:[])];
+    const parts=cellParts(c).flatMap(c=>[{day:d,start:c.start,end:Math.min(c.end,1440)},...(c.end>1440?[{day:(d+1)%7,start:0,end:c.end-1440}]:[])]);
     for(const part of parts){
       const a=availabilityCode(p.availability?.[part.day]);if(!a)warnings.push(`${p.name}, ${DAY_NAMES[part.day]} : disponibilité non renseignée.`);
       else if(a==='0'||a!=='J'&&!a.split(',').some(range=>{const [s,e]=range.trim().split('-');return part.start>=parseTime(s)&&part.end<=parseTime(e,{end:true});}))warnings.push(`${p.name}, ${DAY_NAMES[part.day]} : quart en dehors de la disponibilité.`);
     }
-    const next=row.cells[d+1];if(c.end>1440&&isTimedCell(next)&&next.start<c.end-1440)warnings.push(`${p.name}, ${DAY_NAMES[d+1]} : chevauchement avec le quart de la veille.`);
+    const next=row.cells[d+1];if(cellParts(c).some(part=>part.end>1440&&cellParts(next).some(n=>isTimedCell(n)&&n.start<part.end-1440)))warnings.push(`${p.name}, ${DAY_NAMES[d+1]} : chevauchement avec le quart de la veille.`);
   }}return warnings;
 }
 export const isBirthday=(birth,date)=>Boolean(birth&&date&&String(birth).slice(-5)===String(date).slice(-5));
@@ -249,10 +259,10 @@ export function sheetHTML({department,weekStart,people,draft,blank=false,related
     if(!rows.some(r=>r.personId===item.personId)){const person=people.find(p=>p.id===item.personId);if(person)rows.push({personId:person.id,person,cells:Array.from({length:7},blankCell)});}
   }
   for(const row of rows){
-    row.shared=!blank&&(related.some(i=>i.personId===row.personId)||row.cells.some(c=>c.workDepartment||c.sourceDepartment)||(row.person.departments||[]).length>1);
+    row.shared=!blank&&(related.some(i=>i.personId===row.personId)||row.cells.some(c=>c.workDepartment||c.sourceDepartment||c.servicePortion)||(row.person.departments||[]).length>1);
     row.printDays=row.cells.map((c,day)=>{
       const extra=blank?[]:related.filter(i=>i.personId===row.personId&&i.day===day).map(i=>({...i.cell,printDepartment:i.cell.workDepartment||i.sourceDepartment}));
-      return [...(isTimedCell(c)?[{...c,printDepartment:c.workDepartment||department.key}]:extra.length?[]:[c]),...extra].sort((a,b)=>(a.start??0)-(b.start??0));
+      return [...(isTimedCell(c)?cellParts(c).map(part=>({...part,printDepartment:part.workDepartment||department.key})):extra.length?[]:[c]),...extra.flatMap(cellParts)].sort((a,b)=>(a.start??0)-(b.start??0));
     });
     const longPost=row.shared&&row.printDays.some(day=>day.some(c=>isTimedCell(c)&&shiftAssignment(c,c.printDepartment||department.key).length>20));
     row.printUnits=Math.max(longPost?2:1,...row.printDays.map(day=>day.reduce((n,c)=>n+(c.absence?3:1),0)));
