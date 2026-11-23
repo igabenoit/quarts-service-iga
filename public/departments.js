@@ -1,3 +1,4 @@
+import {bindEmployeeIdentityCheck,identityCheckMarkup} from './employee-identity.js';
 import {depositPhoto} from './department-photo-upload.js';
 import {assertLeaveCell,leaveLabel,leaveSpans} from './department-leave.js';
 import {cellParts,dayMinutes} from './departments-core.js';
@@ -276,7 +277,7 @@ function openPerson(person){
   editingPerson=person||null;$('#personForm').reset();$('#personError').textContent='';$('#personTitle').textContent=person?'Modifier la fiche':'Ajouter un employé';
   $('#personName').value=person?.name||'';$('#personJobTitle').value=person?.jobTitle||'';$('#personSpecification').value=person?.specification||'';$('#personSeniority').value=person?.seniorityDate||'';$('#personBirthday').value=person?.birthday||'';$('#personEmployeeCode').value=person?.employeeCode||'';$('#personEmail').value=person?.email||'';$('#personGroup').value=person?.group||'regular';$('#personSource').value=person?.sourceNote||'';$('#personVerified').checked=!!person?.verifiedAt;$('#personActive').checked=person?.active??true;$('#personBuffetPriority').checked=person?.buffetPamPriority===true;
   $('#departureSection').hidden=!person;$('#departureDate').value=person?.employmentEndedOn||today();$('#departureStatus').textContent='';
-  renderPersonalAccess(person);
+  renderPersonalAccess(person);personIdentityCheck.refresh();
   const linked=!!person?.serviceEmployeeId;$('#serviceSource').hidden=!linked;$('#personName').readOnly=linked;$('#personSeniority').readOnly=linked;$('#personActive').disabled=linked;$('#availabilityEditor').disabled=linked;
   $('#personDepartments').innerHTML=meta.departments.map(d=>`<label class="check"><input type="checkbox" value="${d.id}" ${person?.departments.includes(d.id)||!person&&d.id===selectedDepartment?'checked':''} ${d.key==='service'?'disabled':''}> ${e(d.name)}</label>`).join('');
   $('#personPriorities').innerHTML=meta.departments.filter(d=>d.key!=='service').map(d=>`<label data-priority-label="${d.id}">${e(d.name)}<input type="number" min="1" step="1" data-priority="${d.id}" value="${person?.displayPriorities?.[d.id]||''}" placeholder="À la fin du groupe"><small>Rang dans le groupe choisi; les autres se décalent automatiquement.</small></label>`).join('');
@@ -332,6 +333,8 @@ $('#terminatePerson').onclick=async()=>{
   }catch(error){if(saved)message('Fin d’emploi enregistrée. Actualisez la page pour voir les horaires à jour.');else $('#departureStatus').textContent=error.message;}
   finally{personSaving=false;$('#personDialog').inert=false;}});
 };
+$('#personName').closest('label').insertAdjacentHTML('afterend',identityCheckMarkup);
+const personIdentityCheck=bindEmployeeIdentityCheck({name:$('#personName'),code:$('#personEmployeeCode'),email:$('#personEmail'),container:$('#personForm [data-identity-check]'),distinct:$('#distinctPerson'),isNew:()=>!editingPerson});
 $('#personForm').onsubmit=async event=>{
   event.preventDefault();if(personSaving)return;
   const person=editingPerson,b={name:$('#personName').value,jobTitle:$('#personJobTitle').value,specification:$('#personSpecification').value,buffetPamPriority:$('#personBuffetPriority').checked,seniorityDate:$('#personSeniority').value,birthday:$('#personBirthday').value,employeeCode:$('#personEmployeeCode').value,email:$('#personEmail').value,group:$('#personGroup').value,sourceNote:$('#personSource').value,seniorityVerified:$('#personVerified').checked,active:$('#personActive').checked,distinctPerson:$('#distinctPerson').checked,departments:[...$('#personDepartments').querySelectorAll('input:checked')].map(i=>Number(i.value)),availability:Object.fromEntries([...$('#personAvailability').querySelectorAll('input')].map(i=>[i.dataset.day,i.value])),version:person?.version};

@@ -134,7 +134,7 @@ export async function installManagerAccess(app,pool,{readSession,issueSession,sa
     if(path==='/api/departments/publication-status'&&req.method==='GET')return;
     if(req.method==='GET'&&(path==='/api/store-portal'||path==='/api/store-portal/weeks/:week'))return;
     if(req.method==='POST'&&path==='/api/departments/people/:id/departure')return;
-    if(path==='/api/departments/meta'||path==='/api/departments/people'||path==='/api/departments/people/:id')return;
+    if(path==='/api/departments/meta'||path==='/api/departments/people'||path==='/api/departments/people/:id'||path==='/api/departments/people/matches')return;
     if(path.startsWith('/api/departments/')){
       let id;
       if(path.startsWith('/api/departments/:id/')||path==='/api/departments/document-mail/:id')id=req.params.id;

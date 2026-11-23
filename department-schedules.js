@@ -1,4 +1,5 @@
 import {departmentServiceSupport} from './public/department-service-support.js';
+import {assertNewEmployeeIdentity,employeeIdentityMatches} from './employee-identity.js';
 import {cellParts} from './public/departments-core.js';
 import {needsSchema} from './preview-schema.js';
 import {storeDateSQL} from './employee-access.js';
@@ -241,6 +242,15 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     }));
   }));
   app.post('/api/departments/people',requireManager,sameOrigin,endpoint(async(req,res)=>res.json(await savePerson(req.body,undefined,req))));
+  app.post('/api/departments/people/matches',requireManager,sameOrigin,endpoint(async(req,res)=>{
+    const roster=await directory(),departments=await listDepartments(pool);
+    const matches=await employeeIdentityMatches(pool,req.body||{},{partial:true});
+    res.json({matches:matches.slice(0,20).map(match=>{
+      const people=roster.filter(p=>p.id===match.personId||p.portalPersonId===match.personId||match.serviceEmployeeId&&p.serviceEmployeeId===match.serviceEmployeeId);
+      const ids=[...new Set(people.flatMap(p=>p.departments))],canOpen=!isScoped(req)||ids.some(id=>ownsDepartment(req,id));
+      return {...match,canOpen,active:people.some(p=>p.active),departments:ids.map(id=>departments.find(d=>d.id===id)?.name).filter(Boolean)};
+    })});
+  }));
   app.put('/api/departments/people/:id/portal-link',requireManager,sameOrigin,endpoint(async(req,res)=>{
     if(isScoped(req))fail('Rattachement réservé à l’administration.',403);
     if(req.body.confirmed!==true)fail('Confirmez que les deux fiches correspondent à la même personne.');
@@ -345,7 +355,7 @@ export async function installDepartmentSchedules(app,pool,{requireManager,sameOr
     const args=[previous?.serviceEmployeeId?previous.name:name,previous?.serviceEmployeeId?null:seniority||null,birthday||null,email,body.group,JSON.stringify(availability),body.active,source,seniority&&body.seniorityVerified?new Date():null,jobTitle,specification,buffetPamPriority];
     let saved;
     if(id)saved=(await client.query('UPDATE schedule_store_people SET name=$1,seniority_date=$2,birthday=$3,email=$4,employment_group=$5,availability=$6,active=$7,source_note=$8,verified_at=$9,job_title=$10,specification=$11,buffet_pam_priority=$12,version=version+1,updated_at=clock_timestamp() WHERE id=$13 RETURNING id',[...args,id])).rows[0];
-    else{if(list.some(p=>nameKey(p.name)===nameKey(name))&&body.distinctPerson!==true)fail('Un nom identique existe déjà. Utilisez sa fiche pour ajouter un département, ou confirmez qu’il s’agit d’une autre personne.',409);saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification,buffet_pam_priority,onboarding_new) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING id',args)).rows[0];}
+    else{await assertNewEmployeeIdentity(client,{...body,name,email});saved=(await client.query('INSERT INTO schedule_store_people(name,seniority_date,birthday,email,employment_group,availability,active,source_note,verified_at,job_title,specification,buffet_pam_priority,onboarding_new) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true) RETURNING id',args)).rows[0];}
     await saveEmployeeCode(client,saved.id,body.employeeCode,{initialOnly:isScoped(req)});
     if(previous?.serviceEmployeeId&&!(await client.query('SELECT 1 FROM schedule_employees WHERE id=$1',[previous.serviceEmployeeId])).rows.length)fail('La fiche Service a été annulée. Réactualisez le répertoire.',409);
     if(previous?.serviceEmployeeId)await client.query('INSERT INTO schedule_employee_contacts(employee_id,email) VALUES($1,$2) ON CONFLICT(employee_id) DO UPDATE SET email=EXCLUDED.email,updated_at=clock_timestamp()',[previous.serviceEmployeeId,email]);

@@ -74,7 +74,7 @@
         <div class="section-title"><div><p class="eyebrow">ÉQUIPE</p><h2>Employés et disponibilités</h2></div><p>Clique sur un employé pour modifier sa disponibilité permanente.</p></div>
         <div id="employeeList" class="employee-list"></div>
         <form id="employeeForm">
-          <input id="employeeId" type="hidden">
+          <input id="employeeId" type="hidden"><label class="employee-option" style="grid-column:1/-1"><input id="employeeDistinctPerson" type="checkbox"> Si une fiche correspond au nom, j’ai vérifié qu’il s’agit d’une autre personne.</label>
           <label>Nom<input id="employeeName" required maxlength="100"></label><label>Code employé (6 derniers chiffres)<input id="employeeCode" pattern="[0-9]{6}" maxlength="6" inputmode="numeric" autocomplete="off"></label><label>Date de naissance (gestion seulement)<input id="employeeBirthday" type="date"></label>
           <label>Fonction<select id="employeeRole"><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option></select></label>
           <fieldset class="employee-other-roles"><legend>Autres postes possibles</legend><div id="employeeOtherRoles"></div></fieldset>

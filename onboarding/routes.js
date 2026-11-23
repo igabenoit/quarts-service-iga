@@ -58,7 +58,8 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   await pool.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);
   const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,employee_email,manager_email,generation,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
   const lastDelivery=event?(await pool.query("SELECT created_at,data->>'status' AS status,data->>'email' AS email FROM employee_file_events WHERE action IN ('onboarding.delivery','onboarding.invite','onboarding.renew') AND data->>'employeeKey'=$1 ORDER BY id DESC LIMIT 1",[e.key])).rows[0]:null;
-  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  const suggestedEmployeeEmail=!trial&&e.personId?(await sourcePool.query("SELECT COALESCE(NULLIF(c.email,''),p.email,'') AS email FROM schedule_store_people p LEFT JOIN schedule_employee_contacts c ON c.employee_id=p.service_employee_id WHERE p.id=$1",[e.personId])).rows[0]?.email||'':'';
+  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,suggestedEmployeeEmail,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;

@@ -1,4 +1,6 @@
 import {attachDatabasePool} from '@vercel/functions';
+import {assertNewEmployeeIdentity} from './employee-identity.js';
+import {normalizeEmail} from './employee-contacts.js';
 import {installScheduledWorkSchema,runsInWebProcess,runScheduledWork} from './scheduled-work.js';
 import {needsSchema,isPreparingPreview,usePreparedSchema} from './preview-schema.js';
 import {installCash} from './cash-order.js';
@@ -258,13 +260,18 @@ async function reorderEmployees(client, role, column, movedId, requestedRank,sto
   }
 }
 async function saveServicePersonal(client,id,body,initialOnly){
-  if(body.employeeCode===undefined&&body.birthday===undefined)return;
+  if(body.employeeCode===undefined&&body.birthday===undefined&&body.email===undefined)return;
   const birthday=body.birthday;
   if(birthday!==undefined&&(typeof birthday!=='string'||birthday&&(!validDate(birthday)||birthday>new Date().toISOString().slice(0,10)||birthday<'1900-01-01')))throw Error('Date de naissance invalide.');
   await client.query('INSERT INTO schedule_store_people(service_employee_id,name) SELECT id,name FROM schedule_employees WHERE id=$1 ON CONFLICT(service_employee_id) DO NOTHING',[id]);
   const person=(await client.query('SELECT id FROM schedule_store_people WHERE service_employee_id=$1',[id])).rows[0];
   await saveEmployeeCode(client,person.id,body.employeeCode,{initialOnly});
   if(birthday!==undefined)await client.query('UPDATE schedule_store_people SET birthday=$1,version=version+1 WHERE id=$2',[birthday||null,person.id]);
+  if(body.email!==undefined){
+    const email=normalizeEmail(body.email);if(body.email&&!email)throw Error('Courriel invalide.');
+    await client.query('INSERT INTO schedule_employee_contacts(employee_id,email) VALUES($1,$2) ON CONFLICT(employee_id) DO UPDATE SET email=EXCLUDED.email,updated_at=clock_timestamp()',[id,email]);
+    await client.query('UPDATE schedule_store_people SET email=$1 WHERE id=$2',[email,person.id]);
+  }
 }
 function mapEmployee(row,weekStart=null) {
   const profile=employeeAvailability(row,{weekStart:typeof weekStart==='string'&&validDate(weekStart)?weekStart:null});
@@ -294,10 +301,10 @@ app.post("/api/employees/import", requireManager, sameOrigin, async (request, re
     await beginUndo(client,"Importer les employés",request.params.weekStart||null,request);
     const count = await client.query("SELECT COUNT(*)::int AS count FROM schedule_employees WHERE store_id=$1",[request.storeId]);
     if (count.rows[0].count) throw new Error("La liste existe déjà. Modifiez les employés individuellement.");
-    for (const e of normalized) await client.query(
+    for (const e of normalized) {await assertNewEmployeeIdentity(client,e);await client.query(
       `INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,store_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.storeId]);
+      [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.storeId]);}
     for (const role of ["manager","supervisor","cashier","packer","orders"]) {
       await client.query(`WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (ORDER BY seniority, id) AS position
@@ -318,6 +325,7 @@ app.post("/api/employees", requireManager, sameOrigin, async (request, response)
     const e = normalizeEmployee(request.body || {});
     await client.query("BEGIN");
     await beginUndo(client,"Ajouter un employé",request.params.weekStart||null,request);
+    await assertNewEmployeeIdentity(client,{...request.body,name:e.name});
     const result = await client.query(`INSERT INTO schedule_employees (name,area,role,roles,seniority,target_minutes,max_minutes,availability,notes,active,is_minor,allow_extra_hours,onboarding_new,store_id)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13) RETURNING *`,
       [e.name,e.area,e.role,JSON.stringify(e.roles),e.seniority,e.targetMinutes,e.maxMinutes,JSON.stringify(e.availability),e.notes,e.active,e.isMinor,e.allowExtraHours,request.storeId]);
