@@ -39,7 +39,7 @@ test('formation pratique : autorisation fondée sur une observation et signature
  assert.equal((await PDFLib.PDFDocument.load(final)).getPageCount(),3);
 });
 test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer les anciennes annexes',{timeout:90000},async()=>{
- const f=await liveAppFixture({employeeVault:true});
+ const f=await liveAppFixture({employeeVault:true,onboardingEmail:true});
  try{
   const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
   const headers={Origin:f.base,'X-Employee-Files':'1'};
@@ -59,15 +59,18 @@ test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer
   assert.equal(before.body.catalog.sst_general,'Programme d’accueil général SST – 2026');
   assert.ok(before.body.catalog.sst.includes('ancien modèle'));
   const invitation=await admin('POST','onboarding/invite?key='+key+'&view=direction',{
-   documents:['sst_general'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'
+   documents:['sst_general','tuac'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'
   });
   assert.equal(invitation.status,200,JSON.stringify(invitation.body));
   const token=invitation.body.path.split('#')[1];
   const call=(action,body={})=>f.call('POST','/api/accueil-employe/'+action,{headers:{...headers,Authorization:'Bearer '+token},body});
   const state=await call('state');
   assert.equal(state.status,200);
-  assert.equal(state.body.documents.length,1);
-  assert.equal(state.body.documents[0].kind,'sst_general');
+  assert.deepEqual(state.body.documents.map(d=>d.kind),['tuac','sst_general']);
+  const reminder=await f.onboardingMail(true);assert.equal(reminder.length,1);
+  assert.equal(reminder[0].payload.from,'IGA Benoit <rh@example.invalid>');
+  assert.match(reminder[0].payload.text,/rempli avec votre gérant, dans votre département/);
+  assert.match(reminder[0].payload.text,/complétion est obligatoire/);
   const forged={...valid,formation_complete:'yes',tache_1:'Trancheur',tache_1_autorise:'yes',signature_nom_responsable:'Signature falsifiée'};
   const sign=await call('sign',{kind:'sst_general',version:0,policy:state.body.policy.id,answers:forged,strokes});
   assert.equal(sign.status,200,JSON.stringify(sign.body));
@@ -76,5 +79,9 @@ test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer
   const pdf=await admin('GET','originals/'+doc.original_id);
   assert.equal(pdf.status,200);
   assert.equal(pdf.headers.get('content-type'),'application/pdf');
+  await f.query('UPDATE onboarding_cases SET reminded=false WHERE employee_key=$1',[key],{vault:true});
+  const remaining=await f.onboardingMail(true);assert.equal(remaining.length,1);
+  assert.equal(remaining[0].payload.to[0],'employee@example.invalid');
+  assert.equal(remaining[0].payload.text.includes('Programme d’accueil SST'),false,'ne plus réclamer le SST signé lorsque seul le TUAC reste à remplir');
  }finally{await f.close();}
 });

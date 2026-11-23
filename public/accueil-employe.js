@@ -3,6 +3,7 @@ import {buildRetirement} from './accueil-retraite.js';
 import {buildEmergency} from './accueil-urgence.js';
 import {buildSst} from './accueil-sst.js';
 import {buildGeneralSst} from './accueil-sst-general.js';
+import {sstWelcomeTitle,sstWelcomeInstructions} from './onboarding-messages.js';
 const token=location.hash.slice(1);
 const onsite=new URLSearchParams(location.search).has('sur-place');
 const localParams=new URLSearchParams(location.hash.slice(1));
@@ -27,6 +28,9 @@ function show(state){
  }
  const done=state.documents.filter(d=>d.done).length;
  list.append(node('p',done+' document(s) sur '+state.documents.length+' complété(s)'),node('p','Échéance · '+String(state.due).slice(0,10)));
+ if(state.documents.some(d=>['sst','sst_general'].includes(d.kind)&&!d.done)){
+  const reminder=node('div');reminder.className='banner';reminder.append(node('strong',sstWelcomeTitle),node('p',sstWelcomeInstructions));list.append(reminder);
+ }
  for(const d of state.documents){const b=node('button',d.title+' · '+(d.done?'Signé':d.version?'Reprendre':'Remplir'));b.disabled=d.done;b.onclick=()=>openForm(state,d);list.append(b);}
  if(done===state.documents.length)list.append(node('p','Votre dossier est complet. Vos documents signés sont classés.'));
 }

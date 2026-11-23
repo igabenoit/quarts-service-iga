@@ -1,3 +1,4 @@
+import {sstWelcomeTitle,sstWelcomeInstructions} from './onboarding-messages.js';
 const topics=[
  'Urgences et premiers soins : secouriste, trousse et signalement',
  'Évacuation : sorties et point de rassemblement',
@@ -31,6 +32,7 @@ function notes(parent,fields,draft,key,title){
  fields.set(key,textarea);
 }
 export function buildGeneralSst(form,draft,fields,onsite){
+ const reminder=node(form,'div');reminder.className='banner';node(reminder,'strong',sstWelcomeTitle);node(reminder,'p',sstWelcomeInstructions);
  node(form,'p','À remplir uniquement après un véritable accueil SST chez IGA. La signature confirme les explications reçues, et non une compétence sur une machine.');
  const identity=node(form,'fieldset');node(identity,'legend','1. Identification');
  field(identity,fields,draft,'employe_nom','Nom et prénom de l’employé','text',true);

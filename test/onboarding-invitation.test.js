@@ -60,15 +60,22 @@ test('invitation : un courriel, six titres, lien personnel et reprise sans doubl
  const previous=process.env.SESSION_SECRET;process.env.SESSION_SECRET='fiction-test-only';
  t.after(()=>{if(previous===undefined)delete process.env.SESSION_SECRET;else process.env.SESSION_SECRET=previous;});
  const token=invitationToken('test-nonce'),row={employee_key:'store:1',generation:1,nonce:'test-nonce',token_hash:createHash('sha256').update(token).digest('hex'),employee_email:'employee@example.invalid',due:'2030-01-01'};
- const titles=['Informations personnelles','TUAC','Retraite','Urgence','Éthique','SST 2026'],sent=[],options={site:'https://portail.example.invalid',from:'rh@example.invalid',send:async(payload,id)=>sent.push({payload,id})};
- assert.equal((await sendInvitation(row,titles,options)).status,'sent');await sendInvitation(row,titles,options);
+ const titles=['Informations personnelles','TUAC','Retraite','Urgence','Éthique','SST 2026'],sent=[],options={site:'https://portail.example.invalid',from:'Quarts Service <rh@example.invalid>',send:async(payload,id)=>sent.push({payload,id})};
+ assert.equal((await sendInvitation(row,titles,options)).status,'sent');await sendInvitation(row,titles,{...options,from:'rh@example.invalid'});
  assert.equal(sent.length,2);assert.equal(sent[0].id,sent[1].id);
  assert.deepEqual(sent[0].payload.to,['employee@example.invalid']);assert.equal(sent[0].payload.attachments,undefined);
+ assert.equal(sent[0].payload.from,'IGA Benoit <rh@example.invalid>');
+ assert.equal(sent[0].payload.subject,'Bienvenue dans la grande famille IGA Benoit !');
+ assert.match(sent[0].payload.text,/rempli avec votre gérant, dans votre département/);
+ assert.match(sent[0].payload.text,/complétion est obligatoire/);
+ assert.match(sent[0].payload.text,/reste incomplet tant que ce document n’est pas terminé/);
  for(const title of titles)assert.ok(sent[0].payload.text.includes(title));
  assert.ok(sent[0].payload.text.includes('https://portail.example.invalid/accueil-employe.html#'+token));
  await assert.rejects(()=>sendInvitation({...row,token_hash:null},titles,options));
  await assert.rejects(()=>sendInvitation(row,titles,{...options,send:async()=>{throw Error('Simulated provider failure');}}));
  assert.equal(sent.length,2);
+ await sendInvitation(row,['Informations personnelles'],options);
+ assert.equal(sent[2].payload.text.includes('Programme d’accueil SST'),false,'ne pas demander un SST absent de la sélection');
 });
 
 test('formulaire : six documents présélectionnés, ancien SST exclu, signature conservée',()=>{
