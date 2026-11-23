@@ -62,11 +62,21 @@ async function open(){
  const response=await fetch(url,{credentials:'same-origin',cache:'no-store'});
  if(response.status===401||response.status===403)throw Error('Accès au document refusé. Reconnecte-toi au portail avec ton compte autorisé puis rouvre le dossier.');
  if(!response.ok||!response.headers.get('content-type')?.startsWith('application/pdf'))throw Error('Document indisponible. Rouvre-le depuis le dossier employé.');
- const retirementPdf=(response.headers.get('content-disposition')||'').includes(encodeURIComponent('Inscription au régime de retraite.pdf'));
+ const filename=response.headers.get('content-disposition')||'';
+ const retirementPdf=filename.includes(encodeURIComponent('Inscription au régime de retraite'));
+ const emergencyPdf=filename.includes(encodeURIComponent('Informations en cas d’urgence'));
+ const tuacPdf=filename.includes(encodeURIComponent('Adhésion TUAC 500'));
  download.href=url+'&download=1';download.hidden=false;
+ let displayResponse=response,printUrl=url;
+ if(tuacPdf){
+  printUrl=url+'&print=tuac-original';
+  const printResponse=await fetch(printUrl,{credentials:'same-origin',cache:'no-store'});
+  if(!printResponse.ok)throw Error('Copie pour la feuille TUAC indisponible. Le PDF original signé peut être téléchargé.');
+  displayResponse=printResponse;
+ }
  const lib=await import('/vendor/pdfjs/pdf.min.mjs');
  lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';
- pdf=await lib.getDocument({data:new Uint8Array(await response.arrayBuffer()),isEvalSupported:false}).promise;
+ pdf=await lib.getDocument({data:new Uint8Array(await displayResponse.arrayBuffer()),isEvalSupported:false}).promise;
  pageNumbers=Array.from({length:pdf.numPages},(_,i)=>i+1);
  document.querySelector('nav').hidden=false;
  get('prev').onclick=()=>draw(pageNumbers[pageNumbers.indexOf(pageNumber)-1]);
@@ -90,9 +100,9 @@ async function open(){
   };
   selection.append(label,modeButton);document.querySelector('header').after(selection);
   const instruction=document.createElement('p');instruction.textContent='Le bouton d’impression ouvre un PDF de 3 pages seulement, avec les signatures. Le cahier complet reste conservé et téléchargeable.';selection.after(instruction);
- }else if(retirementPdf){
-  const original=document.createElement('a');original.id='print';original.href=url;original.target='_blank';original.rel='noopener';original.textContent='Ouvrir le PDF pour imprimer';get('print').replaceWith(original);
-  const instruction=document.createElement('p');instruction.textContent='Imprimez le PDF original : format lettre (8,5 × 11 po), recto verso sur une seule feuille, retournement sur le bord long. Aucun en-tête ni pied de page du site n’est ajouté.';document.querySelector('header').after(instruction);
+ }else if(retirementPdf||emergencyPdf||tuacPdf){
+  const original=document.createElement('a');original.id='print';original.href=printUrl;original.target='_blank';original.rel='noopener';original.textContent='Ouvrir le PDF pour imprimer';get('print').replaceWith(original);
+  const instruction=document.createElement('p');instruction.textContent=tuacPdf?'Imprimez sur la feuille originale TUAC à trois fiches : format lettre (8,5 × 11 po), recto seulement, taille réelle (100 %), sans ajustement. Cette copie reprend les renseignements et la signature existants. Le PDF original signé reste disponible au téléchargement.':'Imprimez le PDF original : format lettre (8,5 × 11 po), recto verso sur une seule feuille, retournement sur le bord long. Aucun en-tête ni pied de page du site n’est ajouté.';document.querySelector('header').after(instruction);
  }else{get('print').hidden=false;get('print').onclick=printDocument;}
  await draw(pageNumbers[0]);
 }

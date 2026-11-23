@@ -13,10 +13,10 @@ export function personalAnswers(input,previous={},employer=false){
  }));
 }
 const dateValid=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value+'T12:00:00Z'))&&new Date(value+'T12:00:00Z').toISOString().slice(0,10)===value;
-export function validatePersonalInformation(answers){
- if(!personalEmployerReady(answers))throw Error('L’employeur doit compléter sa section avant la signature. Vous pouvez enregistrer vos renseignements et revenir plus tard.');
- for(const key of personalFields.filter(key=>!['apartment','homePhone','mobilePhone'].includes(key)))if(!answers[key]?.trim())throw Error('Veuillez compléter le champ « '+personalLabels[key]+' ».');
- for(const key of ['birthDate','signatureDate','employerStartDate'])if(!dateValid(answers[key]))throw Error('Vérifiez la date « '+personalLabels[key]+' ».');
+export function validatePersonalInformation(answers,{employeeOnly=false}={}){
+ if(!employeeOnly&&!personalEmployerReady(answers))throw Error('L’employeur doit compléter sa section avant la finalisation.');
+ for(const key of (employeeOnly?personalEmployeeFields:personalFields).filter(key=>!['apartment','homePhone','mobilePhone'].includes(key)))if(!answers[key]?.trim())throw Error('Veuillez compléter le champ « '+personalLabels[key]+' ».');
+ for(const key of employeeOnly?['birthDate','signatureDate']:['birthDate','signatureDate','employerStartDate'])if(!dateValid(answers[key]))throw Error('Vérifiez la date « '+personalLabels[key]+' ».');
  if(!/^\d{3}[ -]?\d{3}[ -]?\d{3}$/.test(answers.sin))throw Error('Le numéro d’assurance sociale doit comporter neuf chiffres.');
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email))throw Error('Vérifiez l’adresse courriel.');
  if(!/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/.test(answers.postalCode))throw Error('Vérifiez le code postal.');

@@ -49,7 +49,7 @@ test('nouvelle embauche : section employeur protégée, brouillons partagés et 
   const onsite=(action,body)=>admin('POST','onboarding/sur-place/'+action+'?key='+alice.key+'&view=direction',{kind:'renseignements',...body});
   let state=must(await execute(alice,'state'));
   const policy=state.policy.id,body={kind:'renseignements',version:0,policy,answers:{...employee,...employer}};
-  const premature=must(await execute(alice,'sign',{...body,strokes}),400);assert.match(premature.error,/employeur doit compléter/);
+  must(await execute(alice,'sign',{...body,strokes:[]}),400);
   state=must(await execute(alice,'save',body));assert.equal(state.documents[0].draft.employerSalary,'');assert.equal(state.documents[0].draft.sin,employee.sin);
   must(await onsite('sign',{...body,version:1,strokes}),400);
   state=must(await onsite('save',{version:1,policy,answers:{...employer,sin:'111111111'}}));

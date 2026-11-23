@@ -3,6 +3,7 @@ import {sendPrivateBytes} from './private-response.js';
 import {installEmployeeDiscipline} from './employee-discipline.js';
 import {saveDirectionSignature} from './onboarding/ethics-source.js';
 import {ethicsSignatureExcerpt} from './onboarding/ethics-print.js';
+import {tuacPrintCopy} from './onboarding/tuac-print.js';
 import {installSingleTrial} from './onboarding/single-trial.js';
 import {installOnboarding,onboardingTitle} from './onboarding/routes.js';
 import express from 'express';
@@ -216,18 +217,23 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  }));
  app.post(BASE+'/assignments/:id/review',auth,origin,wrap(async(req,res)=>{const dir=await directory();await transaction(async db=>{const {row}=await assignment(req.ef,req.params.id,dir,db);if(['employe','sst'].includes(req.ef.view))fail('Révision réservée au responsable autorisé.',403);if(row.version!==req.body.version)fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason||!['filed','review'].includes(req.body.status)||!(await originals(row.id,db)).length)fail('Indiquez le résultat et le motif de la vérification.');await db.query('UPDATE employee_file_assignments SET status=$1,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[req.body.status,row.id]);await event(db,req.ef,'reviewed',{status:req.body.status,reason},row.id);});res.json({ok:true});}));
  app.post(BASE+'/assignments/:id/renew',auth,origin,wrap(async(req,res)=>{const dir=await directory();const id=await transaction(async db=>{const {row,e}=await assignment(req.ef,req.params.id,dir,db);const ts=await templates(db),t=latest(ts).find(t=>t.family_id===row.family_id);if(!t?.published||!templateAllowed(req.ef,t,e))fail('Nouvelle attribution non autorisée.',403);if(row.version!==req.body.version||row.status==='superseded')fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason)fail('Indiquez le motif de la mise à jour.');const id=randomUUID();await db.query('INSERT INTO employee_file_assignments(id,employee_key,template_id,workflow,due_date,actor) VALUES($1,$2,$3,$4,$5,$6)',[id,e.key,t.id,'update',date(req.body.dueDate),json(req.ef.audit)]);await db.query("UPDATE employee_file_assignments SET status='superseded',version=version+1 WHERE id=$1",[row.id]);await event(db,req.ef,'renewed',{newAssignmentId:id,reason},row.id);await event(db,req.ef,'assigned',{previousAssignmentId:row.id,reason},id);return id;});res.status(201).json({id});}));
- async function originalAccess(a,id){if(!uuid(id))fail('Pièce inaccessible.',404);const o=(await pool.query('SELECT * FROM employee_file_originals WHERE id=$1',[id])).rows[0];if(!o)fail('Pièce inaccessible.',404);const e=person(a,await directory(),o.employee_key);if(!content(a,e,o.category))fail('Pièce inaccessible.',403);if(!(await pool.query('SELECT id FROM employee_file_links WHERE original_id=$1 UNION ALL SELECT original_id FROM onboarding_docs WHERE original_id=$1',[id])).rows.length)fail('Pièce inaccessible.',404);return o;}
+ async function originalAccess(a,id){if(!uuid(id))fail('Pièce inaccessible.',404);const o=(await pool.query('SELECT * FROM employee_file_originals WHERE id=$1',[id])).rows[0];if(!o)fail('Pièce inaccessible.',404);const e=person(a,await directory(),o.employee_key);if(!content(a,e,o.category))fail('Pièce inaccessible.',403);if(!(await pool.query("SELECT id FROM employee_file_links WHERE original_id=$1 UNION ALL SELECT original_id FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[id])).rows.length)fail('Pièce inaccessible.',404);return o;}
  app.get(BASE+'/originals/:id',auth,wrap(async(req,res)=>{
   const o=await originalAccess(req.ef,req.params.id);
   let data=o.sst_document_id?(await sourcePool.query('SELECT data FROM sst_documents WHERE id=$1',[o.sst_document_id])).rows[0]?.data:o.data;
   if(!data)fail('Original indisponible.',404);
-  const kind=o.mime==='application/pdf'?(await pool.query('SELECT kind FROM onboarding_docs WHERE original_id=$1',[o.id])).rows[0]?.kind:null;
+  const kind=o.mime==='application/pdf'?(await pool.query("SELECT kind FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[o.id])).rows[0]?.kind:null;
   let name=o.name;
+  if(req.query.print){
+   if(req.query.print!=='tuac-original'||kind!=='tuac')fail('Copie d’impression indisponible pour ce document.',400);
+   try{data=await tuacPrintCopy(data);}catch(error){fail(error.message,422);}
+   name='Adhésion TUAC 500 - Impression feuille originale.pdf';
+  }
   if(req.query.pages){
    if(req.query.pages!=='signatures'||kind!=='ethique')fail('Extrait de signatures indisponible pour ce document.',400);
    data=await ethicsSignatureExcerpt(data);name='Code d’éthique - Pages de signature.pdf';
   }
-  await event(pool,req.ef,'original.read',{originalId:o.id,...(req.query.pages?{pages:'signatures'}:{})});
+  await event(pool,req.ef,'original.read',{originalId:o.id,...(req.query.pages?{pages:'signatures'}:{}),...(req.query.print?{print:'tuac-original'}:{})});
   res.set({'Content-Type':o.mime,'Content-Disposition':`${req.query.download?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Content-Type-Options':'nosniff','X-Frame-Options':'SAMEORIGIN',...(kind?{'X-Onboarding-Kind':kind}:{})});
   await sendPrivateBytes(res,data);
  }));

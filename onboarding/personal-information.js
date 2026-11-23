@@ -1,9 +1,10 @@
 import PDFLib from './tuac/pdf-lib.min.cjs';
-import {personalFields,personalLabels,validatePersonalInformation} from '../public/personal-information-schema.js';
+import {personalFields,personalLabels,personalEmployerFields,validatePersonalInformation} from '../public/personal-information-schema.js';
 export {personalFields};
 const clean=value=>String(value??'').replace(/[^\u0020-\u007e\u00a0-\u00ff\u0152\u0153\u0160\u0161\u0178\u20ac\u2013\u2014\u2018\u2019\u201c\u201d]/g,' ').replace(/\s+/g,' ').trim();
-export async function signedPersonalInformation(answers,strokes){
- validatePersonalInformation(answers);
+export async function signedPersonalInformation(answers,strokes,options={}){
+ validatePersonalInformation(answers,options);
+ if(options.employeeOnly)answers={...answers,...Object.fromEntries(personalEmployerFields.map(k=>[k,'']))};
  if(!Array.isArray(strokes)||strokes.length>200||!strokes.some(line=>Array.isArray(line)&&line.length>1))throw Error('Signature de l’employé requise.');
  for(const line of strokes){if(!Array.isArray(line)||line.length>4000)throw Error('Signature invalide.');for(const point of line)if(!Array.isArray(point)||point.length!==2||!point.every(n=>Number.isFinite(n)&&n>=0&&n<=1))throw Error('Signature invalide.');}
  const pdf=await PDFLib.PDFDocument.create(),page=pdf.addPage([612,792]);

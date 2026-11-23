@@ -54,7 +54,7 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
  const additions=(c.defaultDocuments||[]).filter(kind=>!items.some(d=>d.kind===kind));
  if(c.invited_at){
   const status=document.createElement('div');status.className='onboarding-status';
-  status.innerHTML='<p><strong>'+done+' / '+items.length+' documents signés</strong> · Échéance : '+esc(date(c.due))+'</p><progress max="'+Math.max(1,items.length)+'" value="'+done+'" aria-label="Documents signés"></progress>'+items.map(d=>'<div class="row spread"><span>'+esc(c.catalog[d.kind])+'</span>'+(d.original_id?'<a href="'+esc(signedPdfUrl(d.original_id))+'" target="_blank" rel="noopener">'+(d.kind==='ethique'?'Voir / imprimer les signatures':'PDF signé')+'</a>':d.done?'<span class="badge ok">Signé · accès réservé</span>':'<span class="badge warn">À compléter</span>')+'</div>').join('');panel.append(status);
+  status.innerHTML='<p><strong>'+done+' / '+items.length+' documents finalisés</strong> · Échéance : '+esc(date(c.due))+'</p><progress max="'+Math.max(1,items.length)+'" value="'+done+'" aria-label="Documents finalisés"></progress>'+items.map(d=>'<div class="row spread"><span>'+esc(c.catalog[d.kind])+'</span>'+(d.original_id?'<a href="'+esc(signedPdfUrl(d.original_id))+'" target="_blank" rel="noopener">'+(d.kind==='ethique'?'Voir / imprimer les signatures':'PDF signé')+'</a>':d.done?'<span class="badge ok">Signé · accès réservé</span>':d.awaitingDirection?'<span class="badge warn">Signé par l’employé · À finaliser par la direction</span><a href="/accueil-employe.html?sur-place#'+esc(new URLSearchParams({key,kind:d.kind}))+'">Finaliser ma partie</a><a target="_blank" rel="noopener" href="'+esc(signedPdfUrl(d.employeeOriginalId))+'">Partie employé signée</a>':'<span class="badge warn">À remplir par l’employé</span>')+'</div>').join('');panel.append(status);
   if(additions.length){
    const available=document.createElement('div');available.className='onboarding-additions';
    available.innerHTML=additions.map(kind=>'<div class="row spread"><strong>'+esc(c.catalog[kind])+'</strong><span class="badge warn">À ajouter à l’envoi</span></div>').join('')+'<p>Ces documents sont sélectionnés ci-dessous. Enregistrez pour les ajouter au lien personnel existant, ou choisissez l’envoi par courriel.</p>';status.append(available);
@@ -68,17 +68,22 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
   }
  }
  const personal=c.documents.find(d=>d.kind==='renseignements');
- if(!personal?.done&&!personal?.original_id){
+ if(!personal?.done&&!personal?.original_id&&!personal?.awaitingDirection){
   const preparation=document.createElement('p'),link=document.createElement('a');
   link.className='button secondary';link.textContent='Compléter la section employeur';
   link.href='/accueil-employe.html?sur-place#'+new URLSearchParams({key,kind:'renseignements'});
-  preparation.append(link,document.createTextNode(' Département, poste, date d’entrée, salaire et échelle. À préparer avant la signature de l’employé.'));panel.append(preparation);
+  preparation.append(link,document.createTextNode(' Département, poste, date d’entrée, salaire et échelle. L’employé peut signer sa partie avant votre intervention.'));panel.append(preparation);
  }
  const retirement=c.documents.find(d=>d.kind==='retraite');
- if(!retirement?.done&&!retirement?.original_id){
+ if(!retirement?.done&&!retirement?.original_id&&!retirement?.awaitingDirection){
   const preparation=document.createElement('p'),link=document.createElement('a');link.className='button secondary';link.textContent='Régime de retraite · Compléter la section direction';
   link.href='/accueil-employe.html?sur-place#'+new URLSearchParams({key,kind:'retraite'});
   preparation.append(link,document.createTextNode(' Employeur actuel, section locale, adhésion syndicale et date d’embauche.'));panel.append(preparation);
+ }
+ const tuac=c.documents.find(d=>d.kind==='tuac');
+ if(!tuac?.done&&!tuac?.original_id&&!tuac?.awaitingDirection&&view==='direction'){
+  const preparation=document.createElement('p'),link=document.createElement('a');link.className='button secondary';link.textContent='TUAC · Compléter la date d’emploi';
+  link.href='/accueil-employe.html?sur-place#'+new URLSearchParams({key,kind:'tuac'});preparation.append(link);panel.append(preparation);
  }
  const formHost=document.createElement(c.invited_at?'details':'div');
  if(c.invited_at&&additions.length)formHost.open=true;

@@ -50,7 +50,7 @@ test('retraite : le participant ne peut ni modifier ni approuver les données de
   const onsite=(action,body)=>admin('POST','onboarding/sur-place/'+action+'?key='+key+'&view=direction',{kind:'retraite',...body});
   const policy=must(await call('state')).policy.id;
   const input={kind:'retraite',version:0,policy,answers:{...employee,...employer,_employerPrepared:true},strokes};
-  must(await call('sign',input),400);
+  must(await call('sign',{...input,strokes:[]}),400);
   let state=must(await call('save',input));assert.equal(state.documents[0].draft._employerPrepared,false);assert.equal(state.documents[0].draft.p_employeur,'');
   state=must(await onsite('save',{version:1,policy,answers:{...employer,p_nas:'111111111'}}));assert.equal(state.documents[0].draft.p_nas,employee.p_nas);assert.equal(state.documents[0].draft._employerPrepared,true);
   must(await call('save',{...input,version:1}),409);must(await onsite('sign',{...input,version:2}),400);

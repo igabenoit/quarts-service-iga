@@ -42,6 +42,6 @@ process.on("message",async m=>{try{if(m.invitationMessages){
  const {sendPending}=await import('../onboarding/mail.js');
  const messages=[];
  if(m.advance)await employeeVaultPool.query("UPDATE onboarding_cases SET reminder_at=now()-interval '1 minute'");
- await sendPending(employeeVaultPool,{site:'https://portail.example.invalid',send:async(payload,id)=>messages.push({payload,id})});
+ await sendPending(employeeVaultPool,{site:'https://portail.example.invalid',directionEmail:m.directionEmail,send:async(payload,id)=>{if(m.failMail)throw Error('Simulated notification failure');messages.push({payload,id});}});
  process.send({id:m.id,result:messages});return;
 }const result=await (m.vault?employeeVaultPool:primary).query(m.sql,m.args);process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});

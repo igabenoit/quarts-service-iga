@@ -1,2 +1,5 @@
 main{max-width:42rem;margin:auto;padding:clamp(1rem,4vw,2.5rem)}header{display:flex;align-items:center;gap:1rem}canvas{display:block;width:100%;height:130px;border:1px solid #8799aa;background:white;touch-action:none}label{display:block;margin:.8rem 0}input:not([type=checkbox]){display:block;width:100%}button{margin:.5rem .4rem .5rem 0}details p{white-space:pre-wrap}
 .retirement-authorization{display:block;width:100%;height:auto}#editor fieldset{min-width:0;margin:1rem 0;padding:1rem}#editor [hidden]{display:none}
+canvas.tuac-signature{height:auto;aspect-ratio:4/1}
+.onboarding-document{padding:1rem 0;border-top:1px solid #ccd5da}.onboarding-document h3{margin:.5rem 0}.onboarding-document dl{display:grid;grid-template-columns:minmax(7rem,1fr) minmax(0,2fr);gap:.4rem .75rem}.onboarding-document dt{font-weight:650}.onboarding-document dd{margin:0;min-width:0;overflow-wrap:anywhere;white-space:normal}.onboarding-document p{color:#445462}
+@media(max-width:480px){.onboarding-document dl{display:block}.onboarding-document dt{margin-top:.6rem}.onboarding-document dd{margin-top:.2rem}}

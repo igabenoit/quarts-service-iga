@@ -19,7 +19,7 @@ export function buildPersonalInformation(form,draft,fields,employer){
   const info=node('fieldset');info.append(node('legend','Section employeur · lecture seule'));
   for(const key of personalEmployerFields){const label=node('label',personalLabels[key]),input=node('input');input.value=draft[key]||'À compléter par l’employeur';input.readOnly=true;input.setAttribute('aria-readonly','true');label.append(input);info.append(label);}
   form.append(info);
-  if(!personalEmployerReady(draft)){const note=node('p','L’employeur doit terminer sa section avant votre signature. Vous pouvez déjà remplir vos renseignements et les enregistrer.');note.className='personal-pending';note.setAttribute('role','status');form.append(note);}
+  if(!personalEmployerReady(draft)){const note=node('p','Vous pouvez remplir et signer votre partie maintenant. La direction complétera ensuite sa section; vos renseignements et votre signature seront conservés.');note.className='personal-pending';note.setAttribute('role','status');form.append(note);}
  }
  return {ready:personalEmployerReady(draft)};
 }

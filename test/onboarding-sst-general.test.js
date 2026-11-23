@@ -88,11 +88,12 @@ test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer
   const sign=await call('sign',{kind:'sst_general',version:0,policy:state.body.policy.id,answers:forged,strokes});
   assert.equal(sign.status,200,JSON.stringify(sign.body));
   const doc=(await admin('GET',route)).body.documents.find(d=>d.kind==='sst_general');
-  assert.equal(doc.done,true);
-  const pdf=await admin('GET','originals/'+doc.original_id);
+  assert.equal(doc.done,false);assert.equal(doc.awaitingDirection,true);
+  const pdf=await admin('GET','originals/'+doc.employeeOriginalId);
   assert.equal(pdf.status,200);
   assert.equal(pdf.headers.get('content-type'),'application/pdf');
   await f.query('UPDATE onboarding_cases SET reminded=false WHERE employee_key=$1',[key],{vault:true});
+  const notice=await f.onboardingMail();assert.equal(notice.length,1);assert.match(notice[0].payload.subject,/Document à finaliser/);
   const remaining=await f.onboardingMail(true);assert.equal(remaining.length,1);
   assert.equal(remaining[0].payload.to[0],'employee@example.invalid');
   assert.equal(remaining[0].payload.text.includes('Programme d’accueil SST'),false,'ne plus réclamer le SST signé lorsque seul le TUAC reste à remplir');

@@ -17,13 +17,13 @@ export const generalSstTextKeys=[
  'signature_nom_employe','signature_date_employe','signature_nom_responsable','signature_date_responsable'
 ];
 export const generalSstFields=[...generalSstTextKeys,...generalSstCheckKeys,'confirmation'];
-const employeeKeys=new Set([
+export const generalSstEmployeeKeys=new Set([
  'employe_nom','departement_poste',...generalSstTopics,
  'accueil_points_a_reprendre','signature_nom_employe','signature_date_employe','confirmation'
 ]);
 export function sanitizeGeneralSstAnswers(answers,onsite){
  const clean=Object.fromEntries(generalSstFields.map(k=>[k,String(answers?.[k]??'').slice(0,200)]));
- if(!onsite)for(const k of generalSstFields)if(!employeeKeys.has(k))clean[k]='';
+ if(!onsite)for(const k of generalSstFields)if(!generalSstEmployeeKeys.has(k))clean[k]='';
  return clean;
 }
 export const blankGeneralSst=()=>readFile(new URL('./sst-general/form.pdf',import.meta.url));
@@ -65,7 +65,7 @@ export async function signedGeneralSst(input,employeeStrokes,options={}){
  if(answers.formation_complete==='yes'&&answers.formation_a_poursuivre==='yes')throw Error('Précisez un seul état pour la formation pratique.');
  if(answers.formation_complete==='yes'&&!generalSstTasks.some(k=>answers[k].trim()&&answers[k+'_explique']==='yes'&&answers[k+'_pratique']==='yes'&&answers[k+'_autorise']==='yes'))
   throw Error('La formation pratique ne peut être déclarée terminée sans démonstration et observation.');
- const managerialKeys=generalSstFields.filter(k=>!employeeKeys.has(k));
+ const managerialKeys=generalSstFields.filter(k=>!generalSstEmployeeKeys.has(k));
  const managed=onsite&&managerialKeys.some(k=>answers[k]&&answers[k]!=='no');
  if(managed&&(!answers.signature_nom_responsable.trim()||!isDate(answers.signature_date_responsable)||!validSignature(options.supervisorStrokes)))
   throw Error('Signature et date du responsable requises pour valider ses observations.');

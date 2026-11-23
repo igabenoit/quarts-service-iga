@@ -37,6 +37,7 @@ test('parcours de deux nouvelles embauches isolées', {timeout:90000},async()=>{
   tokens[0]=must(await admin('POST',routes[0]('renew'),{})).path.split('#')[1];
   assert.equal(must(await execute(0,'state')).documents[0].version,1);
   must(await execute(0,'sign',{...body,version:1,strokes:[[[0,0],[0.5,0.8],[1,0.2]]]}));
+  must(await admin('POST',routes[0]('sur-place/finalize'),{...body,version:2,answers:{Emploi:'2026-11-08'}}));
   const status=must(await admin('GET',routes[0]()));assert.ok(status.completed_at);assert.ok(status.activity);
   const notifications=await f.onboardingMail(true);assert.equal(notifications.length,1);
   assert.deepEqual(notifications[0].payload.to,['rh@example.invalid']);assert.equal(notifications[0].payload.subject,'Dossier d’accueil complété');

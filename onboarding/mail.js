@@ -37,18 +37,39 @@ export async function sendInvitation(row,titles,{send,site=siteUrl(),from=sender
  }
  return {status:'sent',email:row.employee_email};
 }
-export async function sendPending(pool,{send,trial=null,site=process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL}={}){
+export async function sendPending(pool,{send,trial=null,directionEmail=process.env.ONBOARDING_DIRECTION_EMAIL,site=process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL}={}){
  if(!site)return;
  const root=new URL(site).origin;
  const db=await pool.connect();
  try{
   await db.query('BEGIN');
-  const row=(await db.query(`SELECT * FROM onboarding_cases WHERE (completed_at IS NOT NULL AND NOT notified) OR (completed_at IS NULL AND token_hash IS NOT NULL AND reminder_at<=now() AND NOT reminded) ORDER BY COALESCE(completed_at,reminder_at) LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
+  const row=(await db.query(`SELECT * FROM onboarding_cases c WHERE
+   EXISTS(SELECT 1 FROM onboarding_docs d WHERE d.employee_key=c.employee_key AND d.original_id IS NULL AND d.draft#>>'{_workflow,employeeOriginalId}' IS NOT NULL AND d.draft#>>'{_workflow,notifiedAt}' IS NULL)
+   OR (completed_at IS NOT NULL AND NOT notified)
+   OR (completed_at IS NULL AND token_hash IS NOT NULL AND reminder_at<=now() AND NOT reminded AND EXISTS(SELECT 1 FROM onboarding_docs d WHERE d.employee_key=c.employee_key AND d.invited AND d.original_id IS NULL AND d.draft#>>'{_workflow,employeeOriginalId}' IS NULL))
+   ORDER BY COALESCE(activity,completed_at,reminder_at) LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
   if(row){
    if(trial && (row.employee_key!==trial.key||row.employee_email!==trial.employeeEmail||row.manager_email!==trial.managerEmail))throw Error('Essai hors périmètre');
+   const pending=(await db.query("SELECT kind,draft FROM onboarding_docs WHERE employee_key=$1 AND original_id IS NULL AND draft#>>'{_workflow,employeeOriginalId}' IS NOT NULL AND draft#>>'{_workflow,notifiedAt}' IS NULL ORDER BY kind FOR UPDATE",[row.employee_key])).rows;
+   if(pending.length){
+    for(const doc of pending){
+     const w=doc.draft._workflow,to=trial?trial.managerEmail:directionEmail||row.manager_email;
+     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to||''))throw Error('Destinataire de finalisation manquant');
+     const link=root+'/accueil-employe.html?sur-place#'+new URLSearchParams({key:row.employee_key,kind:doc.kind});
+     const payload={from:onboardingSender(),to:[to],subject:'Document à finaliser · '+w.title,text:'Bonjour,\n\n'+w.employeeName+' a rempli et signé sa partie du document suivant :\n'+w.title+'\n\nTa partie reste à compléter pour finaliser le document. Les renseignements et la signature de l’employé sont verrouillés.\n\nOuvrir le document à finaliser : '+link+'\n\nConnecte-toi avec ton accès autorisé. Aucun formulaire ni renseignement confidentiel n’est joint à ce courriel.\n\nIGA Benoit'};
+     payload.html=emailHtml(payload.text);
+     const id=createHash('sha256').update('onboarding-direction|'+w.employeeOriginalId+'|'+to).digest('hex');
+     if(send)await send(payload,id);else{
+      const r=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':id},body:JSON.stringify(payload)});
+      if(!r.ok)throw Error('Avis de finalisation en attente');
+     }
+     await db.query("UPDATE onboarding_docs SET draft=jsonb_set(draft,'{_workflow,notifiedAt}',to_jsonb(now()::text)) WHERE employee_key=$1 AND kind=$2",[row.employee_key,doc.kind]);
+    }
+    await db.query('COMMIT');return;
+   }
    const complete=!!row.completed_at,token=invitationToken(row.nonce);
    if(!complete && createHash('sha256').update(token).digest('hex')!==row.token_hash)throw Error('Lien à renouveler');
-   const pendingSst=!complete&&(await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND kind IN ('sst','sst_general') AND original_id IS NULL LIMIT 1",[row.employee_key])).rowCount>0;
+   const pendingSst=!complete&&(await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND kind IN ('sst','sst_general') AND original_id IS NULL AND draft#>>'{_workflow,employeeOriginalId}' IS NULL LIMIT 1",[row.employee_key])).rowCount>0;
    const payload={from:onboardingSender(),to:[complete?row.manager_email:row.employee_email],subject:complete?'Dossier d’accueil complété':'Rappel de votre accueil',text:complete?'Un dossier d’accueil est complet. Consultez Dossiers employés : '+root+'/dossiers-employes.html':'Votre dossier d’accueil est encore à compléter.'+(pendingSst?'\n\n'+sstNotice:'')+'\n\nReprenez votre dossier : '+root+'/accueil-employe.html#'+token};
    payload.html=emailHtml(payload.text);
    const id=createHash('sha256').update([row.employee_key,row.invited_at,complete?'final':'rappel'].join('|')).digest('hex');

@@ -31,7 +31,7 @@ function notes(parent,fields,draft,key,title){
  textarea.name=key;textarea.maxLength=200;textarea.value=draft[key]||'';
  fields.set(key,textarea);
 }
-export function buildGeneralSst(form,draft,fields,onsite){
+export function buildGeneralSst(form,draft,fields,onsite,awaitingDirection=false){
  const reminder=node(form,'div');reminder.className='banner';node(reminder,'strong',sstWelcomeTitle);node(node(reminder,'p'),'strong',sstWelcomeSubtitle);node(reminder,'p',sstWelcomeInstructions);
  node(form,'p','À remplir uniquement après un véritable accueil SST chez IGA. La signature confirme les explications reçues, et non une compétence sur une machine.');
  const identity=node(form,'fieldset');node(identity,'legend','1. Identification');
@@ -73,4 +73,5 @@ export function buildGeneralSst(form,draft,fields,onsite){
  field(employee,fields,draft,'signature_date_employe','Date de la signature','date',true);
  field(employee,fields,draft,'confirmation','Je confirme avoir reçu les explications cochées et sais à qui demander de l’aide.','checkbox',true);
  if(!onsite)node(form,'p','La formation pratique et les autorisations des machines seront validées séparément chez IGA par un responsable, en personne. Ce formulaire ne vaut pas autorisation d’utiliser un équipement.');
+ if(awaitingDirection)for(const k of ['employe_nom','departement_poste','accueil_points_a_reprendre','signature_nom_employe','signature_date_employe','confirmation',...topics.map((_,i)=>'accueil_sujet_'+(i+1))]){const input=fields.get(k);if(input){input.disabled=true;input.required=false;}}
 }

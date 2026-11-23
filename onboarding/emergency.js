@@ -109,5 +109,8 @@ export async function signedEmergency(a,strokes){
   txt('Ils ne constituent pas une ordonnance ni une autorisation d’administrer un médicament.',39,737,8,false,muted);
   txt('Annexe liée à la fiche signée en page 1.',39,755,8,true,blue);
  }
+ const printing=pdf.catalog.getOrCreateViewerPreferences();
+ printing.setPrintScaling(PDFLib.PrintScaling.None);printing.setDuplex(PDFLib.Duplex.DuplexFlipLongEdge);printing.setPickTrayByPDFSize(true);
+ delete pdf.context.trailerInfo.Info;
  return Buffer.from(await pdf.save());
 }

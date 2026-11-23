@@ -34,7 +34,7 @@ export function buildRetirement(form,draft,fields,employer=false){
  for(const f of employerFields){
   const label=create('label',f.label),input=create('input');input.readOnly=true;input.setAttribute('aria-readonly','true');input.value=draft[f.id]||'À compléter par la direction';label.append(input);direction.append(label);
  }
- if(!retirementEmployerReady(draft))direction.append(create('p','La direction doit compléter et enregistrer sa section avant votre signature. Vous pouvez enregistrer vos réponses et reprendre plus tard.'));
+ if(!retirementEmployerReady(draft))direction.append(create('p','Vous pouvez remplir et signer votre partie maintenant. La direction complétera ensuite les renseignements de l’employeur. Vous n’aurez pas à signer de nouveau.'));
  const spouse=control(form,'spouse','Ajouter un conjoint ou une conjointe ?',{choices:{no:'Non',yes:'Oui'},value:'no'});
  section('c','2 · Renseignements sur le conjoint');
  const mode=control(form,'mode','3 · Désignation de bénéficiaire',{choices:{estate:'Ma succession',persons:'Un ou plusieurs bénéficiaires'},req:true});

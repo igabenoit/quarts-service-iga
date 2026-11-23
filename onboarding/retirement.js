@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import PDFLib from './tuac/pdf-lib.min.cjs';
-import {retirementFields,visibleGroup,retirementEmployerReady} from '../public/retirement-fields.js';
+import {retirementFields,visibleGroup,retirementEmployerReady,retirementEmployerKeys} from '../public/retirement-fields.js';
 export {retirementKeys} from '../public/retirement-fields.js';
 
 const scale=72/95;
@@ -9,8 +9,8 @@ function dateParts(v){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||new Date(v+'T12:00Z').toISOString().slice(0,10)!==v)throw Error('Date invalide');
  return v.slice(8)+v.slice(5,7)+v.slice(0,4);
 }
-export async function signedRetirement(answers,strokes){
- if(!retirementEmployerReady(answers))throw Error('La direction doit compléter et enregistrer les renseignements de l’employeur avant votre signature.');
+export async function signedRetirement(answers,strokes,options={}){
+ if(!options.employeeOnly&&!retirementEmployerReady(answers))throw Error('La direction doit compléter et enregistrer les renseignements de l’employeur avant la finalisation.');
  const {mode,count,signed,consent}=answers;
  if(consent!=='yes'||!['estate','persons'].includes(mode))throw Error('Autorisation et désignation requises');
  dateParts(signed);
@@ -30,6 +30,7 @@ export async function signedRetirement(answers,strokes){
  function cross(page,[x,y]){text(page,'X',x-4,y+4,8);}
  if(mode==='estate')cross(pages[0],[40,713]);
  for(const f of retirementFields){
+  if(options.employeeOnly&&retirementEmployerKeys.includes(f.id))continue;
   if(!visibleGroup(f.group,answers))continue;
   let v=(answers[f.id]||'').trim();
   if(!v){if(f.req)throw Error(f.label);continue;}
