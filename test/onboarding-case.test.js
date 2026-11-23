@@ -18,13 +18,17 @@ test('parcours de deux nouvelles embauches isolées', {timeout:90000},async()=>{
    const key=must(await admin('GET','state')).employees.find(e=>e.name===n).key;
    const route=(op='')=>'onboarding'+(op?'/'+op:'')+'?key='+key+'&view=direction';routes.push(route);
    const draft=must(await admin('GET',route()));assert.ok(draft.eligible);assert.equal(draft.invited_at,null);
-   const invite=must(await admin('POST',route('invite'),{documents:['tuac'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'}));tokens.push(invite.path.split('#')[1]);
+   const selection={documents:['tuac'],email:'employee@example.invalid',managerEmail:n==='Alice Exemple'?'rh@example.invalid; gerant@example.invalid, RH@example.invalid':'rh@example.invalid',days:3,due:'2030-01-01'};
+   const invalid=must(await admin('POST',route('invite'),{...selection,managerEmail:'rh@example.invalid; invalide'}),400);assert.match(invalid.error,/adresse de suivi est invalide/);
+   assert.equal(must(await admin('GET',route())).invited_at,null,'une adresse invalide empêche toute invitation');
+   const invite=must(await admin('POST',route('invite'),selection));tokens.push(invite.path.split('#')[1]);
+   assert.equal(must(await admin('GET',route())).manager_email,n==='Alice Exemple'?'rh@example.invalid, gerant@example.invalid':'rh@example.invalid');
   }
   const execute=(i,action,body={})=>f.call('POST','/api/accueil-employe/'+action,{headers:{...headers,Authorization:'Bearer '+tokens[i]},body});
   assert.deepEqual(await f.onboardingMail(),[]);
   const reminders=[...await f.onboardingMail(true),...await f.onboardingMail()];
   assert.equal(reminders.length,2);
-  for(const item of reminders){assert.equal(item.payload.subject,'Rappel de votre accueil');assert.ok(tokens.some(t=>item.payload.text.endsWith(t)));assert.equal(item.payload.attachments,undefined);}
+  for(const item of reminders){assert.equal(item.payload.subject,'Rappel de votre accueil');assert.deepEqual(item.payload.to,['employee@example.invalid']);assert.ok(tokens.some(t=>item.payload.text.endsWith(t)));assert.equal(item.payload.attachments,undefined);}
   assert.deepEqual(await f.onboardingMail(),[]);
   const initial=must(await execute(0,'state'));
   const answers=Object.fromEntries(tuacFields.map(k=>[k,'Exemple']));
@@ -37,10 +41,12 @@ test('parcours de deux nouvelles embauches isolées', {timeout:90000},async()=>{
   tokens[0]=must(await admin('POST',routes[0]('renew'),{})).path.split('#')[1];
   assert.equal(must(await execute(0,'state')).documents[0].version,1);
   must(await execute(0,'sign',{...body,version:1,strokes:[[[0,0],[0.5,0.8],[1,0.2]]]}));
+  const pending=await f.onboardingMail();assert.equal(pending.length,1);assert.deepEqual(pending[0].payload.to,['rh@example.invalid','gerant@example.invalid'],'sans destinataire direction fixe, les avis suivent le dossier');
   must(await admin('POST',routes[0]('sur-place/finalize'),{...body,version:2,answers:{Emploi:'2026-11-08'}}));
   const status=must(await admin('GET',routes[0]()));assert.ok(status.completed_at);assert.ok(status.activity);
+  await assert.rejects(()=>f.query(null,null,{onboardingMail:true,failMail:true}),/Simulated/);
   const notifications=await f.onboardingMail(true);assert.equal(notifications.length,1);
-  assert.deepEqual(notifications[0].payload.to,['rh@example.invalid']);assert.equal(notifications[0].payload.subject,'Dossier d’accueil complété');
+  assert.deepEqual(notifications[0].payload.to,['rh@example.invalid','gerant@example.invalid']);assert.equal(notifications[0].payload.subject,'Dossier d’accueil complété');
   assert.equal(notifications[0].payload.attachments,undefined);assert.deepEqual(await f.onboardingMail(),[]);
   const original='originals/'+status.documents[0].original_id;
   const pdf=await admin('GET',original);assert.equal(pdf.headers.get('content-type'),'application/pdf');assert.ok(pdf.body.startsWith('%PDF-'));

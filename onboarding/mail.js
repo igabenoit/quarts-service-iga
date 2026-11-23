@@ -1,5 +1,6 @@
 import {createHmac,createHash} from 'node:crypto';
 import {onboardingWelcome,sstWelcomeTitle,sstWelcomeSubtitle,sstWelcomeInstructions} from '../public/onboarding-messages.js';
+import {parseFollowUpEmails} from '../public/onboarding-follow-up.js';
 export function invitationToken(nonce){
  return createHmac('sha256',process.env.SESSION_SECRET).update('onboarding/'+nonce).digest('base64url');
 }
@@ -56,10 +57,9 @@ export async function sendPending(pool,{send,trial=null,directionEmail=process.e
    const pending=(await db.query("SELECT kind,draft FROM onboarding_docs WHERE employee_key=$1 AND original_id IS NULL AND draft#>>'{_workflow,employeeOriginalId}' IS NOT NULL AND draft#>>'{_workflow,notifiedAt}' IS NULL ORDER BY kind FOR UPDATE",[row.employee_key])).rows;
    if(pending.length){
     for(const doc of pending){
-     const w=doc.draft._workflow,to=trial?trial.managerEmail:directionEmail||row.manager_email;
-     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to||''))throw Error('Destinataire de finalisation manquant');
+     const w=doc.draft._workflow,to=parseFollowUpEmails(trial?trial.managerEmail:directionEmail||row.manager_email);
      const link=root+'/accueil-employe.html?sur-place#'+new URLSearchParams({key:row.employee_key,kind:doc.kind});
-     const payload={from:onboardingSender(),to:[to],subject:'Document à finaliser · '+w.title,text:'Bonjour,\n\n'+w.employeeName+' a rempli et signé sa partie du document suivant :\n'+w.title+'\n\nTa partie reste à compléter pour finaliser le document. Les renseignements et la signature de l’employé sont verrouillés.\n\nOuvrir le document à finaliser : '+link+'\n\nConnecte-toi avec ton accès autorisé. Aucun formulaire ni renseignement confidentiel n’est joint à ce courriel.\n\nIGA Benoit'};
+     const payload={from:onboardingSender(),to,subject:'Document à finaliser · '+w.title,text:'Bonjour,\n\n'+w.employeeName+' a rempli et signé sa partie du document suivant :\n'+w.title+'\n\nTa partie reste à compléter pour finaliser le document. Les renseignements et la signature de l’employé sont verrouillés.\n\nOuvrir le document à finaliser : '+link+'\n\nConnecte-toi avec ton accès autorisé. Aucun formulaire ni renseignement confidentiel n’est joint à ce courriel.\n\nIGA Benoit'};
      payload.html=emailHtml(payload.text);
      const id=createHash('sha256').update('onboarding-direction|'+w.employeeOriginalId+'|'+to).digest('hex');
      if(send)await send(payload,id);else{
@@ -73,9 +73,9 @@ export async function sendPending(pool,{send,trial=null,directionEmail=process.e
    const complete=!!row.completed_at,token=invitationToken(row.nonce);
    if(!complete && createHash('sha256').update(token).digest('hex')!==row.token_hash)throw Error('Lien à renouveler');
    const pendingSst=!complete&&(await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND kind IN ('sst','sst_general') AND original_id IS NULL AND draft#>>'{_workflow,employeeOriginalId}' IS NULL LIMIT 1",[row.employee_key])).rowCount>0;
-   const payload={from:onboardingSender(),to:[complete?row.manager_email:row.employee_email],subject:complete?'Dossier d’accueil complété':'Rappel de votre accueil',text:complete?'Un dossier d’accueil est complet. Consultez Dossiers employés : '+root+'/dossiers-employes.html':'Votre dossier d’accueil est encore à compléter.'+(pendingSst?'\n\n'+sstNotice:'')+'\n\nReprenez votre dossier : '+root+'/accueil-employe.html#'+token};
+   const payload={from:onboardingSender(),to:complete?parseFollowUpEmails(row.manager_email):[row.employee_email],subject:complete?'Dossier d’accueil complété':'Rappel de votre accueil',text:complete?'Un dossier d’accueil est complet. Consultez Dossiers employés : '+root+'/dossiers-employes.html':'Votre dossier d’accueil est encore à compléter.'+(pendingSst?'\n\n'+sstNotice:'')+'\n\nReprenez votre dossier : '+root+'/accueil-employe.html#'+token};
    payload.html=emailHtml(payload.text);
-   const id=createHash('sha256').update([row.employee_key,row.invited_at,complete?'final':'rappel'].join('|')).digest('hex');
+   const id=createHash('sha256').update([row.employee_key,row.invited_at,complete?'final|'+payload.to.join(','):'rappel'].join('|')).digest('hex');
    if(send)await send(payload,id);
    else{
     const r=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':id},body:JSON.stringify(payload)});

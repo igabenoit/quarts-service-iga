@@ -11,6 +11,7 @@ import {tuacAnswers} from '../public/tuac-fields.js';
 import {sharedKinds,directionReady,workflowState,publicDraft} from './workflow.js';
 import {signedEmergency,emergencyFields} from './emergency.js';
 import {onboardingBlockReason} from '../public/onboarding-eligibility.js';
+import {parseFollowUpEmails} from '../public/onboarding-follow-up.js';
 
 import {annexKeys,signedAnnex,annexPdf} from './annexe-sst.js';
 import {generalSstFields,generalSstEmployeeKeys,signedGeneralSst,blankGeneralSst,sanitizeGeneralSstAnswers} from './sst-general.js';
@@ -98,10 +99,11 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     const b=req.body;
     if(trial && (b.email!==trial.employeeEmail||b.managerEmail!==trial.managerEmail||b.approvedPolicy!==trial.policyId))fail(400,'Vérifiez les destinataires et approuvez la politique de cet essai.');
     if(!await publishedPolicy(db))fail(428,'Publiez la politique de confidentialité avant l’invitation.');
-    if(!Array.isArray(b.documents)||!b.documents.length||b.documents.some(k=>!Object.hasOwn(catalog,k))||!mail(b.email)||!mail(b.managerEmail)||!date(b.due)||!Number.isInteger(b.days)||b.days<1||b.days>365)fail(400,'Vérifiez les documents, les courriels, l’échéance et le délai.');
+    let managerEmails;try{managerEmails=parseFollowUpEmails(b.managerEmail);}catch(error){fail(400,error.message);}
+    if(!Array.isArray(b.documents)||!b.documents.length||b.documents.some(k=>!Object.hasOwn(catalog,k))||!mail(b.email)||!date(b.due)||!Number.isInteger(b.days)||b.days<1||b.days>365)fail(400,'Vérifiez les documents, les courriels, l’échéance et le délai.');
     for(const k of new Set(b.documents))await db.query('INSERT INTO onboarding_docs(employee_key,kind) VALUES($1,$2) ON CONFLICT(employee_key,kind) DO UPDATE SET invited=true',[e.key,k]);
     if(!(await db.query('SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND original_id IS NULL LIMIT 1',[e.key])).rowCount)fail(409,'Les formulaires sélectionnés sont déjà signés.');
-    await db.query("UPDATE onboarding_cases SET invited_at=COALESCE(invited_at,now()),due=$2,reminder_at=now()+$3::int*interval '1 day',employee_email=$4,manager_email=$5,completed_at=NULL,notified=false,reminded=false WHERE employee_key=$1",[e.key,b.due,b.days,b.email,b.managerEmail]);
+    await db.query("UPDATE onboarding_cases SET invited_at=COALESCE(invited_at,now()),due=$2,reminder_at=now()+$3::int*interval '1 day',employee_email=$4,manager_email=$5,completed_at=NULL,notified=false,reminded=false WHERE employee_key=$1",[e.key,b.due,b.days,b.email,managerEmails.join(', ')]);
     // A corrected recipient must not leave the previous recipient's link active.
     if(row.employee_email&&row.employee_email!==b.email)nonce=null;
    }else if(op!=='renew'||!row.invited_at||row.completed_at)fail(409,'Actualisez le dossier.');

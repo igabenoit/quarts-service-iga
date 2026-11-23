@@ -23,8 +23,12 @@ try{
  await status.getByText('Aucun courriel envoyé',{exact:true}).waitFor();
  assert.equal(await panel.locator('.onboarding-blocked').count(),0);
  await panel.getByLabel('Courriel de l’employé',{exact:true}).fill('camille@example.invalid');
- await panel.getByLabel('Courriel du gestionnaire pour le suivi').fill('rh@example.invalid');
+ await panel.getByLabel('Courriels des gestionnaires pour le suivi').fill('rh@example.invalid; invalide');
  await panel.getByLabel('Échéance',{exact:true}).fill('2030-11-10');
+ await panel.locator('form [value=email]').click();
+ await panel.getByRole('alert').filter({hasText:'Une adresse de suivi est invalide'}).waitFor();
+ assert.equal((await f.query(null,null,{invitationMessages:true})).length,0);
+ await panel.getByLabel('Courriels des gestionnaires pour le suivi').fill('rh@example.invalid; gerant@example.invalid, RH@example.invalid');
  await panel.locator('form [value=email]').click();
  await status.locator(':scope > strong').filter({hasText:'Courriel transmis'}).waitFor();
  assert.match(await status.innerText(),/camille@example.invalid/);
@@ -38,6 +42,8 @@ try{
  await panel.screenshot({path:'../onboarding-delivery-confirmation.png'});
  // Link-only edits retain old receipts, without claiming the new recipient was emailed.
  await panel.getByText('Ajouter des documents ou modifier l’envoi',{exact:true}).click();
+ assert.equal(await panel.getByLabel('Courriels des gestionnaires pour le suivi').inputValue(),'rh@example.invalid, gerant@example.invalid');
+ await panel.locator('form .form-grid').screenshot({path:'../onboarding-multiple-follow-up.png'});
  await panel.getByLabel('Courriel de l’employé',{exact:true}).fill('correct@example.invalid');
  await panel.locator('form [value=link]').click();
  await status.getByText('Aucun courriel envoyé pour ce lien',{exact:true}).waitFor();
