@@ -1,20 +1,42 @@
 import {readFile} from 'node:fs/promises';
 import PDFLib from './tuac/pdf-lib.min.cjs';
 import {signedTuac,employer} from './tuac.js';
+import {calibrateTuacPrint,tuacPrintLayout,currentTuacPrintLayout} from './tuac-calibration.js';
 const name=PDFLib.PDFName.of;
 const decode=stream=>Buffer.from(PDFLib.decodePDFRawStream(stream).decode()).toString();
 const invalid=()=>{throw Error('Ce PDF TUAC ne correspond pas à un modèle d’impression reconnu. L’original signé reste disponible.');};
 
-// Read-only print derivative for the former two-copy generator. Never replace
-// an archived signed PDF. Recognize the exact template, fields and signature
-// operators before reproducing its existing content on the calibrated sheet.
+// Read-only print derivatives. Never replace an archived signed PDF.
+// Three-copy overlays retain their exact original text and signature streams.
+// The former two-copy generator is recognized before reproducing its content.
 export async function tuacPrintCopy(bytes){
  const pdf=await PDFLib.PDFDocument.load(bytes,{updateMetadata:false});
  if(pdf.getPageCount()!==1)invalid();
  const page=pdf.getPage(0),size=page.getSize();
  if(size.width!==612||size.height!==792)invalid();
+ const layout=tuacPrintLayout(pdf);
+ if(layout===currentTuacPrintLayout)return Buffer.from(bytes);
+ if(layout)invalid();
  const objects=page.node.Resources().lookupMaybe(name('XObject'),PDFLib.PDFDict);
- if(!objects?.entries().length&&pdf.catalog.getOrCreateViewerPreferences().getDuplex()===PDFLib.Duplex.Simplex)return Buffer.from(bytes);
+ if(!objects?.entries().length){
+  const streams=page.node.Contents();
+  if(!streams||page.node.Annots()?.size()||pdf.catalog.has(name('AcroForm')))invalid();
+  const content=Array.from({length:streams.size()},(_,i)=>decode(streams.lookup(i))).join('\n');
+  const positions=[...content.matchAll(/1 0 0 1 ([\d.-]+) ([\d.-]+) Tm/g)];
+  const perCopy=positions.length/3;
+  if(![18,21].includes(perCopy)||content.match(/ Tj\b/g)?.length!==positions.length||content.match(/^S$/gm)?.length!==3||content.match(/ cm\b/g)?.length!==3||/\bDo\b/.test(content))invalid();
+  const fonts=page.node.Resources().lookupMaybe(name('Font'),PDFLib.PDFDict);
+  if(!fonts?.entries().length||fonts.entries().some(([key])=>!/^\/LiberationSans-\d+$/.test(key.toString())))invalid();
+  const rows=[[70,93.7,118.7,142.5,166.4,191],[333.4,357.6,382.2,406.4,430.5,454.8],[597.6,621.7,646.2,670.4,694.5,719]];
+  for(let i=0;i<3;i++){
+   const expected=rows[i].map(row=>792-(row-4)-3*72/25.4);
+   const y=[...Array(5).fill(expected[0]),...Array(5).fill(expected[1]),expected[2]+7.4-2*72/25.4,expected[2],expected[2],expected[3],expected[4],...(perCopy===21?Array(3).fill(expected[4]):[]),...Array(3).fill(expected[5])];
+   const actual=positions.slice(i*perCopy,(i+1)*perCopy);
+   if(actual.some((p,j)=>Math.abs(Number(p[2])-y[j])>1e-6)||Math.abs(Number(actual[0][1])-[96.5,96.75,96.85][i])>1e-6)invalid();
+  }
+  calibrateTuacPrint(pdf);
+  return Buffer.from(await pdf.save());
+ }
  const entries=objects?.entries();if(entries?.length!==2||new Set(entries.map(([,ref])=>ref.toString())).size!==1)invalid();
  const form=pdf.context.lookup(entries[0][1]);
  if(form.dict.get(name('Subtype'))?.toString()!=='/Form'||form.dict.get(name('BBox'))?.toString()!=='[ 0 0 792 472 ]')invalid();

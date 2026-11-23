@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import fontkit from '@pdf-lib/fontkit';
 import PDFLib from './tuac/pdf-lib.min.cjs';
+import {calibrateTuacPrint} from './tuac-calibration.js';
 
 import {normalizeTuacPhone} from '../public/tuac-phone.js';
 import {tuacFields,tuacEmployerReady} from '../public/tuac-fields.js';
@@ -75,7 +76,8 @@ export async function signedTuac(answers, strokes,options={}) {
   const page = pdf.addPage([612,792]);
 
   for (const {x, rows} of copies) {
-    // The Xerox test placed the baseline 3 mm below the initial scan calibration.
+    // Historical coordinates, retained for reproducible archived print copies.
+    // The current native-print calibration is applied once to the whole page.
     const [name, address, contact, company, job, sign] = rows.map(row => 792 - (row - 4) - 3 * mm);
     function field(value, left, right, y, size = 10, center = false) {
       const width = font.widthOfTextAtSize(value, size);
@@ -106,5 +108,6 @@ export async function signedTuac(answers, strokes,options={}) {
     date(data.Signature, [95, 117, 142.5, 168.7], sign);
     signPage(page, 210 + x, sign);
   }
+  calibrateTuacPrint(pdf);
   return Buffer.from(await pdf.save());
 }

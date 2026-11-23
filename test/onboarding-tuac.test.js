@@ -24,8 +24,8 @@ test('TUAC signé : trois fiches calibrées sur la feuille originale, aucun fond
   assert.equal(pdf.getPageCount(),1);
   const page=pdf.getPages()[0];
   assert.deepEqual(page.getSize(),{width:612,height:792});
-  const stream=page.node.Contents().lookup(0);
-  const operators=Buffer.from(PDFLib.decodePDFRawStream(stream).decode()).toString();
+  const streams=page.node.Contents();
+  const operators=Array.from({length:streams.size()},(_,i)=>Buffer.from(PDFLib.decodePDFRawStream(streams.lookup(i)).decode()).toString()).join('\n');
   assert.equal(operators.match(/ Do\b/g),null,'aucun fond de formulaire réimprimé');
   assert.equal(operators.match(/ Tj\b/g)?.length,63,'les 21 valeurs, dont les dates séparées, sur chacune des trois fiches');
   assert.equal(operators.match(/^S$/gm)?.length,3,'la même signature sur chacune des fiches');
