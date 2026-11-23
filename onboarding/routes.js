@@ -1,3 +1,5 @@
+import {signedPersonalInformation,personalFields} from './personal-information.js';
+import {personalAnswers} from '../public/personal-information-schema.js';
 import {blankEthics,ethicsKeys,signedEthics} from './ethics.js';
 import {signedRetirement,retirementKeys} from './retirement.js';
 import {sendPending,invitationToken,sendInvitation,invitationEmailReady} from './mail.js';
@@ -12,9 +14,9 @@ import {annexSource} from './ethics-source.js';
 const blankAnnex=async()=>annexPdf(await annexSource());
 const blankFor=kind=>kind==='sst'?blankAnnex():kind==='sst_general'?blankGeneralSst():blankEthics();
 const base='/api/employee-files/onboarding';
-const catalog={tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics},sst:{title:'Accusé de réception – Programme d’accueil général SST (ancien modèle)',fields:annexKeys,render:signedAnnex},sst_general:{title:'Programme d’accueil général SST – 2026',fields:generalSstFields,render:signedGeneralSst,category:'sst'}};
+const catalog={renseignements:{title:'Informations personnelles · Embauche',fields:personalFields,render:signedPersonalInformation},tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics},sst:{title:'Accusé de réception – Programme d’accueil général SST (ancien modèle)',fields:annexKeys,render:signedAnnex},sst_general:{title:'Programme d’accueil général SST – 2026',fields:generalSstFields,render:signedGeneralSst,category:'sst'}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
-export const onboardingDefaults=['tuac','retraite','urgence','ethique','sst_general'];
+export const onboardingDefaults=['renseignements','tuac','retraite','urgence','ethique','sst_general'];
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
@@ -39,7 +41,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(!['direction','gerant'].includes(req.ef.view)||!content(req.ef,e,'rh'))fail(403,'Accès RH requis.');
   return e;
  }
- const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id,invited FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>d.kind==='urgence'&&!allowedMedical?{...d,done:!!d.original_id,original_id:null,restricted:true}:{...d,done:!!d.original_id});
+ const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id,invited FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'renseignements' THEN -1 WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>d.kind==='urgence'&&!allowedMedical?{...d,done:!!d.original_id,original_id:null,restricted:true}:{...d,done:!!d.original_id});
  app.get(base+'/modele/sst-general',auth,wrap(async(req,res)=>{
   if(!['direction','gerant'].includes(req.ef.view))fail(403,'Accès réservé à la gestion.');
   res.set('Cache-Control','no-store').type('pdf').send(await blankGeneralSst());
@@ -110,13 +112,17 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     if(b.policy!==String(policy.id)||!b.answers||typeof b.answers!=='object')fail(400,'Confirmez la politique et vérifiez les champs.');
     const spec=catalog[doc.kind];
     let answers=Object.fromEntries(spec.fields.map(k=>[k,String(b.answers[k]??'').slice(0,200)]));
+    if(doc.kind==='renseignements'){
+     if(onsite&&action==='sign')fail(400,'L’employé doit signer ce formulaire depuis son lien personnel.');
+     try{answers=personalAnswers(b.answers,doc.draft||{},onsite);}catch(error){fail(400,error.message);}
+    }
     if(doc.kind==='sst_general')answers=sanitizeGeneralSstAnswers(answers,onsite);
     if(doc.kind==='sst'&&!onsite){
       for(const k of spec.fields.filter(k=>k.startsWith('initiales')))answers[k]=doc.draft?.[k]||'';
     }
     let original=null;
     if(action==='sign'){
-     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch{fail(400,'Vérifiez les champs et la signature.');}
+     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch(error){fail(400,doc.kind==='renseignements'?error.message:'Vérifiez les champs et la signature.');}
      const file=await saveOriginal(db,{audit:onsite?{...req.ef.audit,kind:'sur-place',policy:String(policy.id)}:{kind:'invitation',generation:row.generation,policy:String(policy.id)}},{key},spec.category||'rh',bytes,{name:spec.title+'.pdf',mime:'application/pdf',provenance:onsite?'Signature en présence de l’employé':'Signature du parcours d’accueil',documentDate:new Date().toISOString().slice(0,10),signatureKind:'drawn'});
      original=file.id;
     }
@@ -161,7 +167,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     return null;
    }
    await updateDocument(db,req,row,policy,action,false);
-   const items=(await db.query("SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows;
+   const items=(await db.query("SELECT kind,draft,version,original_id IS NOT NULL AS done FROM onboarding_docs WHERE employee_key=$1 AND invited ORDER BY CASE kind WHEN 'renseignements' THEN -1 WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows;
    return {documents:items.map(d=>({...d,title:catalog[d.kind].title,fields:catalog[d.kind].fields})),policy:{id:String(policy.id),text:policy.text},due:row.due};
   });
   if(result===null)return res.type('pdf').send(await blankFor(req.body.kind));

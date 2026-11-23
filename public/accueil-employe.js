@@ -1,3 +1,4 @@
+import {buildPersonalInformation} from './accueil-renseignements.js';
 import {buildRetirement} from './accueil-retraite.js';
 import {buildEmergency} from './accueil-urgence.js';
 import {buildSst} from './accueil-sst.js';
@@ -32,6 +33,19 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
+ if(d.kind==='renseignements'&&onsite){
+  buildPersonalInformation(form,d.draft,fields,true);
+  const check=node('input');check.type='checkbox';const consent=node('label');consent.append(check,' J’ai pris connaissance de la politique de confidentialité.');
+  const privacy=node('details');privacy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));form.append(privacy,consent);
+  const save=node('button','Enregistrer la section employeur');save.type='button';form.append(save);
+  save.onclick=async()=>{
+   if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}
+   save.disabled=true;
+   try{const result=await call('save',{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].map(([key,input])=>[key,input.value]))});show(result);status.textContent='Section employeur enregistrée. L’employé peut reprendre son formulaire depuis son lien personnel.';}catch(error){status.textContent=error.message;}finally{save.disabled=false;}
+  };
+  form.onsubmit=e=>e.preventDefault();return;
+ }
+ const personal=d.kind==='renseignements'?buildPersonalInformation(form,d.draft,fields,false):null;
  if(['sst','sst_general','ethique'].includes(d.kind)){
   const read=node('button',d.kind==='sst_general'?'Ouvrir le programme d’accueil SST (PDF remplissable)':d.kind==='sst'?'Ouvrir l’ancienne annexe SST (PDF remplissable)':'Télécharger le code d’éthique et lire les attestations (PDF, 52 pages)');read.type='button';
   read.onclick=async()=>{try{
@@ -55,7 +69,7 @@ function openForm(state,d){
  }
  const validateRetirement=d.kind==='retraite'?buildRetirement(form,d.draft,fields):null;
   const validateEmergency=d.kind==='urgence'?buildEmergency(form,d.draft,fields):null;
- if(!['ethique','sst','sst_general'].includes(d.kind)&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
+ if(!['renseignements','ethique','sst','sst_general'].includes(d.kind)&&!validateRetirement&&!validateEmergency)for(const key of d.fields){const label=node('label',labels[key]||key),i=node('input');i.type=['Naissance','Emploi','Signature'].includes(key)?'date':key==='Courriel'?'email':'text';i.maxLength=200;i.required=true;i.value=d.draft[key]||'';label.append(i);form.append(label);fields.set(key,i);}
  const policy=node('details');policy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));
  const check=node('input');check.type='checkbox';const label=node('label');label.append(check,' J’ai pris connaissance de la politique.');form.append(policy,label,node('h3','Signature'));
  const c=node('canvas');c.width=800;c.height=200;c.setAttribute('aria-label','Tracez votre signature');form.append(c);
@@ -78,7 +92,7 @@ function openForm(state,d){
   const eraseSupervisor=node('button','Effacer la signature du responsable');eraseSupervisor.type='button';eraseSupervisor.onclick=()=>{painter.clearRect(0,0,800,200);supervisorStrokes=[];};form.append(eraseSupervisor);
  }
  for(const [action,title] of [['save','Enregistrer et reprendre plus tard'],['sign','Signer et classer le PDF']]){
-  const b=node('button',title);b.type='button';form.append(b);
+  const b=node('button',title);b.type='button';if(action==='sign'&&personal&&!personal.ready)b.disabled=true;form.append(b);
   b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'){validateRetirement?.();validateEmergency?.();if(!form.reportValidity())return;}
    b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.type==='checkbox'?(i.checked?'yes':'no'):i.value])),strokes:action==='sign'?strokes:[],supervisorStrokes:action==='sign'?supervisorStrokes:[]});show(result);status.textContent=action==='save'?(onsite?'Brouillon enregistré dans le dossier.':'Brouillon enregistré. Conservez votre lien pour reprendre.'):'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
  }

@@ -4,7 +4,7 @@ const date=value=>value?new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',time
 export function onboardingForm(c){
  const documents=c.documents||[],defaults=c.defaultDocuments||[],kinds=[...new Set([...defaults,...documents.map(d=>d.kind)])];
  const due=c.due||new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Date.now()+7*86400000));
- return '<form data-invitation><fieldset><legend><strong>Documents à transmettre</strong></legend><p class="muted">Les cinq formulaires actuels sont sélectionnés. Les signatures et les réponses déjà enregistrées sont conservées.</p>'+kinds.map(kind=>{
+ return '<form data-invitation><fieldset><legend><strong>Documents à transmettre</strong></legend><p class="muted">Les '+defaults.length+' formulaires actuels sont sélectionnés. Les signatures et les réponses déjà enregistrées sont conservées.</p>'+kinds.map(kind=>{
   const doc=documents.find(d=>d.kind===kind),done=doc?.done||doc?.original_id,assigned=doc?.invited;
   return '<label class="check"><input type="checkbox" name="doc" value="'+esc(kind)+'" checked'+(done||assigned?' disabled':'')+'><span>'+esc(c.catalog[kind])+(done?' <span class="badge ok">Signé</span>':assigned?' <span class="badge warn">À compléter</span>':'')+'</span></label>';
  }).join('')+'</fieldset><div class="form-grid"><label>Courriel de l’employé<input required type="email" name="email" autocomplete="off" value="'+esc(c.employeeEmail||c.employee_email||'')+'"></label><label>Courriel du gestionnaire pour le suivi<input required type="email" name="managerEmail" autocomplete="off" value="'+esc(c.managerEmail||c.manager_email||'')+'"></label><label>Échéance<input required type="date" name="due" value="'+esc(due)+'"></label><label>Rappel après (jours)<input required type="number" name="days" value="3" min="1" max="365"></label></div>'+(c.emailReady?'':'<p class="muted">L’envoi par courriel est indisponible. Vous pouvez créer le lien et le transmettre vous-même.</p>')+'<div class="actions">'+(c.emailReady?'<button type="submit" name="delivery" value="email">Envoyer les documents par courriel</button>':'')+'<button type="submit" name="delivery" value="link" class="secondary">'+(c.invited_at?'Enregistrer et afficher le lien':'Créer le lien à transmettre')+'</button></div></form>';
@@ -61,6 +61,13 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
    actions.innerHTML=(c.active?(c.emailReady?'<button data-op="send">Envoyer ou réessayer le courriel</button>':'')+'<button class="secondary" data-op="revoke">Révoquer le lien</button>':'<p>Lien révoqué</p>')+'<button class="secondary" data-op="renew">Créer un nouveau lien</button>';panel.append(actions);
    for(const button of actions.querySelectorAll('[data-op]'))button.onclick=()=>change(button.dataset.op);
   }
+ }
+ const personal=c.documents.find(d=>d.kind==='renseignements');
+ if(!personal?.done&&!personal?.original_id){
+  const preparation=document.createElement('p'),link=document.createElement('a');
+  link.className='button secondary';link.textContent='Compléter la section employeur';
+  link.href='/accueil-employe.html?sur-place#'+new URLSearchParams({key,kind:'renseignements'});
+  preparation.append(link,document.createTextNode(' Département, poste, date d’entrée, salaire et échelle. À préparer avant la signature de l’employé.'));panel.append(preparation);
  }
  const formHost=document.createElement(c.invited_at?'details':'div');
  formHost.innerHTML=(c.invited_at?'<summary>Ajouter des documents ou modifier l’envoi</summary>':'')+onboardingForm(c);panel.append(formHost);

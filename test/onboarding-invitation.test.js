@@ -23,7 +23,7 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   must(await f.call('POST','/api/employee-files/'+route('start'),{body:{},cookie}),403);
   must(await admin('POST',route('start'),{}));
   const draft=must(await admin('GET',route()));assert.equal(draft.eligible,true);
-  assert.deepEqual(draft.defaultDocuments,['tuac','retraite','urgence','ethique','sst_general']);
+  assert.deepEqual(draft.defaultDocuments,['renseignements','tuac','retraite','urgence','ethique','sst_general']);
   const selection={documents:['tuac'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'};
   must(await admin('POST',route('invite'),selection),428);
   must(await admin('POST','policy?view=direction',{text:'Politique fictive de confidentialité. '.repeat(12),confirmed:true}),201);
@@ -37,7 +37,7 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   await f.query(null,null,{invitationMessages:true,fail:true});
   const expanded=must(await admin('POST',route('invite'),{...selection,documents:draft.defaultDocuments,delivery:'email'}));
   assert.equal(expanded.path,invite.path);assert.equal(expanded.delivery.status,'failed');
-  const state=must(await execute('state'));assert.equal(state.documents.length,5);assert.equal(state.documents.find(d=>d.kind==='tuac').done,true);
+  const state=must(await execute('state'));assert.equal(state.documents.length,6);assert.equal(state.documents.find(d=>d.kind==='tuac').done,true);
   const updated=must(await admin('GET',route()));assert.equal(updated.completed_at,null);assert.equal(updated.documents.find(d=>d.kind==='tuac').original_id,original);
   assert.equal(updated.lastDelivery.status,'failed');
   const failed=await f.query(null,null,{invitationMessages:true,fail:false});assert.equal(failed.length,1);
@@ -52,15 +52,15 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   assert.equal(must(await admin('GET',route())).lastDelivery.status,null);
   must(await admin('POST',route('revoke'),{}));must(await execute('state'),404);
   must(await admin('POST',route('send'),{}),409);
-  token=must(await admin('POST',route('renew'),{})).path.split('#')[1];assert.equal(must(await execute('state')).documents.length,5);
+  token=must(await admin('POST',route('renew'),{})).path.split('#')[1];assert.equal(must(await execute('state')).documents.length,6);
  }finally{await f.close();}
 });
 
-test('invitation : un courriel, cinq titres, lien personnel et reprise sans doublon',async t=>{
+test('invitation : un courriel, six titres, lien personnel et reprise sans doublon',async t=>{
  const previous=process.env.SESSION_SECRET;process.env.SESSION_SECRET='fiction-test-only';
  t.after(()=>{if(previous===undefined)delete process.env.SESSION_SECRET;else process.env.SESSION_SECRET=previous;});
  const token=invitationToken('test-nonce'),row={employee_key:'store:1',generation:1,nonce:'test-nonce',token_hash:createHash('sha256').update(token).digest('hex'),employee_email:'employee@example.invalid',due:'2030-01-01'};
- const titles=['TUAC','Retraite','Urgence','Éthique','SST 2026'],sent=[],options={site:'https://portail.example.invalid',from:'rh@example.invalid',send:async(payload,id)=>sent.push({payload,id})};
+ const titles=['Informations personnelles','TUAC','Retraite','Urgence','Éthique','SST 2026'],sent=[],options={site:'https://portail.example.invalid',from:'rh@example.invalid',send:async(payload,id)=>sent.push({payload,id})};
  assert.equal((await sendInvitation(row,titles,options)).status,'sent');await sendInvitation(row,titles,options);
  assert.equal(sent.length,2);assert.equal(sent[0].id,sent[1].id);
  assert.deepEqual(sent[0].payload.to,['employee@example.invalid']);assert.equal(sent[0].payload.attachments,undefined);
@@ -71,10 +71,10 @@ test('invitation : un courriel, cinq titres, lien personnel et reprise sans doub
  assert.equal(sent.length,2);
 });
 
-test('formulaire : cinq documents présélectionnés, ancien SST exclu, signature conservée',()=>{
- const catalog={tuac:'TUAC',retraite:'Retraite',urgence:'Urgence',ethique:'Éthique',sst_general:'SST 2026',sst:'Ancien SST'};
- const html=onboardingForm({catalog,defaultDocuments:['tuac','retraite','urgence','ethique','sst_general'],documents:[{kind:'tuac',done:true,invited:true}],employee_email:'test@example.invalid',emailReady:true});
- assert.equal((html.match(/name="doc"/g)||[]).length,5);assert.ok(!html.includes('Ancien SST'));
+test('formulaire : six documents présélectionnés, ancien SST exclu, signature conservée',()=>{
+ const catalog={renseignements:'Informations personnelles',tuac:'TUAC',retraite:'Retraite',urgence:'Urgence',ethique:'Éthique',sst_general:'SST 2026',sst:'Ancien SST'};
+ const html=onboardingForm({catalog,defaultDocuments:['renseignements','tuac','retraite','urgence','ethique','sst_general'],documents:[{kind:'tuac',done:true,invited:true}],employee_email:'test@example.invalid',emailReady:true});
+ assert.equal((html.match(/name="doc"/g)||[]).length,6);assert.ok(!html.includes('Ancien SST'));
  assert.match(html,/value="tuac" checked disabled/);assert.ok(html.includes('Envoyer les documents par courriel'));
  const escaped=onboardingForm({catalog:{tuac:'<script>faux</script>'},defaultDocuments:['tuac'],documents:[],employee_email:'" onfocus="evil'});
  assert.ok(!escaped.includes('<script>'));assert.ok(escaped.includes('&quot; onfocus=&quot;evil'));

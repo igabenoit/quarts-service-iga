@@ -25,7 +25,7 @@ test('fiche urgence : deux contacts, option de non-divulgation et PDF signé',as
  await assert.rejects(()=>signedEmergency(answers,[]),/Signature/);
 });
 
-test('embauche : formulaire d’urgence en troisième position, signé et accessible uniquement avec connexion', {timeout:90000},async()=>{
+test('embauche : formulaire d’urgence après les renseignements et adhésions, signé et accessible uniquement avec connexion', {timeout:90000},async()=>{
  const f=await liveAppFixture({employeeVault:true});
  try{
   const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
@@ -38,7 +38,7 @@ test('embauche : formulaire d’urgence en troisième position, signé et access
   const key=expect(await admin('GET','state')).employees.find(e=>e.name==='Camille Exemple').key;
   const route='onboarding?key='+encodeURIComponent(key)+'&view=direction';
   const start=expect(await admin('GET',route));
-  assert.deepEqual(Object.keys(start.catalog).slice(0,3),['tuac','retraite','urgence']);
+  assert.deepEqual(Object.keys(start.catalog).slice(0,4),['renseignements','tuac','retraite','urgence']);
   assert.ok(Object.hasOwn(start.catalog,'sst_general'),'le programme d’accueil SST 2026 est offert à l’embauche');
   const link=expect(await admin('POST','onboarding/invite?key='+encodeURIComponent(key)+'&view=direction',
    {documents:['tuac','retraite','urgence'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-11-15'})).path;
