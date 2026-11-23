@@ -77,5 +77,10 @@ export async function signedGeneralSst(input,employeeStrokes,options={}){
  // Page 3 : les deux lignes sont à y=171 points (621 depuis le haut).
  drawSignature(page,employeeStrokes,98,172,190,20);
  if(managed)drawSignature(page,options.supervisorStrokes,391,172,169,20);
- return Buffer.from(await pdf.save());
+ // Le modèle comporte des révisions PDF incrémentales. Copier les pages
+ // terminées évite les anciennes références et supprime le formulaire vide.
+ const completed=await PDFLib.PDFDocument.create();
+ for(const page of await completed.copyPages(pdf,pdf.getPageIndices()))completed.addPage(page);
+ delete completed.context.trailerInfo.Info;
+ return Buffer.from(await completed.save());
 }

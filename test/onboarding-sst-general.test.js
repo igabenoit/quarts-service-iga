@@ -28,6 +28,7 @@ test('nouveau programme SST : PDF vierge 3 pages, champs exacts et signature emp
  await assert.rejects(()=>signedGeneralSst({...valid,accueil_sujet_5:'no'},strokes),/sujets/);
  const pdf=await PDFLib.PDFDocument.load(await signedGeneralSst(altered,strokes));
  assert.equal(pdf.getPageCount(),3);
+ assert.equal(pdf.catalog.has(PDFLib.PDFName.of('AcroForm')),false,'le PDF signé est statique sans ancien formulaire résiduel');
  assert.ok((await pdf.save()).byteLength>30000);
 });
 test('formation pratique : autorisation fondée sur une observation et signature du responsable',async()=>{
