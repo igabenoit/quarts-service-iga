@@ -10,6 +10,7 @@ import {signedTuac,tuacFields} from './tuac.js';
 import {tuacAnswers} from '../public/tuac-fields.js';
 import {sharedKinds,directionReady,workflowState,publicDraft} from './workflow.js';
 import {signedEmergency,emergencyFields} from './emergency.js';
+import {onboardingBlockReason} from '../public/onboarding-eligibility.js';
 
 import {annexKeys,signedAnnex,annexPdf} from './annexe-sst.js';
 import {generalSstFields,generalSstEmployeeKeys,signedGeneralSst,blankGeneralSst,sanitizeGeneralSstAnswers} from './sst-general.js';
@@ -54,16 +55,20 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  }));
  app.get(base,auth,wrap(async(req,res)=>{
   const e=await manager(req);
-  if(!await eligible(e.key))return res.json({eligible:false,canStart:e.active&&!e.issue});
+  const blockingReason=onboardingBlockReason(e),canInvite=!blockingReason;
+  res.set('Cache-Control','no-store');
+  if(!await eligible(e.key))return res.json({eligible:false,canStart:canInvite,canInvite,blockingReason});
   await pool.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);
   const row=(await pool.query('SELECT invited_at,activity,due::text,completed_at,employee_email,manager_email,generation,token_hash IS NOT NULL AS active FROM onboarding_cases WHERE employee_key=$1',[e.key])).rows[0];
-  const lastDelivery=event?(await pool.query("SELECT created_at,data->>'status' AS status,data->>'email' AS email FROM employee_file_events WHERE action IN ('onboarding.delivery','onboarding.invite','onboarding.renew') AND data->>'employeeKey'=$1 ORDER BY id DESC LIMIT 1",[e.key])).rows[0]:null;
+  const deliveryHistory=event?(await pool.query("SELECT created_at,data->>'status' AS status,data->>'email' AS email,data->>'generation' AS generation,data->>'providerMessageId' AS provider_message_id,data->>'confirmedAt' AS confirmed_at FROM employee_file_events WHERE action='onboarding.delivery' AND data->>'employeeKey'=$1 ORDER BY id DESC LIMIT 10",[e.key])).rows:[];
+  const lastDelivery=deliveryHistory.find(d=>d.generation===String(row.generation)&&d.email===row.employee_email)||null;
   const suggestedEmployeeEmail=!trial&&e.personId?(await sourcePool.query("SELECT COALESCE(NULLIF(c.email,''),p.email,'') AS email FROM schedule_store_people p LEFT JOIN schedule_employee_contacts c ON c.employee_id=p.service_employee_id WHERE p.id=$1",[e.personId])).rows[0]?.email||'':'';
-  res.json({eligible:true,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,suggestedEmployeeEmail,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  res.json({eligible:true,canInvite,blockingReason,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,suggestedEmployeeEmail,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,deliveryHistory,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;
-  if(!e.active||e.issue)fail(409,'Vérifiez le matricule et le statut actif de cette fiche.');
+  const blockingReason=onboardingBlockReason(e);
+  if(blockingReason)fail(409,(op==='send'||op==='invite'&&req.body?.delivery==='email'?'Courriel non envoyé. ':'Opération bloquée. ')+blockingReason);
   if(op==='start'){
    if(trial&&e.key!==trial.key)fail(403,'Fiche hors essai.');
    await transaction(async db=>{await db.query('INSERT INTO onboarding_cases(employee_key) VALUES($1) ON CONFLICT DO NOTHING',[e.key]);if(event)await event(db,req.ef,'onboarding.started',{employeeKey:e.key});});
@@ -167,7 +172,9 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  app.post(base+'/sur-place/:action',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req),kind=req.body.kind,action=req.params.action;
   if(['retraite','tuac'].includes(kind)&&req.ef.view!=='direction')fail(403,'Section réservée à la direction.');
-  if(!e.active||e.issue||!Object.hasOwn(catalog,kind)||!['state','save','sign',...(sharedKinds.has(kind)?['finalize']:[]),...(['ethique','sst','sst_general'].includes(kind)?['lecture']:[])].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
+  const blockingReason=onboardingBlockReason(e);
+  if(blockingReason)fail(400,blockingReason);
+  if(!Object.hasOwn(catalog,kind)||!['state','save','sign',...(sharedKinds.has(kind)?['finalize']:[]),...(['ethique','sst','sst_general'].includes(kind)?['lecture']:[])].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
   if(action==='lecture')return res.set('Cache-Control','no-store').type('pdf').send(await blankFor(kind));
   if(kind==='urgence'&&!content(req.ef,e,'medical'))fail(403,'Accès aux informations médicales réservé aux personnes autorisées.');
   const policy=await publishedPolicy(pool);
@@ -190,7 +197,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   const token=req.get('authorization').slice(7);
   const result=await transaction(async db=>{
    const row=(await db.query('SELECT * FROM onboarding_cases WHERE token_hash=$1 FOR UPDATE',[digest(token)])).rows[0];
-   if(!row || (trial && row.employee_key!==trial.key) || !(await directory()).employees.some(e=>e.key===row.employee_key && e.active && !e.issue))fail(404,'Lien indisponible.');
+   if(!row || (trial && row.employee_key!==trial.key) || !(await directory()).employees.some(e=>e.key===row.employee_key && !onboardingBlockReason(e)))fail(404,'Lien indisponible.');
    const policy=await publishedPolicy(db);
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;

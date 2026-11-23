@@ -5,8 +5,9 @@ import {liveAppFixture} from './live-app-fixture.mjs';
 import {tuacFields} from '../onboarding/tuac.js';
 import {sendInvitation,invitationToken,invitationEmailReady} from '../onboarding/mail.js';
 import {onboardingForm} from '../public/employee-onboarding.js';
+import {onboardingBlockReason} from '../public/onboarding-eligibility.js';
 
-test('une fiche importée peut recevoir tous les documents sans perdre les signatures', {timeout:90000},async()=>{
+test('embauche sans matricule : inviter, signer, finaliser puis ajouter le matricule sans perdre les preuves', {timeout:90000},async()=>{
  const f=await liveAppFixture({employeeVault:true,onboardingEmail:true});
  try{
   const cookie=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
@@ -14,15 +15,15 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   const must=(r,code=200)=>{assert.equal(r.status,code,JSON.stringify(r.body).slice(0,400));return r.body;};
   const admin=(method,path,body)=>f.call(method,'/api/employee-files/'+path,{cookie,headers,body});
   const dep=must(await f.call('GET','/api/departments/meta',{cookie})).departments.find(d=>d.key==='boulangerie');
-  must(await f.call('POST','/api/departments/people',{cookie,body:{name:'Nouvelle Fictive',group:'regular',active:true,departments:[dep.id],availability:{},employeeCode:'887761'}}));
+  must(await f.call('POST','/api/departments/people',{cookie,body:{name:'Nouvelle Fictive',group:'regular',active:true,departments:[dep.id],availability:{}}}));
   const key=must(await admin('GET','state')).employees.find(e=>e.name==='Nouvelle Fictive').key;
   await f.query('UPDATE schedule_store_people SET onboarding_new=false WHERE id=$1',[key.split(':')[1]]);
   const route=(op='')=>'onboarding'+(op?'/'+op:'')+'?key='+key+'&view=direction';
-  assert.equal(must(await admin('GET',route())).eligible,false);
+  const unopened=must(await admin('GET',route()));assert.equal(unopened.eligible,false);assert.equal(unopened.canStart,true);assert.equal(unopened.blockingReason,null);
   must(await f.call('POST','/api/employee-files/'+route('start'),{body:{},headers}),401);
   must(await f.call('POST','/api/employee-files/'+route('start'),{body:{},cookie}),403);
   must(await admin('POST',route('start'),{}));
-  const draft=must(await admin('GET',route()));assert.equal(draft.eligible,true);
+  const draft=must(await admin('GET',route()));assert.equal(draft.eligible,true);assert.equal(draft.canInvite,true);assert.equal(draft.lastDelivery,null);
   assert.deepEqual(draft.defaultDocuments,['renseignements','tuac','retraite','urgence','ethique','sst_general']);
   const selection={documents:['tuac'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'};
   must(await admin('POST',route('invite'),selection),428);
@@ -45,16 +46,33 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   const retried=must(await admin('POST',route('send'),{}));assert.equal(retried.delivery.status,'sent');assert.equal(retried.path,invite.path);
   const sent=await f.query(null,null,{invitationMessages:true});assert.equal(sent.length,1);assert.equal(sent[0].id,failed[0].id);
   assert.deepEqual(sent[0].payload.to,['employee@example.invalid']);assert.equal(sent[0].payload.attachments,undefined);
-  assert.equal(must(await admin('GET',route())).lastDelivery.status,'sent');
+  const confirmation=must(await admin('GET',route()));assert.equal(confirmation.lastDelivery.status,'sent');assert.match(confirmation.lastDelivery.provider_message_id,/^fixture-mail-/);assert.ok(confirmation.lastDelivery.confirmed_at);assert.equal(confirmation.deliveryHistory.length,2);
+  await f.query('UPDATE schedule_store_people SET employee_code=$2 WHERE id=$1',[key.split(':')[1],'887761']);
+  assert.equal(must(await execute('state')).documents.find(d=>d.kind==='tuac').done,true);
+  assert.deepEqual(must(await admin('GET',route())).lastDelivery,confirmation.lastDelivery,'attribuer le matricule conserve le dossier et la preuve');
   const events=await f.query("SELECT data FROM employee_file_events WHERE action='onboarding.delivery'",[],{vault:true});assert.ok(!JSON.stringify(events).includes(token));
   must(await admin('POST',route('invite'),{...selection,documents:['unknown']}),400);
   const corrected=must(await admin('POST',route('invite'),{...selection,documents:draft.defaultDocuments,email:'correct@example.invalid'}));
   must(await execute('state'),404);token=corrected.path.split('#')[1];must(await execute('state'));
-  assert.equal(must(await admin('GET',route())).lastDelivery.status,null);
+  const correctedState=must(await admin('GET',route()));assert.equal(correctedState.lastDelivery,null);assert.equal(correctedState.deliveryHistory[0].status,'sent');assert.equal(correctedState.deliveryHistory[0].email,selection.email);
   must(await admin('POST',route('revoke'),{}));must(await execute('state'),404);
   must(await admin('POST',route('send'),{}),409);
   token=must(await admin('POST',route('renew'),{})).path.split('#')[1];assert.equal(must(await execute('state')).documents.length,6);
+  // Ambiguous identities and inactive records remain blocked; missing codes alone do not.
+  await f.query('UPDATE schedule_store_people SET active=false WHERE id=$1',[key.split(':')[1]]);
+  assert.equal(must(await admin('GET',route())).canInvite,false);
+  assert.match(must(await admin('POST',route('send'),{}),409).error,/Courriel non envoyé.*inactive/);
+  must(await execute('state'),404);
+  assert.equal((await f.query(null,null,{invitationMessages:true})).length,0,'aucun envoi pour une fiche inactive');
  }finally{await f.close();}
+});
+
+test('seul un matricule en attente est permis; les identités ambiguës restent bloquées',()=>{
+ assert.equal(onboardingBlockReason({active:true,issue:'Matricule manquant : à attribuer dans la liste du personnel'}),null);
+ assert.equal(onboardingBlockReason({active:true,issue:''}),null);
+ assert.match(onboardingBlockReason({active:true,issue:'Matricule ambigu : plusieurs fiches correspondent'}),/ambigu/);
+ assert.match(onboardingBlockReason({active:true,issue:'Plusieurs fiches correspondent : rapprochement à vérifier'}),/rapprochement/);
+ assert.match(onboardingBlockReason({active:false,issue:'Matricule manquant : à attribuer dans la liste du personnel'}),/inactive/);
 });
 
 test('invitation : un courriel, six titres, lien personnel et reprise sans doublon',async t=>{

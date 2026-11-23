@@ -29,13 +29,16 @@ export async function sendInvitation(row,titles,{send,site=siteUrl(),from=sender
   text:'Bonjour,\n\n'+onboardingWelcome+'\nNous sommes heureux de vous accueillir dans notre équipe.\n\nVos documents d’embauche sont prêts à remplir et à signer :\n'+titles.map(title=>'• '+title).join('\n')+(titles.some(title=>/\bSST\b/i.test(title))?'\n\n'+sstNotice:'')+'\n\nMerci de compléter tous les documents demandés avant l’échéance : '+due+'\n\nOuvrir votre dossier : '+new URL(site).origin+'/accueil-employe.html#'+token+'\n\nVous pouvez enregistrer vos réponses et reprendre plus tard avec ce même lien. Ce lien est personnel : ne le transférez pas.\n\nIGA Extra Famille Benoit'};
  payload.html=emailHtml(payload.text);
  const id=createHash('sha256').update(JSON.stringify([row.employee_key,row.generation,payload])).digest('hex');
- if(send)await send(payload,id);
+ let receipt;
+ if(send)receipt=await send(payload,id);
  else{
   if(!invitationEmailReady())throw Error('Envoi de courriel non configuré');
   const r=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':id},body:JSON.stringify(payload)});
   if(!r.ok)throw Error('Courriel non accepté');
+  receipt=await r.json();
+  if(typeof receipt?.id!=='string'||!receipt.id)throw Error('Confirmation d’envoi indisponible');
  }
- return {status:'sent',email:row.employee_email};
+ return {status:'sent',email:row.employee_email,confirmedAt:new Date().toISOString(),...(typeof receipt?.id==='string'?{providerMessageId:receipt.id}:{})};
 }
 export async function sendPending(pool,{send,trial=null,directionEmail=process.env.ONBOARDING_DIRECTION_EMAIL,site=process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL}={}){
  if(!site)return;

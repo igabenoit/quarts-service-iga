@@ -11,7 +11,7 @@ if(process.env.TEST_ONBOARDING_EMAIL==='yes'){
  globalThis.fetch=async(url,options)=>{
   if(url!=='https://api.resend.com/emails')return actualFetch(url,options);
   invitationMessages.push({payload:JSON.parse(options.body),id:options.headers['Idempotency-Key']});
-  return new Response('{}',{status:emailFailure?503:200});
+  return new Response(JSON.stringify(emailFailure?{message:'Simulated failure'}:{id:'fixture-mail-'+options.headers['Idempotency-Key']}),{status:emailFailure?503:200});
  };
 }
 let primary,employeeVaultPool;

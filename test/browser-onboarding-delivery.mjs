@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {liveAppFixture} from './live-app-fixture.mjs';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const f=await liveAppFixture({employeeVault:true,onboardingEmail:true});let browser;
+try{
+ const must=r=>{assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
+ // No real account or mail provider is used.
+ const login=await f.call('POST','/api/login',{body:{code:'audit-admin-test'}});
+ const headers={Origin:f.base,'X-Employee-Files':'1'};
+ const policy=await f.call('POST','/api/employee-files/policy?view=direction',{cookie:login.cookie,headers,body:{text:'Politique fictive. '.repeat(24),confirmed:true}});assert.equal(policy.status,201);
+ const dep=must(await f.call('GET','/api/departments/meta',{cookie:login.cookie})).departments.find(d=>d.key==='boulangerie');
+ must(await f.call('POST','/api/departments/people',{cookie:login.cookie,body:{name:'Camille Exemple Sans Matricule',group:'regular',active:true,departments:[dep.id],availability:{}}}));
+ const state=must(await f.call('GET','/api/employee-files/state?view=direction',{cookie:login.cookie,headers}));
+ const key=state.employees.find(e=>e.name==='Camille Exemple Sans Matricule').key;
+ browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE,headless:true});
+ const page=await browser.newPage({viewport:{width:1360,height:1000}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ const [name,value]=login.cookie.split('=');await page.context().addCookies([{name,value,url:f.base}]);
+ const url=f.base+'/dossiers-employes?vue=direction#dossiers/'+key;
+ await page.goto(url);
+ const panel=page.locator('#onboardingPanel'),status=panel.getByRole('region',{name:'État du courriel'});
+ await status.getByText('Aucun courriel envoyé',{exact:true}).waitFor();
+ assert.equal(await panel.locator('.onboarding-blocked').count(),0);
+ await panel.getByLabel('Courriel de l’employé',{exact:true}).fill('camille@example.invalid');
+ await panel.getByLabel('Courriel du gestionnaire pour le suivi').fill('rh@example.invalid');
+ await panel.getByLabel('Échéance',{exact:true}).fill('2030-11-10');
+ await panel.locator('form [value=email]').click();
+ await status.locator(':scope > strong').filter({hasText:'Courriel transmis'}).waitFor();
+ assert.match(await status.innerText(),/camille@example.invalid/);
+ assert.match(await status.innerText(),/\d{1,2} h \d{2}/);
+ await status.getByText(/Historique des envois/).click();
+ assert.match(await status.innerText(),/Référence de confirmation : fixture-mail-/);
+ assert.equal((await f.query(null,null,{invitationMessages:true})).length,1);
+ await page.reload();
+ await status.locator(':scope > strong').filter({hasText:'Courriel transmis'}).waitFor();
+ assert.match(await status.innerText(),/camille@example.invalid/);
+ await panel.screenshot({path:'../onboarding-delivery-confirmation.png'});
+ // Link-only edits retain old receipts, without claiming the new recipient was emailed.
+ await panel.getByText('Ajouter des documents ou modifier l’envoi',{exact:true}).click();
+ await panel.getByLabel('Courriel de l’employé',{exact:true}).fill('correct@example.invalid');
+ await panel.locator('form [value=link]').click();
+ await status.getByText('Aucun courriel envoyé pour ce lien',{exact:true}).waitFor();
+ await status.getByText(/Historique des envois/).click();
+ assert.match(await status.innerText(),/camille@example.invalid/);
+ assert.equal((await f.query(null,null,{invitationMessages:true,fail:true})).length,0);
+ await panel.locator('[data-op=send]').click();
+ await status.locator(':scope > strong').filter({hasText:'Envoi non confirmé'}).waitFor();
+ assert.equal(await status.evaluate(e=>e.classList.contains('success')),false);
+ assert.match(await status.innerText(),/correct@example.invalid/);
+ assert.equal((await f.query(null,null,{invitationMessages:true,fail:false})).length,1);
+ await panel.locator('[data-op=send]').click();
+ await status.locator(':scope > strong').filter({hasText:'Courriel transmis'}).waitFor();
+ assert.match(await status.innerText(),/correct@example.invalid/);
+ for(const width of [390,768,1360]){
+  await page.setViewportSize({width,height:1000});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'aucun débordement à '+width+' px');
+ }
+ await f.query('UPDATE schedule_store_people SET active=false WHERE id=$1',[key.split(':')[1]]);
+ await page.reload();await panel.getByText('Envoi bloqué',{exact:true}).waitFor();
+ assert.match(await panel.locator('.onboarding-blocked').innerText(),/inactive/);
+ assert.equal(await panel.locator('[data-op=send]').isDisabled(),true);
+ assert.equal(await panel.locator('form [value=email]').isDisabled(),true);
+ assert.deepEqual(errors,[]);
+ console.log('Chrome : envoi simulé sans matricule, preuve persistante datée, historique conservé, lien seul, échec et reprise, fiche inactive bloquée, 3 largeurs vérifiés.');
+}finally{await browser?.close();await f.close();}

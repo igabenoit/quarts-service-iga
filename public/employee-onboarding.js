@@ -1,13 +1,21 @@
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=value=>value?new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeZone:'America/Toronto'}).format(new Date(/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T12:00:00Z':value)):'';
+const timestamp=value=>value?new Intl.DateTimeFormat('fr-CA',{dateStyle:'long',timeStyle:'short',timeZone:'America/Toronto'}).format(new Date(value)):'';
+const deliveryLabel=status=>status==='sent'?'Courriel transmis':status==='unavailable'?'Courriel non envoyé — service indisponible':'Envoi non confirmé';
+
+export function onboardingDeliveryStatus(c){
+ const last=c.lastDelivery,history=c.deliveryHistory||[],sent=last?.status==='sent';
+ return '<section class="onboarding-delivery '+(sent?'success':last?'error':'neutral')+'" aria-label="État du courriel"><strong>'+esc(last?deliveryLabel(last.status):c.invited_at?'Aucun courriel envoyé pour ce lien':'Aucun courriel envoyé')+'</strong>'+(last?'<p>Destinataire : <strong>'+esc(last.email)+'</strong><br>'+esc(timestamp(last.confirmed_at||last.created_at))+' (heure du Québec)</p><p>'+(sent?'Accepté par le service d’envoi. La réception et la lecture ne sont pas confirmées.':last.status==='unavailable'?'Le service d’envoi est indisponible. Vous pouvez copier le lien pour le transmettre à l’employé.':'Le service d’envoi n’a pas confirmé cette tentative. Réessayez l’envoi ou transmettez le lien personnel.')+'</p>':'<p>'+(c.invited_at?'Le lien est prêt. Cliquez sur « Envoyer les documents par courriel » ou transmettez le lien vous-même.':'Remplissez les champs ci-dessous, puis cliquez sur « Envoyer les documents par courriel ».')+'</p>')+(history.length?'<details><summary>Historique des envois</summary><ul>'+history.map(d=>'<li><strong>'+esc(deliveryLabel(d.status))+'</strong> · '+esc(d.email)+'<br>'+esc(timestamp(d.confirmed_at||d.created_at))+(d.provider_message_id?'<br>Référence de confirmation : <code>'+esc(d.provider_message_id)+'</code>':'')+'</li>').join('')+'</ul></details>':'')+'</section>';
+}
 
 export function onboardingForm(c){
  const documents=c.documents||[],defaults=c.defaultDocuments||[],kinds=[...new Set([...defaults,...documents.map(d=>d.kind)])];
+ const disabled=c.canInvite===false?' disabled':'';
  const due=c.due||new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Date.now()+7*86400000));
  return '<form data-invitation><fieldset><legend><strong>Documents à transmettre</strong></legend><p class="muted">Les '+defaults.length+' formulaires actuels sont sélectionnés. Les signatures et les réponses déjà enregistrées sont conservées.</p>'+kinds.map(kind=>{
   const doc=documents.find(d=>d.kind===kind),done=doc?.done||doc?.original_id,assigned=doc?.invited;
   return '<label class="check"><input type="checkbox" name="doc" value="'+esc(kind)+'" checked'+(done||assigned?' disabled':'')+'><span>'+esc(c.catalog[kind])+(done?' <span class="badge ok">Signé</span>':assigned?' <span class="badge warn">À compléter</span>':c.invited_at?' <span class="badge warn">À ajouter à l’envoi</span>':'')+'</span></label>';
- }).join('')+'</fieldset><div class="form-grid"><label>Courriel de l’employé<input required type="email" name="email" autocomplete="off" value="'+esc(c.employeeEmail||c.employee_email||c.suggestedEmployeeEmail||'')+'"></label><label>Courriel du gestionnaire pour le suivi<input required type="email" name="managerEmail" autocomplete="off" value="'+esc(c.managerEmail||c.manager_email||'')+'"></label><label>Échéance<input required type="date" name="due" value="'+esc(due)+'"></label><label>Rappel après (jours)<input required type="number" name="days" value="3" min="1" max="365"></label></div>'+(c.emailReady?'':'<p class="muted">L’envoi par courriel est indisponible. Vous pouvez créer le lien et le transmettre vous-même.</p>')+'<div class="actions">'+(c.emailReady?'<button type="submit" name="delivery" value="email">Envoyer les documents par courriel</button>':'')+'<button type="submit" name="delivery" value="link" class="secondary">'+(c.invited_at?'Enregistrer et afficher le lien':'Créer le lien à transmettre')+'</button></div></form>';
+ }).join('')+'</fieldset><div class="form-grid"><label>Courriel de l’employé<input required type="email" name="email" autocomplete="off" value="'+esc(c.employeeEmail||c.employee_email||c.suggestedEmployeeEmail||'')+'"></label><label>Courriel du gestionnaire pour le suivi<input required type="email" name="managerEmail" autocomplete="off" value="'+esc(c.managerEmail||c.manager_email||'')+'"></label><label>Échéance<input required type="date" name="due" value="'+esc(due)+'"></label><label>Rappel après (jours)<input required type="number" name="days" value="3" min="1" max="365"></label></div>'+(c.emailReady?'':'<p class="muted">L’envoi par courriel est indisponible. Vous pouvez créer le lien et le transmettre vous-même.</p>')+'<div class="actions">'+(c.emailReady?'<button type="submit" name="delivery" value="email"'+disabled+'>Envoyer les documents par courriel</button>':'')+'<button type="submit" name="delivery" value="link" class="secondary"'+disabled+'>'+(c.invited_at?'Enregistrer et afficher le lien':'Créer le lien à transmettre')+'</button></div></form>';
 }
 
 export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
@@ -20,10 +28,13 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
  const c=await request();
  if(!panel.isConnected)return;
  panel.className='panel onboarding-panel';
- panel.innerHTML='<div class="row spread"><div><p class="eyebrow">EMBAUCHE</p><h3>Documents d’embauche</h3></div>'+(c.invited_at?'<span class="badge '+(c.completed_at?'ok':'warn')+'">'+(c.completed_at?'Dossier complété':'En cours')+'</span>':'')+'</div><p>Un seul lien personnel pour remplir et signer les formulaires. Les PDF signés sont conservés au dossier.</p><p data-feedback role="status" aria-live="polite"></p>';
+ panel.innerHTML='<div class="row spread"><div><p class="eyebrow">EMBAUCHE</p><h3>Documents d’embauche</h3></div>'+(c.invited_at?'<span class="badge '+(c.completed_at?'ok':'warn')+'">'+(c.completed_at?'Dossier complété':'En cours')+'</span>':'')+'</div><p>Un seul lien personnel pour remplir et signer les formulaires. Les PDF signés sont conservés au dossier.</p><p class="muted">Le matricule peut être ajouté après la réception des renseignements de l’employé. Il n’est pas requis pour transmettre, remplir ou signer les documents d’embauche.</p>'+onboardingDeliveryStatus(c)+(c.blockingReason?'<div class="onboarding-blocked" role="alert"><strong>Envoi bloqué</strong><p>'+esc(c.blockingReason)+'</p></div>':'')+'<p data-feedback role="status" aria-live="polite"></p>';
  const feedback=()=>panel.querySelector('[data-feedback]');
  async function change(operation,body){
-  for(const b of panel.querySelectorAll('button'))b.disabled=true;
+  clearTimeout(panel.refreshTimer);
+  const buttonStates=[...panel.querySelectorAll('button')].map(b=>[b,b.disabled]);
+  for(const [b] of buttonStates)b.disabled=true;
+  feedback().dataset.state='pending';feedback().setAttribute('role','status');
   feedback().textContent=(operation==='invite'&&body?.delivery==='email')||operation==='send'?'Envoi en cours…':'Enregistrement…';
   try{
    const result=await request(operation,body);
@@ -31,6 +42,8 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
    if(!panel.isConnected)return;
    if(result.delivery){
     feedback().textContent=result.delivery.status==='sent'?'Courriel transmis au service d’envoi pour '+result.delivery.email+'.':result.delivery.status==='failed'?'Le courriel n’a pas pu être confirmé. Les documents sont prêts : réessayez l’envoi ou copiez le lien.':'Courriel indisponible. Copiez le lien pour le transmettre à l’employé.';
+    feedback().dataset.state=result.delivery.status==='sent'?'success':'error';
+    if(result.delivery.status!=='sent')feedback().setAttribute('role','alert');
    }
    if(result.path){
     const block=document.createElement('div');block.className='onboarding-link';
@@ -38,15 +51,15 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
     const input=block.querySelector('input');input.value=new URL(result.path,location.origin).href;
     block.querySelector('button').onclick=async()=>{try{await navigator.clipboard.writeText(input.value);feedback().textContent='Lien copié.';}catch{input.select();feedback().textContent='Le lien est sélectionné. Utilisez Ctrl+C pour le copier.';}};
     panel.append(block);
-    if(!result.delivery)feedback().textContent='Documents prêts. Transmettez ce lien personnel à l’employé.';
+    if(!result.delivery)feedback().textContent='Lien prêt. Aucun courriel n’a été envoyé par cette action. Transmettez ce lien personnel à l’employé.';
    }
   }catch(error){
-   feedback().textContent=error.message;
-   for(const b of panel.querySelectorAll('button'))b.disabled=false;
+   feedback().textContent=error.message;feedback().dataset.state='error';feedback().setAttribute('role','alert');
+   for(const [b,disabled] of buttonStates)b.disabled=disabled;
   }
  }
  if(!c.eligible){
-  const p=document.createElement('p');p.textContent=c.canStart?'Ce dossier n’a pas encore de parcours d’embauche. Vous pouvez le préparer ici.':'Vérifiez le matricule et le statut actif de cette fiche avant de préparer les documents.';panel.append(p);
+  const p=document.createElement('p');p.textContent=c.canStart?'Ce dossier n’a pas encore de parcours d’embauche. Vous pouvez le préparer ici, même sans matricule.':c.blockingReason||'Cette fiche ne permet pas de préparer les documents.';panel.append(p);
   if(c.canStart){const b=document.createElement('button');b.textContent='Préparer les documents d’embauche';b.onclick=()=>change('start');panel.append(b);}
   return;
  }
@@ -59,12 +72,10 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
    const available=document.createElement('div');available.className='onboarding-additions';
    available.innerHTML=additions.map(kind=>'<div class="row spread"><strong>'+esc(c.catalog[kind])+'</strong><span class="badge warn">À ajouter à l’envoi</span></div>').join('')+'<p>Ces documents sont sélectionnés ci-dessous. Enregistrez pour les ajouter au lien personnel existant, ou choisissez l’envoi par courriel.</p>';status.append(available);
   }
-  if(c.lastDelivery?.status==='sent')feedback().textContent='Courriel transmis au service d’envoi le '+date(c.lastDelivery.created_at)+' pour '+c.lastDelivery.email+'.';
-  if(['failed','unavailable'].includes(c.lastDelivery?.status))feedback().textContent='Dernier envoi non confirmé. Réessayez ou transmettez le lien personnel.';
   if(!c.completed_at){
    const actions=document.createElement('div');actions.className='actions';
-   actions.innerHTML=(c.active?(c.emailReady?'<button data-op="send">Envoyer ou réessayer le courriel</button>':'')+'<button class="secondary" data-op="revoke">Révoquer le lien</button>':'<p>Lien révoqué</p>')+'<button class="secondary" data-op="renew">Créer un nouveau lien</button>';panel.append(actions);
-   for(const button of actions.querySelectorAll('[data-op]'))button.onclick=()=>change(button.dataset.op);
+   actions.innerHTML=(c.active?(c.emailReady?'<button data-op="send">Envoyer les documents par courriel</button>':'')+'<button class="secondary" data-op="revoke">Révoquer le lien</button>':'<p>Lien révoqué</p>')+'<button class="secondary" data-op="renew">Créer un nouveau lien</button>';panel.append(actions);
+   for(const button of actions.querySelectorAll('[data-op]')){button.disabled=c.canInvite===false;button.onclick=()=>change(button.dataset.op);}
   }
  }
  const personal=c.documents.find(d=>d.kind==='renseignements');
