@@ -1,4 +1,5 @@
 import {ethicsPageCount,ethicsSignaturePages} from './ethics-pages.js';
+import {pdfBytes,pdfPrintUrl,attachPdfPrintLink} from './pdf-print-link.js';
 const params=new URLSearchParams(location.hash.slice(1));
 const id=params.get('id'), view=params.get('view')||'direction';
 const get=id=>document.getElementById(id);
@@ -13,6 +14,9 @@ if(cash){
 }
 const status=get('status'), download=get('download'), canvas=document.querySelector('canvas');
 let pdf, pageNumber=1, pageNumbers=[],signatureSelect,modeButton;
+const printUrls=new Set();
+function localPrintUrl(bytes){const url=pdfPrintUrl(bytes);printUrls.add(url);return url;}
+window.addEventListener('pagehide',event=>{if(!event.persisted)for(const url of printUrls)URL.revokeObjectURL(url);});
 async function draw(number){
  get('prev').disabled=get('next').disabled=true;
  if(signatureSelect)signatureSelect.disabled=true;
@@ -67,16 +71,17 @@ async function open(){
  const emergencyPdf=filename.includes(encodeURIComponent('Informations en cas d’urgence'));
  const tuacPdf=filename.includes(encodeURIComponent('Adhésion TUAC 500'));
  download.href=url+'&download=1';download.hidden=false;
- let displayResponse=response,printUrl=url;
+ let displayResponse=response;
  if(tuacPdf){
-  printUrl=url+'&print=tuac-original';
-  const printResponse=await fetch(printUrl,{credentials:'same-origin',cache:'no-store'});
+  const printResponse=await fetch(url+'&print=tuac-original',{credentials:'same-origin',cache:'no-store'});
   if(!printResponse.ok)throw Error('Copie pour la feuille TUAC indisponible. Le PDF original signé peut être téléchargé.');
   displayResponse=printResponse;
  }
  const lib=await import('/vendor/pdfjs/pdf.min.mjs');
  lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';
- pdf=await lib.getDocument({data:new Uint8Array(await displayResponse.arrayBuffer()),isEvalSupported:false}).promise;
+ const bytes=await pdfBytes(displayResponse);
+ const printUrl=retirementPdf||emergencyPdf||tuacPdf?localPrintUrl(bytes):null;
+ pdf=await lib.getDocument({data:bytes,isEvalSupported:false}).promise;
  pageNumbers=Array.from({length:pdf.numPages},(_,i)=>i+1);
  document.querySelector('nav').hidden=false;
  get('prev').onclick=()=>draw(pageNumbers[pageNumbers.indexOf(pageNumber)-1]);
@@ -84,7 +89,9 @@ async function open(){
  if(response.headers.get('x-onboarding-kind')==='ethique'&&pdf.numPages===ethicsPageCount){
   document.querySelector('h1').textContent='Code d’éthique · Pages de signature';
   pageNumbers=ethicsSignaturePages.map(p=>p.number);
-  const print=document.createElement('a');print.id='print';print.href=url+'&pages=signatures';print.target='_blank';print.rel='noopener';print.textContent='Imprimer les 3 pages de signature';get('print').replaceWith(print);
+  const signatureResponse=await fetch(url+'&pages=signatures',{credentials:'same-origin',cache:'no-store'});
+  const signaturesUrl=localPrintUrl(await pdfBytes(signatureResponse));
+  attachPdfPrintLink(get('print'),signaturesUrl,'Imprimer les 3 pages de signature','Code d’éthique - Pages de signature.pdf');
   const selection=document.createElement('div');selection.className='signature-controls';
   const label=document.createElement('label');label.textContent='Accès direct : ';
   signatureSelect=document.createElement('select');signatureSelect.setAttribute('aria-label','Page de signature');
@@ -101,7 +108,7 @@ async function open(){
   selection.append(label,modeButton);document.querySelector('header').after(selection);
   const instruction=document.createElement('p');instruction.textContent='Le bouton d’impression ouvre un PDF de 3 pages seulement, avec les signatures. Le cahier complet reste conservé et téléchargeable.';selection.after(instruction);
  }else if(retirementPdf||emergencyPdf||tuacPdf){
-  const original=document.createElement('a');original.id='print';original.href=printUrl;original.target='_blank';original.rel='noopener';original.textContent='Ouvrir le PDF pour imprimer';get('print').replaceWith(original);
+  attachPdfPrintLink(get('print'),printUrl,'Ouvrir le PDF pour imprimer',tuacPdf?'TUAC - Impression feuille originale.pdf':retirementPdf?'Inscription au régime de retraite.pdf':'Informations en cas d’urgence.pdf');
   const instruction=document.createElement('p');instruction.textContent=tuacPdf?'Imprimez sur la feuille originale TUAC à trois fiches : format lettre (8,5 × 11 po), recto seulement, taille réelle (100 %), sans ajustement. Cette copie reprend les renseignements et la signature existants. Le PDF original signé reste disponible au téléchargement.':'Imprimez le PDF original : format lettre (8,5 × 11 po), recto verso sur une seule feuille, retournement sur le bord long. Aucun en-tête ni pied de page du site n’est ajouté.';document.querySelector('header').after(instruction);
  }else{get('print').hidden=false;get('print').onclick=printDocument;}
  await draw(pageNumbers[0]);
