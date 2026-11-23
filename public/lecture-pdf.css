@@ -1,5 +1,6 @@
 *{box-sizing:border-box}body{margin:0;background:#edf2ef;color:#17382f;font:16px/1.5 system-ui}main{max-width:1100px;padding:1rem;margin:auto}header,nav{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}h1{font-size:1.45rem}button,a{color:#134b3d}button{font:inherit;padding:.4rem .7rem}button:disabled{color:#767e78}canvas{display:block;width:100%;height:auto;background:white;margin:.8rem auto}p:empty{display:none}[hidden]{display:none!important}
 
+.signature-controls{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}.signature-controls select{font:inherit;max-width:100%;padding:.4rem}.signature-controls label{max-width:100%}
 #printPages{display:none}
 @media print{
  @page{size:letter portrait;margin:0}

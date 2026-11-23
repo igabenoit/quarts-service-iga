@@ -2,6 +2,7 @@ import {signedPersonalInformation,personalFields} from './personal-information.j
 import {personalAnswers} from '../public/personal-information-schema.js';
 import {blankEthics,ethicsKeys,signedEthics} from './ethics.js';
 import {signedRetirement,retirementKeys} from './retirement.js';
+import {retirementAnswers} from '../public/retirement-fields.js';
 import {sendPending,invitationToken,sendInvitation,invitationEmailReady} from './mail.js';
 import {runsInWebProcess} from '../scheduled-work.js';
 import {randomBytes,createHash} from 'node:crypto';
@@ -116,13 +117,17 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
      if(onsite&&action==='sign')fail(400,'L’employé doit signer ce formulaire depuis son lien personnel.');
      try{answers=personalAnswers(b.answers,doc.draft||{},onsite);}catch(error){fail(400,error.message);}
     }
+    if(doc.kind==='retraite'){
+     if(onsite&&action==='sign')fail(400,'L’employé doit signer ce formulaire depuis son lien personnel.');
+     try{answers=retirementAnswers(b.answers,doc.draft||{},onsite);}catch(error){fail(400,error.message);}
+    }
     if(doc.kind==='sst_general')answers=sanitizeGeneralSstAnswers(answers,onsite);
     if(doc.kind==='sst'&&!onsite){
       for(const k of spec.fields.filter(k=>k.startsWith('initiales')))answers[k]=doc.draft?.[k]||'';
     }
     let original=null;
     if(action==='sign'){
-     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch(error){fail(400,doc.kind==='renseignements'?error.message:'Vérifiez les champs et la signature.');}
+     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch(error){fail(400,['renseignements','retraite'].includes(doc.kind)?error.message:'Vérifiez les champs et la signature.');}
      const file=await saveOriginal(db,{audit:onsite?{...req.ef.audit,kind:'sur-place',policy:String(policy.id)}:{kind:'invitation',generation:row.generation,policy:String(policy.id)}},{key},spec.category||'rh',bytes,{name:spec.title+'.pdf',mime:'application/pdf',provenance:onsite?'Signature en présence de l’employé':'Signature du parcours d’accueil',documentDate:new Date().toISOString().slice(0,10),signatureKind:'drawn'});
      original=file.id;
     }
@@ -132,6 +137,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  }
  app.post(base+'/sur-place/:action',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req),kind=req.body.kind,action=req.params.action;
+  if(kind==='retraite'&&req.ef.view!=='direction')fail(403,'Section réservée à la direction.');
   if(!e.active||e.issue||!Object.hasOwn(catalog,kind)||!['state','save','sign',...(['ethique','sst','sst_general'].includes(kind)?['lecture']:[])].includes(action))fail(400,'Vérifiez le dossier et le formulaire.');
   if(action==='lecture')return res.set('Cache-Control','no-store').type('pdf').send(await blankFor(kind));
   if(kind==='urgence'&&!content(req.ef,e,'medical'))fail(403,'Accès aux informations médicales réservé aux personnes autorisées.');

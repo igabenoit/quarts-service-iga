@@ -38,6 +38,18 @@ test('formation pratique : autorisation fondée sur une observation et signature
  const final=await signedGeneralSst(completed,strokes,{onsite:true,supervisorStrokes:strokes});
  assert.equal((await PDFLib.PDFDocument.load(final)).getPageCount(),3);
 });
+test('signatures SST : les tracés restent au-dessus des deux lignes, même dessinés au bas du pavé',async()=>{
+ const lowStrokes=[[[.12,.85],[.45,.99],[.82,.84]]];
+ const bytes=await signedGeneralSst({...valid,signature_nom_responsable:'Responsable fictif',signature_date_responsable:'2026-11-23'},lowStrokes,{onsite:true,supervisorStrokes:lowStrokes});
+ const pdf=await PDFLib.PDFDocument.load(bytes),contents=pdf.getPage(2).node.Contents();
+ const commands=contents.asArray().map(ref=>Buffer.from(PDFLib.decodePDFRawStream(pdf.context.lookup(ref)).decode()).toString()).join('\n');
+ const paths=[...commands.matchAll(/0\.03 0\.16 0\.4 RG([\s\S]*?)Q/g)];
+ assert.equal(paths.length,4);
+ const points=paths.flatMap(match=>[...match[1].matchAll(/([\d.]+) ([\d.]+) [ml]/g)].map(p=>[Number(p[1]),Number(p[2])]));
+ assert.ok(points.length>=8);
+ assert.equal(Math.min(...points.map(p=>p[1])),172);
+ for(const [x,y] of points){assert.ok(y>=172&&y<=192,'au-dessus de la ligne originale à y=171');assert.ok((x>=98&&x<=288)||(x>=391&&x<=560),'dans la bonne zone de signature');}
+});
 test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer les anciennes annexes',{timeout:90000},async()=>{
  const f=await liveAppFixture({employeeVault:true,onboardingEmail:true});
  try{
@@ -69,8 +81,8 @@ test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer
   assert.deepEqual(state.body.documents.map(d=>d.kind),['tuac','sst_general']);
   const reminder=await f.onboardingMail(true);assert.equal(reminder.length,1);
   assert.equal(reminder[0].payload.from,'IGA Benoit <rh@example.invalid>');
-  assert.match(reminder[0].payload.text,/rempli avec votre gérant, dans votre département/);
-  assert.match(reminder[0].payload.text,/complétion est obligatoire/);
+  assert.match(reminder[0].payload.text,/À remplir avec votre gérant, dans votre département/);
+  assert.match(reminder[0].payload.text,/Cette étape est obligatoire/);
   const forged={...valid,formation_complete:'yes',tache_1:'Trancheur',tache_1_autorise:'yes',signature_nom_responsable:'Signature falsifiée'};
   const sign=await call('sign',{kind:'sst_general',version:0,policy:state.body.policy.id,answers:forged,strokes});
   assert.equal(sign.status,200,JSON.stringify(sign.body));

@@ -1,9 +1,10 @@
 import {buildPersonalInformation} from './accueil-renseignements.js';
 import {buildRetirement} from './accueil-retraite.js';
+import {retirementEmployerReady} from './retirement-fields.js';
 import {buildEmergency} from './accueil-urgence.js';
 import {buildSst} from './accueil-sst.js';
 import {buildGeneralSst} from './accueil-sst-general.js';
-import {sstWelcomeTitle,sstWelcomeInstructions} from './onboarding-messages.js';
+import {sstWelcomeTitle,sstWelcomeSubtitle,sstWelcomeInstructions} from './onboarding-messages.js';
 const token=location.hash.slice(1);
 const onsite=new URLSearchParams(location.search).has('sur-place');
 const localParams=new URLSearchParams(location.hash.slice(1));
@@ -29,7 +30,7 @@ function show(state){
  const done=state.documents.filter(d=>d.done).length;
  list.append(node('p',done+' document(s) sur '+state.documents.length+' complété(s)'),node('p','Échéance · '+String(state.due).slice(0,10)));
  if(state.documents.some(d=>['sst','sst_general'].includes(d.kind)&&!d.done)){
-  const reminder=node('div');reminder.className='banner';reminder.append(node('strong',sstWelcomeTitle),node('p',sstWelcomeInstructions));list.append(reminder);
+  const reminder=node('div'),subtitle=node('p');reminder.className='banner';subtitle.append(node('strong',sstWelcomeSubtitle));reminder.append(node('strong',sstWelcomeTitle),subtitle,node('p',sstWelcomeInstructions));list.append(reminder);
  }
  for(const d of state.documents){const b=node('button',d.title+' · '+(d.done?'Signé':d.version?'Reprendre':'Remplir'));b.disabled=d.done;b.onclick=()=>openForm(state,d);list.append(b);}
  if(done===state.documents.length)list.append(node('p','Votre dossier est complet. Vos documents signés sont classés.'));
@@ -37,11 +38,11 @@ function show(state){
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
  const fields=new Map(), labels={Emploi:'Date d’emploi',Signature:'Date de signature',Naissance:'Date de naissance',Indicatif:'Indicatif régional',Rue:'Numéro et rue',Appartement:'Appartement (ou S/O)'};
- if(d.kind==='renseignements'&&onsite){
-  buildPersonalInformation(form,d.draft,fields,true);
+ if(['renseignements','retraite'].includes(d.kind)&&onsite){
+  if(d.kind==='retraite')buildRetirement(form,d.draft,fields,true);else buildPersonalInformation(form,d.draft,fields,true);
   const check=node('input');check.type='checkbox';const consent=node('label');consent.append(check,' J’ai pris connaissance de la politique de confidentialité.');
   const privacy=node('details');privacy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));form.append(privacy,consent);
-  const save=node('button','Enregistrer la section employeur');save.type='button';form.append(save);
+  const save=node('button',d.kind==='retraite'?'Enregistrer la section direction':'Enregistrer la section employeur');save.type='button';form.append(save);
   const next=node('p'),invitation=node('a','Choisir les documents à envoyer à cet employé');
   invitation.href='/dossiers-employes?vue=direction#dossiers/'+localParams.get('key');next.append(invitation);form.append(next);
   save.onclick=async()=>{
@@ -98,7 +99,7 @@ function openForm(state,d){
   const eraseSupervisor=node('button','Effacer la signature du responsable');eraseSupervisor.type='button';eraseSupervisor.onclick=()=>{painter.clearRect(0,0,800,200);supervisorStrokes=[];};form.append(eraseSupervisor);
  }
  for(const [action,title] of [['save','Enregistrer et reprendre plus tard'],['sign','Signer et classer le PDF']]){
-  const b=node('button',title);b.type='button';if(action==='sign'&&personal&&!personal.ready)b.disabled=true;form.append(b);
+  const b=node('button',title);b.type='button';if(action==='sign'&&((personal&&!personal.ready)||(d.kind==='retraite'&&!retirementEmployerReady(d.draft))))b.disabled=true;form.append(b);
   b.onclick=async()=>{if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}if(action==='sign'){validateRetirement?.();validateEmergency?.();if(!form.reportValidity())return;}
    b.disabled=true;try{const result=await call(action,{kind:d.kind,version:d.version,policy:state.policy.id,answers:Object.fromEntries([...fields].filter(([,i])=>!i.matches(':disabled')).map(([k,i])=>[k,i.type==='checkbox'?(i.checked?'yes':'no'):i.value])),strokes:action==='sign'?strokes:[],supervisorStrokes:action==='sign'?supervisorStrokes:[]});show(result);status.textContent=action==='save'?(onsite?'Brouillon enregistré dans le dossier.':'Brouillon enregistré. Conservez votre lien pour reprendre.'):'PDF signé et classé.';}catch(e){status.textContent=e.message;}finally{b.disabled=false;}};
  }

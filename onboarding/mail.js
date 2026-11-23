@@ -1,5 +1,5 @@
 import {createHmac,createHash} from 'node:crypto';
-import {onboardingWelcome,sstWelcomeTitle,sstWelcomeInstructions} from '../public/onboarding-messages.js';
+import {onboardingWelcome,sstWelcomeTitle,sstWelcomeSubtitle,sstWelcomeInstructions} from '../public/onboarding-messages.js';
 export function invitationToken(nonce){
  return createHmac('sha256',process.env.SESSION_SECRET).update('onboarding/'+nonce).digest('base64url');
 }
@@ -9,7 +9,14 @@ function onboardingSender(value=sender()){
  const configured=value.trim(),address=configured.match(/<([^<>]+)>$/)?.[1]?.trim()||configured;
  return 'IGA Benoit <'+address+'>';
 }
-const sstNotice='IMPORTANT — '+sstWelcomeTitle+'\n'+sstWelcomeInstructions;
+const sstNotice=sstWelcomeTitle+'\n'+sstWelcomeSubtitle+'\n\n'+sstWelcomeInstructions;
+function emailHtml(text){
+ const escape=value=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+ return '<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.5;color:#222">'+text.split('\n\n').map(paragraph=>{
+  const html=paragraph.split(/(https:\/\/\S+)/g).map(part=>part.startsWith('https://')?'<a href="'+escape(part)+'">'+escape(part)+'</a>':escape(part)).join('').replace(/\n/g,'<br>');
+  return '<p>'+(paragraph.startsWith(sstWelcomeTitle)?'<strong>'+html+'</strong>':html)+'</p>';
+ }).join('')+'</div>';
+}
 const siteUrl=()=>process.env.PUBLIC_BASE_URL||process.env.RENDER_EXTERNAL_URL;
 export function invitationEmailReady(){
  try{return !!(process.env.RESEND_API_KEY&&sender()&&process.env.SESSION_SECRET&&new URL(siteUrl()).protocol==='https:');}catch{return false;}
@@ -20,6 +27,7 @@ export async function sendInvitation(row,titles,{send,site=siteUrl(),from=sender
  const due=typeof row.due==='string'?row.due.slice(0,10):row.due.toISOString().slice(0,10);
  const payload={from:onboardingSender(from),to:[row.employee_email],subject:onboardingWelcome,
   text:'Bonjour,\n\n'+onboardingWelcome+'\nNous sommes heureux de vous accueillir dans notre équipe.\n\nVos documents d’embauche sont prêts à remplir et à signer :\n'+titles.map(title=>'• '+title).join('\n')+(titles.some(title=>/\bSST\b/i.test(title))?'\n\n'+sstNotice:'')+'\n\nMerci de compléter tous les documents demandés avant l’échéance : '+due+'\n\nOuvrir votre dossier : '+new URL(site).origin+'/accueil-employe.html#'+token+'\n\nVous pouvez enregistrer vos réponses et reprendre plus tard avec ce même lien. Ce lien est personnel : ne le transférez pas.\n\nIGA Extra Famille Benoit'};
+ payload.html=emailHtml(payload.text);
  const id=createHash('sha256').update(JSON.stringify([row.employee_key,row.generation,payload])).digest('hex');
  if(send)await send(payload,id);
  else{
@@ -42,6 +50,7 @@ export async function sendPending(pool,{send,trial=null,site=process.env.PUBLIC_
    if(!complete && createHash('sha256').update(token).digest('hex')!==row.token_hash)throw Error('Lien à renouveler');
    const pendingSst=!complete&&(await db.query("SELECT 1 FROM onboarding_docs WHERE employee_key=$1 AND invited AND kind IN ('sst','sst_general') AND original_id IS NULL LIMIT 1",[row.employee_key])).rowCount>0;
    const payload={from:onboardingSender(),to:[complete?row.manager_email:row.employee_email],subject:complete?'Dossier d’accueil complété':'Rappel de votre accueil',text:complete?'Un dossier d’accueil est complet. Consultez Dossiers employés : '+root+'/dossiers-employes.html':'Votre dossier d’accueil est encore à compléter.'+(pendingSst?'\n\n'+sstNotice:'')+'\n\nReprenez votre dossier : '+root+'/accueil-employe.html#'+token};
+   payload.html=emailHtml(payload.text);
    const id=createHash('sha256').update([row.employee_key,row.invited_at,complete?'final':'rappel'].join('|')).digest('hex');
    if(send)await send(payload,id);
    else{

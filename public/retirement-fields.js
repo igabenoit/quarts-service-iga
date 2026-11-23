@@ -12,6 +12,18 @@ field('p','etat','État civil',0,0,0,{choices:{'Marié(e)':[153,384],'Célibatai
 title('c',83,602);name('c',194,602);identity('c',203,492,647);field('c','sexe','Sexe',0,0,0,{choices:{'Féminin':[695,639],'Masculin':[695,663]}});for(let i=0;i<3;i++){const g='b'+i,back=i>0,y=i===2?256:0; title(g,back?101:83,back?89+y:771);name(g,back?211:194,back?88+y:771,back?15.7:16); identity(g,back?226:205,back?545:491,back?133+y:814,true);field(g,'lien','Lien de parenté',back?157:140,back?171+y:858,22,{req:true,step:back?15.7:16});field(g,'part','Pourcentage',back?646:643,back?171+y:859,3,{req:true,pattern:'[0-9]{1,3}'});address(g,back?53:35,back?180:163,back?290:275,back?219+y:901,back?54:35,back?588:579,back?635:628,back?266+y:951,back?15.7:16)}
 
 export const retirementKeys = [...retirementFields.map(f=>f.id),'spouse','mode','count','consent','signed'];
+export const retirementEmployerKeys=['p_employeur','p_embauche','p_section','p_adhesion'];
+export const retirementEmployerReady=answers=>answers?._employerPrepared===true&&retirementEmployerKeys.every(key=>typeof answers[key]==='string'&&answers[key].trim());
+export function retirementAnswers(input,previous={},employer=false){
+ const result=Object.fromEntries(retirementKeys.map(key=>{
+  const editable=retirementEmployerKeys.includes(key)===employer;
+  const value=editable?input[key]??'':previous[key]??'';
+  if(typeof value!=='string'||value.length>200)throw Error('Vérifiez les renseignements du régime de retraite.');
+  return [key,value.trim()];
+ }));
+ result._employerPrepared=employer||previous._employerPrepared===true;
+ return result;
+}
 export function visibleGroup(group, values) {
   if (group === 'p') return true;
   if (group === 'c') return values.spouse === 'yes';

@@ -1,6 +1,6 @@
-import {retirementFields,visibleGroup} from './retirement-fields.js';
+import {retirementFields,visibleGroup,retirementEmployerKeys,retirementEmployerReady} from './retirement-fields.js';
 
-export function buildRetirement(form,draft,fields){
+export function buildRetirement(form,draft,fields,employer=false){
  function create(tag,text){const el=document.createElement(tag);el.textContent=text||'';return el;}
  function group(title){const box=create('fieldset');box.append(create('legend',title));form.append(box);return box;}
  function control(parent,id,label,options={}){
@@ -16,13 +16,25 @@ export function buildRetirement(form,draft,fields){
   return el;
  }
  const boxes={};
+ const employerFields=retirementFields.filter(item=>retirementEmployerKeys.includes(item.id));
+ if(employer){
+  const box=group('Renseignements réservés à la direction');
+  box.append(create('p','Complétez et enregistrez ces quatre champs. L’employé remplira ses renseignements personnels et signera depuis son lien.'));
+  for(const f of employerFields)control(box,f.id,f.label,{...f,req:true});
+  return null;
+ }
  function section(id,title){
   const box=group(title);boxes[id]=box;
-  for(const f of retirementFields.filter(item=>item.group===id)){
+  for(const f of retirementFields.filter(item=>item.group===id&&!retirementEmployerKeys.includes(item.id))){
    control(box,f.id,f.label,{...f,choices:f.choices&&Object.fromEntries(Object.keys(f.choices).map(k=>[k,k]))});
   }
  }
  section('p','1 · Renseignements sur le participant');
+ const direction=group('Renseignements de l’employeur · Direction seulement');
+ for(const f of employerFields){
+  const label=create('label',f.label),input=create('input');input.readOnly=true;input.setAttribute('aria-readonly','true');input.value=draft[f.id]||'À compléter par la direction';label.append(input);direction.append(label);
+ }
+ if(!retirementEmployerReady(draft))direction.append(create('p','La direction doit compléter et enregistrer sa section avant votre signature. Vous pouvez enregistrer vos réponses et reprendre plus tard.'));
  const spouse=control(form,'spouse','Ajouter un conjoint ou une conjointe ?',{choices:{no:'Non',yes:'Oui'},value:'no'});
  section('c','2 · Renseignements sur le conjoint');
  const mode=control(form,'mode','3 · Désignation de bénéficiaire',{choices:{estate:'Ma succession',persons:'Un ou plusieurs bénéficiaires'},req:true});

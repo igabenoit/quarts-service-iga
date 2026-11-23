@@ -38,10 +38,15 @@ function validSignature(lines){
  lines.some(line=>line.some(p=>Math.hypot(p[0]-line[0][0],p[1]-line[0][1])>.01));
 }
 function drawSignature(page,lines,left,bottom,width,height){
+ // Recadrer le tracé, et non le canevas : sa position sur le pavé ne doit
+ // jamais pousser la signature sous la ligne du formulaire.
+ let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+ for(const line of lines)for(const [x,y] of line){minX=Math.min(minX,x*4);maxX=Math.max(maxX,x*4);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+ const scale=Math.min(width/Math.max(.01,maxX-minX),height/Math.max(.01,maxY-minY));
  for(const line of lines){
   let previous;
   for(const [x,y] of line){
-   const next={x:left+x*width,y:bottom+(1-y)*height};
+   const next={x:left+(x*4-minX)*scale,y:bottom+(maxY-y)*scale};
    if(previous)page.drawLine({start:previous,end:next,color:PDFLib.rgb(.03,.16,.40),thickness:.85});
    previous=next;
   }
@@ -69,8 +74,8 @@ export async function signedGeneralSst(input,employeeStrokes,options={}){
  for(const key of generalSstCheckKeys)if(answers[key]==='yes')form.getCheckBox(key).check();
  form.flatten();
  const page=pdf.getPage(2);
- // Coordonnées des deux zones de signature sur la page 3 du modèle original (lettre).
- drawSignature(page,employeeStrokes,98,144,176,30);
- if(managed)drawSignature(page,options.supervisorStrokes,367,144,174,30);
+ // Page 3 : les deux lignes sont à y=171 points (621 depuis le haut).
+ drawSignature(page,employeeStrokes,98,172,190,20);
+ if(managed)drawSignature(page,options.supervisorStrokes,391,172,169,20);
  return Buffer.from(await pdf.save());
 }

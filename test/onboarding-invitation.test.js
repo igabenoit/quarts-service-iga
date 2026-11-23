@@ -66,16 +66,18 @@ test('invitation : un courriel, six titres, lien personnel et reprise sans doubl
  assert.deepEqual(sent[0].payload.to,['employee@example.invalid']);assert.equal(sent[0].payload.attachments,undefined);
  assert.equal(sent[0].payload.from,'IGA Benoit <rh@example.invalid>');
  assert.equal(sent[0].payload.subject,'Bienvenue dans la grande famille IGA Benoit !');
- assert.match(sent[0].payload.text,/rempli avec votre gérant, dans votre département/);
- assert.match(sent[0].payload.text,/complétion est obligatoire/);
- assert.match(sent[0].payload.text,/reste incomplet tant que ce document n’est pas terminé/);
+ assert.match(sent[0].payload.text,/À remplir avec votre gérant, dans votre département/);
+ assert.match(sent[0].payload.text,/Cette étape est obligatoire pour que votre dossier d’embauche soit complet/);
+ assert.match(sent[0].payload.html,/<strong>IMPORTANT — Programme d’accueil SST<br>À remplir avec votre gérant, dans votre département<\/strong>/);
+ assert.ok(sent[0].payload.html.includes('href="https://portail.example.invalid/accueil-employe.html#'+token+'"'));
  for(const title of titles)assert.ok(sent[0].payload.text.includes(title));
  assert.ok(sent[0].payload.text.includes('https://portail.example.invalid/accueil-employe.html#'+token));
  await assert.rejects(()=>sendInvitation({...row,token_hash:null},titles,options));
  await assert.rejects(()=>sendInvitation(row,titles,{...options,send:async()=>{throw Error('Simulated provider failure');}}));
  assert.equal(sent.length,2);
- await sendInvitation(row,['Informations personnelles'],options);
+ await sendInvitation(row,['Informations personnelles <script>exemple</script>'],options);
  assert.equal(sent[2].payload.text.includes('Programme d’accueil SST'),false,'ne pas demander un SST absent de la sélection');
+ assert.ok(!sent[2].payload.html.includes('<script>'));assert.ok(sent[2].payload.html.includes('&lt;script&gt;'));
 });
 
 test('formulaire : six documents présélectionnés, ancien SST exclu, signature conservée',()=>{

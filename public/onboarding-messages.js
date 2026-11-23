@@ -1,3 +1,4 @@
 export const onboardingWelcome='Bienvenue dans la grande famille IGA Benoit !';
-export const sstWelcomeTitle='Programme d’accueil SST · À compléter avec votre gérant';
-export const sstWelcomeInstructions='Ce programme doit être rempli avec votre gérant, dans votre département. Sa complétion est obligatoire : prenez un moment avec lui pour le terminer et le signer. Votre dossier d’embauche reste incomplet tant que ce document n’est pas terminé.';
+export const sstWelcomeTitle='IMPORTANT — Programme d’accueil SST';
+export const sstWelcomeSubtitle='À remplir avec votre gérant, dans votre département';
+export const sstWelcomeInstructions='Prévoyez un moment avec votre gérant pour remplir et signer ce document dans votre département. Cette étape est obligatoire pour que votre dossier d’embauche soit complet.';

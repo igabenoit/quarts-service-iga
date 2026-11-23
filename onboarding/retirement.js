@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import PDFLib from './tuac/pdf-lib.min.cjs';
-import {retirementFields,visibleGroup} from '../public/retirement-fields.js';
+import {retirementFields,visibleGroup,retirementEmployerReady} from '../public/retirement-fields.js';
 export {retirementKeys} from '../public/retirement-fields.js';
 
 const scale=72/95;
@@ -10,6 +10,7 @@ function dateParts(v){
  return v.slice(8)+v.slice(5,7)+v.slice(0,4);
 }
 export async function signedRetirement(answers,strokes){
+ if(!retirementEmployerReady(answers))throw Error('La direction doit compléter et enregistrer les renseignements de l’employeur avant votre signature.');
  const {mode,count,signed,consent}=answers;
  if(consent!=='yes'||!['estate','persons'].includes(mode))throw Error('Autorisation et désignation requises');
  dateParts(signed);
@@ -19,7 +20,11 @@ export async function signedRetirement(answers,strokes){
   if(shares.some(v=>!Number.isInteger(v)||v<=0)||shares.reduce((a,b)=>a+b,0)!==100)throw Error('Les parts doivent totaliser 100 %');
  }
  if(!Array.isArray(strokes)||strokes.length>200||!strokes.some(line=>Array.isArray(line)&&line.length>1))throw Error('Signature requise');
- const pdf=await PDFLib.PDFDocument.load(await readFile(new URL('./retraite/form.pdf',import.meta.url)));
+ const pdf=await PDFLib.PDFDocument.load(await readFile(new URL('./retraite/form.pdf',import.meta.url)),{updateMetadata:false});
+ if(pdf.getPageCount()!==2||pdf.getPages().some(page=>page.getWidth()!==612||page.getHeight()!==792))throw Error('Le modèle doit comporter deux pages format lettre.');
+ const printing=pdf.catalog.getOrCreateViewerPreferences();
+ printing.setDuplex(PDFLib.Duplex.DuplexFlipLongEdge);printing.setPrintScaling(PDFLib.PrintScaling.None);printing.setPickTrayByPDFSize(true);
+ delete pdf.context.trailerInfo.Info;
  const pages=pdf.getPages(),font=await pdf.embedFont(PDFLib.StandardFonts.Helvetica);
  function text(page,value,x,y,size=10){page.drawText(value,{x:x*scale,y:page.getHeight()-y*scale,size,font,color});}
  function cross(page,[x,y]){text(page,'X',x-4,y+4,8);}
