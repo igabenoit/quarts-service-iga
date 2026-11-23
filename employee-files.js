@@ -4,6 +4,8 @@ import {installEmployeeDiscipline} from './employee-discipline.js';
 import {saveDirectionSignature} from './onboarding/ethics-source.js';
 import {ethicsSignatureExcerpt} from './onboarding/ethics-print.js';
 import {tuacPrintCopy} from './onboarding/tuac-print.js';
+import {generalSstPrintCopy} from './onboarding/sst-general-print.js';
+import {letterDuplexCopy} from './onboarding/letter-print.js';
 import {installSingleTrial} from './onboarding/single-trial.js';
 import {installOnboarding,onboardingTitle} from './onboarding/routes.js';
 import express from 'express';
@@ -225,15 +227,18 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
   const kind=o.mime==='application/pdf'?(await pool.query("SELECT kind FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[o.id])).rows[0]?.kind:null;
   let name=o.name;
   if(req.query.print){
-   if(req.query.print!=='tuac-original'||kind!=='tuac')fail('Copie d’impression indisponible pour ce document.',400);
-   try{data=await tuacPrintCopy(data);}catch(error){fail(error.message,422);}
-   name='Adhésion TUAC 500 - Impression feuille originale.pdf';
+   const render=req.query.print==='tuac-original'&&kind==='tuac'?tuacPrintCopy:
+    req.query.print==='letter-duplex'&&kind==='urgence'?letterDuplexCopy:
+    req.query.print==='sst-duplex'&&kind==='sst_general'?generalSstPrintCopy:null;
+   if(!render)fail('Copie d’impression indisponible pour ce document.',400);
+   try{data=await render(data);}catch(error){fail(error.message,422);}
+   name=kind==='tuac'?'Adhésion TUAC 500 - Impression feuille originale.pdf':onboardingTitle(kind)+' - Impression recto verso.pdf';
   }
   if(req.query.pages){
    if(req.query.pages!=='signatures'||kind!=='ethique')fail('Extrait de signatures indisponible pour ce document.',400);
    data=await ethicsSignatureExcerpt(data);name='Code d’éthique - Pages de signature.pdf';
   }
-  await event(pool,req.ef,'original.read',{originalId:o.id,...(req.query.pages?{pages:'signatures'}:{}),...(req.query.print?{print:'tuac-original'}:{})});
+  await event(pool,req.ef,'original.read',{originalId:o.id,...(req.query.pages?{pages:'signatures'}:{}),...(req.query.print?{print:req.query.print}:{})});
   res.set({'Content-Type':o.mime,'Content-Disposition':`${req.query.download?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(name)}`,'Content-Security-Policy':"sandbox; default-src 'none'; frame-ancestors 'self'",'X-Content-Type-Options':'nosniff','X-Frame-Options':'SAMEORIGIN',...(kind?{'X-Onboarding-Kind':kind}:{})});
   await sendPrivateBytes(res,data);
  }));

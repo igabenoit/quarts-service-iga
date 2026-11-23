@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import PDFLib from '../onboarding/tuac/pdf-lib.min.cjs';
 import {blankGeneralSst,generalSstFields,sanitizeGeneralSstAnswers,signedGeneralSst} from '../onboarding/sst-general.js';
 import {liveAppFixture} from './live-app-fixture.mjs';
+import {generalSstSignatureZones} from '../onboarding/sst-general-layout.js';
 
 const strokes=[[[.04,.3],[.35,.75],[.77,.3]]];
 const valid={
@@ -14,9 +15,12 @@ const valid={
  ...Object.fromEntries(Array.from({length:6},(_,i)=>['accueil_sujet_'+(i+1),'yes']))
 };
 
-test('nouveau programme SST : PDF vierge 3 pages, champs exacts et signature employé',async()=>{
- const original=await PDFLib.PDFDocument.load(await blankGeneralSst());
- assert.equal(original.getPageCount(),3);
+test('nouveau programme SST : PDF lettre recto verso, champs exacts et signature employé',async()=>{
+ const original=await PDFLib.PDFDocument.load(await blankGeneralSst(),{updateMetadata:false});
+ assert.equal(original.getPageCount(),2);
+ for(const page of original.getPages())assert.deepEqual(page.getSize(),{width:612,height:792});
+ assert.equal(original.catalog.getOrCreateViewerPreferences().getDuplex(),PDFLib.Duplex.DuplexFlipLongEdge);
+ assert.equal(original.context.trailerInfo.Info,undefined);
  assert.equal(original.getForm().getFields().length,52);
  assert.equal(generalSstFields.length,53);
  const altered={...valid,formation_complete:'yes',tache_1:'Trancheur',tache_1_autorise:'yes',signature_nom_responsable:'Faux responsable'};
@@ -26,10 +30,12 @@ test('nouveau programme SST : PDF vierge 3 pages, champs exacts et signature emp
  assert.equal(clean.signature_nom_responsable,'');
  await assert.rejects(()=>signedGeneralSst(valid,[]),/Signature/);
  await assert.rejects(()=>signedGeneralSst({...valid,accueil_sujet_5:'no'},strokes),/sujets/);
- const pdf=await PDFLib.PDFDocument.load(await signedGeneralSst(altered,strokes));
- assert.equal(pdf.getPageCount(),3);
+ const pdf=await PDFLib.PDFDocument.load(await signedGeneralSst(altered,strokes),{updateMetadata:false});
+ assert.equal(pdf.getPageCount(),2);
+ assert.equal(pdf.catalog.getOrCreateViewerPreferences().getDuplex(),PDFLib.Duplex.DuplexFlipLongEdge);
+ assert.equal(pdf.catalog.getOrCreateViewerPreferences().getPrintScaling(),PDFLib.PrintScaling.None);
+ assert.equal(pdf.context.trailerInfo.Info,undefined);
  assert.equal(pdf.catalog.has(PDFLib.PDFName.of('AcroForm')),false,'le PDF signé est statique sans ancien formulaire résiduel');
- assert.ok((await pdf.save()).byteLength>30000);
 });
 test('formation pratique : autorisation fondée sur une observation et signature du responsable',async()=>{
  const base={...valid,responsable_accueil:'Responsable Exemple',date_accueil:'2026-11-10',formation_complete:'yes',tache_1:'Caisse'};
@@ -37,19 +43,21 @@ test('formation pratique : autorisation fondée sur une observation et signature
  const completed={...base,tache_1_explique:'yes',tache_1_pratique:'yes',tache_1_autorise:'yes',signature_nom_responsable:'Responsable Exemple',signature_date_responsable:'2026-11-10'};
  await assert.rejects(()=>signedGeneralSst(completed,strokes,{onsite:true}),/responsable/);
  const final=await signedGeneralSst(completed,strokes,{onsite:true,supervisorStrokes:strokes});
- assert.equal((await PDFLib.PDFDocument.load(final)).getPageCount(),3);
+ assert.equal((await PDFLib.PDFDocument.load(final)).getPageCount(),2);
 });
 test('signatures SST : les tracés restent au-dessus des deux lignes, même dessinés au bas du pavé',async()=>{
  const lowStrokes=[[[.12,.85],[.45,.99],[.82,.84]]];
  const bytes=await signedGeneralSst({...valid,signature_nom_responsable:'Responsable fictif',signature_date_responsable:'2026-11-23'},lowStrokes,{onsite:true,supervisorStrokes:lowStrokes});
- const pdf=await PDFLib.PDFDocument.load(bytes),contents=pdf.getPage(2).node.Contents();
- const commands=contents.asArray().map(ref=>Buffer.from(PDFLib.decodePDFRawStream(pdf.context.lookup(ref)).decode()).toString()).join('\n');
- const paths=[...commands.matchAll(/0\.03 0\.16 0\.4 RG([\s\S]*?)Q/g)];
- assert.equal(paths.length,4);
- const points=paths.flatMap(match=>[...match[1].matchAll(/([\d.]+) ([\d.]+) [ml]/g)].map(p=>[Number(p[1]),Number(p[2])]));
- assert.ok(points.length>=8);
- assert.equal(Math.min(...points.map(p=>p[1])),172);
- for(const [x,y] of points){assert.ok(y>=172&&y<=192,'au-dessus de la ligne originale à y=171');assert.ok((x>=98&&x<=288)||(x>=391&&x<=560),'dans la bonne zone de signature');}
+ const pdf=await PDFLib.PDFDocument.load(bytes);
+ for(const zone of Object.values(generalSstSignatureZones)){
+  const contents=pdf.getPage(zone.page).node.Contents();
+  const commands=contents.asArray().map(ref=>Buffer.from(PDFLib.decodePDFRawStream(pdf.context.lookup(ref)).decode()).toString()).join('\n');
+  const paths=[...commands.matchAll(/0\.03 0\.16 0\.4 RG([\s\S]*?)Q/g)];
+  assert.equal(paths.length,2);
+  const points=paths.flatMap(match=>[...match[1].matchAll(/([\d.]+) ([\d.]+) [ml]/g)].map(p=>[Number(p[1]),Number(p[2])]));
+  assert.equal(Math.min(...points.map(p=>p[1])),zone.bottom);
+  for(const [x,y] of points){assert.ok(y>=zone.bottom&&y<=zone.bottom+zone.height);assert.ok(x>=zone.left&&x<=zone.left+zone.width);}
+ }
 });
 test('parcours nouvelle embauche : le formulaire SST est proposé sans attribuer les anciennes annexes',{timeout:90000},async()=>{
  const f=await liveAppFixture({employeeVault:true,onboardingEmail:true});

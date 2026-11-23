@@ -1,5 +1,5 @@
-import {readFile} from 'node:fs/promises';
 import PDFLib from './tuac/pdf-lib.min.cjs';
+import {createGeneralSstLayout,fitGeneralSstField,generalSstSignatureZones,letterDuplexPreferences} from './sst-general-layout.js';
 
 // Nouvelle fiche SST 2026. L'annexe 11.1 historique conserve son propre type et ses originaux.
 export const generalSstTopics=Array.from({length:6},(_,i)=>'accueil_sujet_'+(i+1));
@@ -26,7 +26,8 @@ export function sanitizeGeneralSstAnswers(answers,onsite){
  if(!onsite)for(const k of generalSstFields)if(!generalSstEmployeeKeys.has(k))clean[k]='';
  return clean;
 }
-export const blankGeneralSst=()=>readFile(new URL('./sst-general/form.pdf',import.meta.url));
+let blank;
+export const blankGeneralSst=()=>blank??=createGeneralSstLayout().then(({pdf})=>pdf.save()).then(bytes=>Buffer.from(bytes));
 const isDate=v=>{
  if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;
  const time=new Date(v+'T12:00:00Z');
@@ -69,18 +70,16 @@ export async function signedGeneralSst(input,employeeStrokes,options={}){
  const managed=onsite&&managerialKeys.some(k=>answers[k]&&answers[k]!=='no');
  if(managed&&(!answers.signature_nom_responsable.trim()||!isDate(answers.signature_date_responsable)||!validSignature(options.supervisorStrokes)))
   throw Error('Signature et date du responsable requises pour valider ses observations.');
- const pdf=await PDFLib.PDFDocument.load(await blankGeneralSst()),form=pdf.getForm();
- for(const key of generalSstTextKeys)form.getTextField(key).setText(answers[key]||'');
+ const {pdf,form,font}=await createGeneralSstLayout();
+ for(const key of generalSstTextKeys)fitGeneralSstField(form.getTextField(key),answers[key]||'',font);
  for(const key of generalSstCheckKeys)if(answers[key]==='yes')form.getCheckBox(key).check();
  form.flatten();
- const page=pdf.getPage(2);
- // Page 3 : les deux lignes sont à y=171 points (621 depuis le haut).
- drawSignature(page,employeeStrokes,98,172,190,20);
- if(managed)drawSignature(page,options.supervisorStrokes,391,172,169,20);
- // Le modèle comporte des révisions PDF incrémentales. Copier les pages
- // terminées évite les anciennes références et supprime le formulaire vide.
+ const employee=generalSstSignatureZones.employee,supervisor=generalSstSignatureZones.supervisor;
+ drawSignature(pdf.getPage(employee.page),employeeStrokes,employee.left,employee.bottom,employee.width,employee.height);
+ if(managed)drawSignature(pdf.getPage(supervisor.page),options.supervisorStrokes,supervisor.left,supervisor.bottom,supervisor.width,supervisor.height);
+ // Copier les pages terminées supprime le formulaire vide et conserve un PDF statique.
  const completed=await PDFLib.PDFDocument.create();
  for(const page of await completed.copyPages(pdf,pdf.getPageIndices()))completed.addPage(page);
- delete completed.context.trailerInfo.Info;
+ letterDuplexPreferences(completed);
  return Buffer.from(await completed.save());
 }

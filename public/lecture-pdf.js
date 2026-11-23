@@ -67,20 +67,22 @@ async function open(){
  if(response.status===401||response.status===403)throw Error('Accès au document refusé. Reconnecte-toi au portail avec ton compte autorisé puis rouvre le dossier.');
  if(!response.ok||!response.headers.get('content-type')?.startsWith('application/pdf'))throw Error('Document indisponible. Rouvre-le depuis le dossier employé.');
  const filename=response.headers.get('content-disposition')||'';
- const retirementPdf=filename.includes(encodeURIComponent('Inscription au régime de retraite'));
- const emergencyPdf=filename.includes(encodeURIComponent('Informations en cas d’urgence'));
- const tuacPdf=filename.includes(encodeURIComponent('Adhésion TUAC 500'));
+ const kind=response.headers.get('x-onboarding-kind');
+ const retirementPdf=kind==='retraite'||filename.includes(encodeURIComponent('Inscription au régime de retraite'));
+ const emergencyPdf=kind==='urgence'||filename.includes(encodeURIComponent('Informations en cas d’urgence'));
+ const tuacPdf=kind==='tuac'||filename.includes(encodeURIComponent('Adhésion TUAC 500'));
+ const sstPdf=kind==='sst_general';
  download.href=url+'&download=1';download.hidden=false;
  let displayResponse=response;
- if(tuacPdf){
-  const printResponse=await fetch(url+'&print=tuac-original',{credentials:'same-origin',cache:'no-store'});
-  if(!printResponse.ok)throw Error('Copie pour la feuille TUAC indisponible. Le PDF original signé peut être téléchargé.');
+ if(tuacPdf||emergencyPdf||sstPdf){
+  const printResponse=await fetch(url+'&print='+(tuacPdf?'tuac-original':sstPdf?'sst-duplex':'letter-duplex'),{credentials:'same-origin',cache:'no-store'});
+  if(!printResponse.ok)throw Error('Copie pour impression indisponible. Le PDF original signé peut être téléchargé.');
   displayResponse=printResponse;
  }
  const lib=await import('/vendor/pdfjs/pdf.min.mjs');
  lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs';
  const bytes=await pdfBytes(displayResponse);
- const printUrl=retirementPdf||emergencyPdf||tuacPdf?localPrintUrl(bytes):null;
+ const printUrl=retirementPdf||emergencyPdf||tuacPdf||sstPdf?localPrintUrl(bytes):null;
  pdf=await lib.getDocument({data:bytes,isEvalSupported:false}).promise;
  pageNumbers=Array.from({length:pdf.numPages},(_,i)=>i+1);
  document.querySelector('nav').hidden=false;
@@ -107,9 +109,14 @@ async function open(){
   };
   selection.append(label,modeButton);document.querySelector('header').after(selection);
   const instruction=document.createElement('p');instruction.textContent='Le bouton d’impression ouvre un PDF de 3 pages seulement, avec les signatures. Le cahier complet reste conservé et téléchargeable.';selection.after(instruction);
- }else if(retirementPdf||emergencyPdf||tuacPdf){
-  attachPdfPrintLink(get('print'),printUrl,'Ouvrir le PDF pour imprimer',tuacPdf?'TUAC - Impression feuille originale.pdf':retirementPdf?'Inscription au régime de retraite.pdf':'Informations en cas d’urgence.pdf');
-  const instruction=document.createElement('p');instruction.textContent=tuacPdf?'Imprimez sur la feuille originale TUAC à trois fiches : format lettre (8,5 × 11 po), recto seulement, taille réelle (100 %), sans ajustement. Cette copie reprend les renseignements et la signature existants. Le PDF original signé reste disponible au téléchargement.':'Imprimez le PDF original : format lettre (8,5 × 11 po), recto verso sur une seule feuille, retournement sur le bord long. Aucun en-tête ni pied de page du site n’est ajouté.';document.querySelector('header').after(instruction);
+ }else if(retirementPdf||emergencyPdf||tuacPdf||sstPdf){
+  attachPdfPrintLink(get('print'),printUrl,'Ouvrir le PDF pour imprimer',tuacPdf?'TUAC - Impression feuille originale.pdf':retirementPdf?'Inscription au régime de retraite.pdf':sstPdf?'Programme d’accueil SST - Recto verso.pdf':'Informations en cas d’urgence - Recto verso.pdf');
+  const instruction=document.createElement('p');
+  instruction.textContent=tuacPdf?'Imprimez sur la feuille originale TUAC à trois fiches : format lettre (8,5 × 11 po), recto seulement, taille réelle (100 %), sans ajustement. Cette copie reprend les renseignements et la signature existants. Le PDF original signé reste disponible au téléchargement.':
+   pdf.numPages===2?'Pour imprimer recto verso sur une seule feuille : dans la fenêtre d’impression de Chrome, choisissez Lettre (8,5 × 11 po), « Imprimer des deux côtés » et « Retourner sur le bord long ». Laissez 1 page par face et vérifiez que l’aperçu annonce 1 feuille pour 2 pages. Le PDF propose le recto verso, mais ce réglage doit aussi être activé pour l’imprimante. Aucun en-tête ni pied de page du site n’est ajouté.':
+   'Ce document contient une seule page : imprimez-le en format lettre (8,5 × 11 po), taille réelle (100 %). Aucun en-tête ni pied de page du site n’est ajouté.';
+  document.querySelector('header').after(instruction);
+  if(sstPdf){document.querySelector('h1').textContent='Programme d’accueil SST · Impression recto verso';const archiveNote=document.createElement('p');archiveNote.textContent='Cette copie de 2 pages reprend les renseignements et les signatures existants. L’original signé reste conservé au dossier et téléchargeable.';instruction.after(archiveNote);}
  }else{get('print').hidden=false;get('print').onclick=printDocument;}
  await draw(pageNumbers[0]);
 }
