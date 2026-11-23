@@ -76,6 +76,9 @@ test('formulaire : six documents présélectionnés, ancien SST exclu, signature
  const html=onboardingForm({catalog,defaultDocuments:['renseignements','tuac','retraite','urgence','ethique','sst_general'],documents:[{kind:'tuac',done:true,invited:true}],employee_email:'test@example.invalid',emailReady:true});
  assert.equal((html.match(/name="doc"/g)||[]).length,6);assert.ok(!html.includes('Ancien SST'));
  assert.match(html,/value="tuac" checked disabled/);assert.ok(html.includes('Envoyer les documents par courriel'));
+ const existing=onboardingForm({catalog,defaultDocuments:['renseignements','tuac'],invited_at:'2026-11-20',documents:[{kind:'tuac',done:true,invited:true},{kind:'renseignements',invited:false}],emailReady:true});
+ assert.match(existing,/value="renseignements" checked><span>Informations personnelles <span class="badge warn">À ajouter à l’envoi/);
+ assert.match(existing,/value="tuac" checked disabled/);
  const escaped=onboardingForm({catalog:{tuac:'<script>faux</script>'},defaultDocuments:['tuac'],documents:[],employee_email:'" onfocus="evil'});
  assert.ok(!escaped.includes('<script>'));assert.ok(escaped.includes('&quot; onfocus=&quot;evil'));
  assert.ok(!escaped.includes('value="email">'));assert.equal(typeof invitationEmailReady(),'boolean');

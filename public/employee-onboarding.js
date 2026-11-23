@@ -6,7 +6,7 @@ export function onboardingForm(c){
  const due=c.due||new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Date.now()+7*86400000));
  return '<form data-invitation><fieldset><legend><strong>Documents à transmettre</strong></legend><p class="muted">Les '+defaults.length+' formulaires actuels sont sélectionnés. Les signatures et les réponses déjà enregistrées sont conservées.</p>'+kinds.map(kind=>{
   const doc=documents.find(d=>d.kind===kind),done=doc?.done||doc?.original_id,assigned=doc?.invited;
-  return '<label class="check"><input type="checkbox" name="doc" value="'+esc(kind)+'" checked'+(done||assigned?' disabled':'')+'><span>'+esc(c.catalog[kind])+(done?' <span class="badge ok">Signé</span>':assigned?' <span class="badge warn">À compléter</span>':'')+'</span></label>';
+  return '<label class="check"><input type="checkbox" name="doc" value="'+esc(kind)+'" checked'+(done||assigned?' disabled':'')+'><span>'+esc(c.catalog[kind])+(done?' <span class="badge ok">Signé</span>':assigned?' <span class="badge warn">À compléter</span>':c.invited_at?' <span class="badge warn">À ajouter à l’envoi</span>':'')+'</span></label>';
  }).join('')+'</fieldset><div class="form-grid"><label>Courriel de l’employé<input required type="email" name="email" autocomplete="off" value="'+esc(c.employeeEmail||c.employee_email||'')+'"></label><label>Courriel du gestionnaire pour le suivi<input required type="email" name="managerEmail" autocomplete="off" value="'+esc(c.managerEmail||c.manager_email||'')+'"></label><label>Échéance<input required type="date" name="due" value="'+esc(due)+'"></label><label>Rappel après (jours)<input required type="number" name="days" value="3" min="1" max="365"></label></div>'+(c.emailReady?'':'<p class="muted">L’envoi par courriel est indisponible. Vous pouvez créer le lien et le transmettre vous-même.</p>')+'<div class="actions">'+(c.emailReady?'<button type="submit" name="delivery" value="email">Envoyer les documents par courriel</button>':'')+'<button type="submit" name="delivery" value="link" class="secondary">'+(c.invited_at?'Enregistrer et afficher le lien':'Créer le lien à transmettre')+'</button></div></form>';
 }
 
@@ -51,9 +51,14 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
   return;
  }
  const items=c.documents.filter(d=>d.invited||d.done||d.original_id),done=items.filter(d=>d.done||d.original_id).length;
+ const additions=(c.defaultDocuments||[]).filter(kind=>!items.some(d=>d.kind===kind));
  if(c.invited_at){
   const status=document.createElement('div');status.className='onboarding-status';
   status.innerHTML='<p><strong>'+done+' / '+items.length+' documents signés</strong> · Échéance : '+esc(date(c.due))+'</p><progress max="'+Math.max(1,items.length)+'" value="'+done+'" aria-label="Documents signés"></progress>'+items.map(d=>'<div class="row spread"><span>'+esc(c.catalog[d.kind])+'</span>'+(d.original_id?'<a href="'+esc(signedPdfUrl(d.original_id))+'" target="_blank" rel="noopener">PDF signé</a>':d.done?'<span class="badge ok">Signé · accès réservé</span>':'<span class="badge warn">À compléter</span>')+'</div>').join('');panel.append(status);
+  if(additions.length){
+   const available=document.createElement('div');available.className='onboarding-additions';
+   available.innerHTML=additions.map(kind=>'<div class="row spread"><strong>'+esc(c.catalog[kind])+'</strong><span class="badge warn">À ajouter à l’envoi</span></div>').join('')+'<p>Ces documents sont sélectionnés ci-dessous. Enregistrez pour les ajouter au lien personnel existant, ou choisissez l’envoi par courriel.</p>';status.append(available);
+  }
   if(c.lastDelivery?.status==='sent')feedback().textContent='Courriel transmis au service d’envoi le '+date(c.lastDelivery.created_at)+' pour '+c.lastDelivery.email+'.';
   if(['failed','unavailable'].includes(c.lastDelivery?.status))feedback().textContent='Dernier envoi non confirmé. Réessayez ou transmettez le lien personnel.';
   if(!c.completed_at){
@@ -70,6 +75,7 @@ export async function renderOnboardingPanel(panel,key,{view,signedPdfUrl}){
   preparation.append(link,document.createTextNode(' Département, poste, date d’entrée, salaire et échelle. À préparer avant la signature de l’employé.'));panel.append(preparation);
  }
  const formHost=document.createElement(c.invited_at?'details':'div');
+ if(c.invited_at&&additions.length)formHost.open=true;
  formHost.innerHTML=(c.invited_at?'<summary>Ajouter des documents ou modifier l’envoi</summary>':'')+onboardingForm(c);panel.append(formHost);
  const form=formHost.querySelector('form');
  if(c.trialPolicy){

@@ -38,6 +38,8 @@ function openForm(state,d){
   const check=node('input');check.type='checkbox';const consent=node('label');consent.append(check,' J’ai pris connaissance de la politique de confidentialité.');
   const privacy=node('details');privacy.append(node('summary','Politique de confidentialité'),node('p',state.policy.text));form.append(privacy,consent);
   const save=node('button','Enregistrer la section employeur');save.type='button';form.append(save);
+  const next=node('p'),invitation=node('a','Choisir les documents à envoyer à cet employé');
+  invitation.href='/dossiers-employes?vue=direction#dossiers/'+localParams.get('key');next.append(invitation);form.append(next);
   save.onclick=async()=>{
    if(!check.checked){status.textContent='Veuillez confirmer la lecture de la politique.';return;}
    save.disabled=true;
