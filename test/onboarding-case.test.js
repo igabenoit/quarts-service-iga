@@ -28,9 +28,10 @@ test('parcours de deux nouvelles embauches isolées', {timeout:90000},async()=>{
   assert.deepEqual(await f.onboardingMail(),[]);
   const initial=must(await execute(0,'state'));
   const answers=Object.fromEntries(tuacFields.map(k=>[k,'Exemple']));
-  Object.assign(answers,{Nom:'Fictif',Naissance:'1990-01-01',Emploi:'2026-11-08',Signature:'2026-11-08',Courriel:'test@example.invalid'});
+  Object.assign(answers,{Nom:'Fictif',Naissance:'1990-01-01',Emploi:'2026-11-08',Signature:'2026-11-08',Courriel:'test@example.invalid',Indicatif:'',Téléphone:'+1 (450) 555-0123',Appartement:''});
   const body={kind:'tuac',version:0,policy:initial.policy.id,answers};
   must(await execute(0,'save',body));assert.equal(must(await execute(0,'state')).documents[0].draft.Nom,'Fictif');
+  const saved=must(await execute(0,'state')).documents[0].draft;assert.equal(saved.Indicatif,'450');assert.equal(saved.Téléphone,'5550123');assert.equal(saved.Appartement,'');
   assert.deepEqual(must(await execute(1,'state',{employeeKey:'store:1'})).documents[0].draft,{});
   must(await admin('POST',routes[0]('revoke'),{}));must(await execute(0,'state'),404);
   tokens[0]=must(await admin('POST',routes[0]('renew'),{})).path.split('#')[1];

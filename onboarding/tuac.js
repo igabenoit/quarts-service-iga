@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import PDFLib from './tuac/pdf-lib.min.cjs';
+import {normalizeTuacPhone} from '../public/tuac-phone.js';
 
 const dates = ['Naissance', 'Emploi', 'Signature'];
 export const employer = {
@@ -10,12 +11,15 @@ export const tuacFields = ['Nom', 'Prénom', 'Naissance', 'Rue', 'Appartement', 
   'Province', 'Code postal', 'Indicatif', 'Téléphone', 'Courriel', 'Emploi', 'Signature'];
 
 export async function signedTuac(answers, strokes) {
+  answers=normalizeTuacPhone(answers);
+  if(!/^[0-9]{3}$/.test(answers.Indicatif||'')||!/^[0-9]{7}$/.test(answers.Téléphone||''))throw Error('Indiquez un indicatif régional de 3 chiffres et un numéro de téléphone de 7 chiffres.');
   const source = await readFile(new URL('./tuac/form.pdf', import.meta.url));
   const pdf = await PDFLib.PDFDocument.load(source);
   const form = pdf.getForm();
   for (const key of [...tuacFields, ...Object.keys(employer)]) {
-    const value = employer[key] ?? answers[key];
-    if (typeof value !== 'string' || !value.trim() || value.length > 200) throw Error('Champ invalide : ' + key);
+    const optional=key==='Appartement';
+    const value = employer[key] ?? answers[key] ?? (optional?'':undefined);
+    if (typeof value !== 'string' || (!optional&&!value.trim()) || value.length > 200) throw Error('Champ invalide : ' + key);
     if (dates.includes(key)) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || new Date(value+'T12:00:00Z').toISOString().slice(0,10) !== value) throw Error('Date invalide');
       const [year, month, day] = value.split('-');

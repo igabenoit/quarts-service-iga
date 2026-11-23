@@ -23,7 +23,7 @@ test('essai unique : coffre général fermé, destinataires fixes et PDF isolé'
   const invite=await call('POST',route('invite'),config);assert.equal(invite.status,200,JSON.stringify(invite.body));
   const employee=(action,body)=>f.call('POST','/api/accueil-employe/'+action,{headers:{...headers,Authorization:'Bearer '+invite.body.path.split('#')[1]},body});
   const answers=Object.fromEntries(tuacFields.map(k=>[k,'Exemple']));
-  Object.assign(answers,{Naissance:'1990-01-01',Emploi:'2026-11-09',Signature:'2026-11-09'});
+  Object.assign(answers,{Naissance:'1990-01-01',Emploi:'2026-11-09',Signature:'2026-11-09',Indicatif:'450',Téléphone:'5550123'});
   assert.equal((await employee('sign',{version:0,kind:'tuac',answers,policy:c.policyId,strokes:[[[0,0],[1,1]]]})).status,200);
   const done=(await call('GET',route())).body;assert.ok(done.completed_at);
   const after=(await call('GET','state')).body;

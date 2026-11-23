@@ -31,7 +31,7 @@ test('une fiche importée peut recevoir tous les documents sans perdre les signa
   const execute=(action,body={},useToken=token)=>f.call('POST','/api/accueil-employe/'+action,{headers:{...headers,Authorization:'Bearer '+useToken},body});
   const initial=must(await execute('state'));
   const answers=Object.fromEntries(tuacFields.map(k=>[k,'Exemple']));
-  Object.assign(answers,{Nom:'Fictif',Naissance:'1990-01-01',Emploi:'2026-11-08',Signature:'2026-11-08',Courriel:'test@example.invalid'});
+  Object.assign(answers,{Nom:'Fictif',Naissance:'1990-01-01',Emploi:'2026-11-08',Signature:'2026-11-08',Courriel:'test@example.invalid',Indicatif:'450',Téléphone:'5550123'});
   must(await execute('sign',{kind:'tuac',version:0,policy:initial.policy.id,answers,strokes:[[[0,0],[0.5,0.8],[1,0.2]]]}));
   const signed=must(await admin('GET',route()));assert.ok(signed.completed_at);const original=signed.documents[0].original_id;
   await f.query(null,null,{invitationMessages:true,fail:true});

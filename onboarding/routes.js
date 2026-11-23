@@ -7,6 +7,7 @@ import {sendPending,invitationToken,sendInvitation,invitationEmailReady} from '.
 import {runsInWebProcess} from '../scheduled-work.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {signedTuac,tuacFields} from './tuac.js';
+import {normalizeTuacPhone} from '../public/tuac-phone.js';
 import {signedEmergency,emergencyFields} from './emergency.js';
 
 import {annexKeys,signedAnnex,annexPdf} from './annexe-sst.js';
@@ -113,6 +114,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     if(b.policy!==String(policy.id)||!b.answers||typeof b.answers!=='object')fail(400,'Confirmez la politique et vérifiez les champs.');
     const spec=catalog[doc.kind];
     let answers=Object.fromEntries(spec.fields.map(k=>[k,String(b.answers[k]??'').slice(0,200)]));
+    if(doc.kind==='tuac')answers=normalizeTuacPhone(answers);
     if(doc.kind==='renseignements'){
      if(onsite&&action==='sign')fail(400,'L’employé doit signer ce formulaire depuis son lien personnel.');
      try{answers=personalAnswers(b.answers,doc.draft||{},onsite);}catch(error){fail(400,error.message);}
@@ -127,7 +129,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
     }
     let original=null;
     if(action==='sign'){
-     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch(error){fail(400,['renseignements','retraite'].includes(doc.kind)?error.message:'Vérifiez les champs et la signature.');}
+     let bytes;try{bytes=await spec.render(answers,b.strokes,{onsite,supervisorStrokes:onsite?b.supervisorStrokes:[]});}catch(error){fail(400,['renseignements','retraite','tuac'].includes(doc.kind)?error.message:'Vérifiez les champs et la signature.');}
      const file=await saveOriginal(db,{audit:onsite?{...req.ef.audit,kind:'sur-place',policy:String(policy.id)}:{kind:'invitation',generation:row.generation,policy:String(policy.id)}},{key},spec.category||'rh',bytes,{name:spec.title+'.pdf',mime:'application/pdf',provenance:onsite?'Signature en présence de l’employé':'Signature du parcours d’accueil',documentDate:new Date().toISOString().slice(0,10),signatureKind:'drawn'});
      original=file.id;
     }
