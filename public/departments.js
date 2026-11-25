@@ -552,13 +552,16 @@ $('#buildControl').onclick=async()=>{
     try{
       if(dirty)await saveDraft();
       const departments=scope==='all'?meta.departments.filter(d=>d.active!==false):[current.department];
-      const reports=await Promise.all(departments.map(async department=>{
+      const reports=[];
+      // Load one department at a time to avoid exhausting the database pool.
+      for(const department of departments){
+        $('#controlStatus').textContent=`Chargement du sommaire… ${reports.length+1}/${departments.length}`;
         const [report,budget]=await Promise.all([
           api(`/api/departments/${department.id}/weeks/${start}/hours-summary`),
           api(`/api/sales-forecasts/${start}?department=${department.id}`).then(data=>({status:'ready',...normalizeDepartmentBudget(data.departmentBudget,department.key)})).catch(()=>({status:'unavailable',department:department.key,hours:null}))
         ]);
-        return {...report,budget};
-      }));
+        reports.push({...report,budget});
+      }
       controlReports=reports;
       renderSummaryTable();refreshSummaryPreview();
       $('#controlStatus').textContent=controlReports.length+' département(s) · budgets des prévisions comparés aux horaires enregistrés. Les heures payées sont saisies séparément.';
