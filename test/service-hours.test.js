@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {serviceHoursSummary} from '../public/service-hours.js';
+import {serviceHoursSummary,unassignedServiceShifts} from '../public/service-hours.js';
 const shift=(id,role,extra={})=>({id,role,startMinute:480,endMinute:960,...extra});
 
 test('only the four Service functions reconcile planned, assigned and remaining hours',()=>{
@@ -26,4 +26,12 @@ test('duplicate, empty and unrelated assignment records cannot inflate assigned 
  const data={shifts:[shift(1,'cashier'),shift(2,'packer')],assignments:[{shiftId:'1',employeeId:'2'},{shiftId:1,employeeId:2},{shiftId:2,employeeId:null},{shiftId:999,employeeId:2}]};
  const s=serviceHoursSummary(data);assert.equal(s.assignedMinutes,420);assert.equal(s.assignedCount,1);assert.equal(s.unassignedMinutes,420);
  assert.equal(serviceHoursSummary().plannedMinutes,0);
+});
+
+test('remaining shift list exactly matches the counter scope without changing stored shifts',()=>{
+ const data={shifts:['manager','supervisor','cashier','packer','orders','support'].map((role,i)=>shift(i+1,role)),assignments:[{shiftId:'1',employeeId:'7'},{shiftId:3,employeeId:null},{shiftId:4,employeeId:8},{shiftId:999,employeeId:9}]};
+ const before=structuredClone(data),remaining=unassignedServiceShifts(data),summary=serviceHoursSummary(data);
+ assert.deepEqual(remaining.map(s=>s.id),[2,3]);assert.equal(remaining.length,summary.unassignedCount);
+ assert.equal(serviceHoursSummary({shifts:remaining}).plannedMinutes,summary.unassignedMinutes);
+ assert.deepEqual(data,before);assert.deepEqual(unassignedServiceShifts(),[]);
 });

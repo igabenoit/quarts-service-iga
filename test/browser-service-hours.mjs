@@ -20,9 +20,24 @@ try{
  await page.waitForFunction(()=>document.querySelector('#combinedPlanned').textContent==='28 h');
  const values=()=>page.locator('#combinedPlanned,#combinedAssigned,#combinedUnassigned').allTextContents();
  assert.deepEqual(await values(),['28 h','0 h','28 h']);assert.equal(await page.locator('#frontBudget,#packerBudget').count(),0);
+ let writes=0;page.on('request',r=>{if(['POST','PUT','DELETE'].includes(r.method())&&/\/api\/(?:weeks|shifts)\//.test(r.url()))writes++;});
+ await page.locator('#showUnassignedShifts').focus();await page.keyboard.press('Enter');
+ assert.equal(await page.locator('#showUnassignedShifts').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#scheduleBoard .schedule-item').count(),4);
+ assert.equal(await page.locator('#scheduleBoard select:disabled').count(),0);
+ assert.match(await page.locator('#unassignedViewStatus').textContent(),/4 quarts · 28 h/);
+ assert.match(await page.locator('#scheduleBoard').textContent(),/Gérante|Superviseur/);
+ assert.doesNotMatch(await page.locator('#scheduleBoard').textContent(),/Commandes téléphoniques|Aide autre département/);
+ assert.equal(writes,0,'Filtering never changes assignments');
+ assert.equal(await page.locator(':focus').getAttribute('id'),'unassignedViewTitle');
  const selector=page.locator('select[data-shift="'+shifts[2].id+'"]');await selector.selectOption(String(employee.id));
  await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='7 h');
  assert.deepEqual(await values(),['28 h','7 h','21 h']);
+ assert.equal(await page.locator('#scheduleBoard .schedule-item').count(),3);
+ assert.equal(await page.locator('select[data-shift="'+shifts[2].id+'"]').count(),0);
+ assert.match(await page.locator('#unassignedViewStatus').textContent(),/3 quarts · 21 h/);
+ await page.locator('#showAllShifts').click();assert.equal(await page.locator('#scheduleBoard .schedule-item').count(),6);
+ assert.equal(await page.locator('#showUnassignedShifts').getAttribute('aria-pressed'),'false');
  await page.reload();await page.locator('#appView').waitFor({state:'visible'});await page.locator('#weekPicker').fill(week);await page.locator('#weekPicker').dispatchEvent('change');
  await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='7 h');
  assert.deepEqual(await values(),['28 h','7 h','21 h']);
@@ -33,6 +48,15 @@ try{
  await page.locator('.service-hours-summary').screenshot({path:'../service-hours-desktop.png'});
  await page.setViewportSize({width:390,height:844});await page.locator('.service-hours-summary').screenshot({path:'../service-hours-mobile.png'});
  assert(await page.locator('.service-hours-summary').evaluate(el=>el.scrollWidth<=el.clientWidth));
+ await page.locator('#showUnassignedShifts').click();
+ await page.locator('#unassignedViewToolbar').screenshot({path:'../service-unassigned-mobile-toolbar.png'});
+ await page.locator('#scheduleBoard .schedule-group').first().screenshot({path:'../service-unassigned-mobile.png'});
+ assert(await page.locator('#scheduleBoard').evaluate(el=>el.scrollWidth<=el.clientWidth));
+ await page.locator('#weekPicker').fill('2030-10-21');await page.locator('#weekPicker').dispatchEvent('change');
+ await page.locator('.unassigned-empty').waitFor({state:'visible'});
+ assert.match(await page.locator('#unassignedViewStatus').textContent(),/0 quart[s]? · 0 h/);
+ await page.locator('#weekPicker').fill(week);await page.locator('#weekPicker').dispatchEvent('change');
+ await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='7 h');
  await page.setViewportSize({width:1440,height:1000});await page.locator('#previewBtn').click();await page.locator('#printPreview').waitFor({state:'visible'});
  const totals=await page.locator('#previewPages .service-week-total').allTextContents();
  assert.equal(totals.length,3);for(const total of totals){assert.match(total,/28 h/);assert.match(total,/7 h attribuées · 21 h à attribuer/);assert.match(total,/hors total Service : 14 h/);}
@@ -41,7 +65,7 @@ try{
  await page.evaluate(async()=>{const {prepareSchedulePages}=await import('/schedule-layout.js');window.testPrepared=prepareSchedulePages([...document.querySelectorAll('#previewPages article')]);const host=window.testPrepared.pages[0].parentElement;Object.assign(host.style,{left:'0',top:'0',zIndex:'99999'});window.testPrepared.pages[0].id='verified-service-page';});
  await page.locator('#verified-service-page .service-week-total').screenshot({path:'../service-hours-print.png'});
  await page.evaluate(()=>window.testPrepared.cleanup());
- await page.locator('#previewClose').click();await page.locator('select[data-shift="'+shifts[2].id+'"]').selectOption('');
+ await page.locator('#previewClose').click();await page.locator('#showAllShifts').click();await page.locator('select[data-shift="'+shifts[2].id+'"]').selectOption('');
  await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='0 h');assert.deepEqual(await values(),['28 h','0 h','28 h']);
- assert.deepEqual(errors,[]);console.log('PASS Service hours: four-role scope, assignment/unassignment, reload, notes save, mobile, matching print and three-page layout.');
+ assert.deepEqual(errors,[]);console.log('PASS Service hours: clickable counter, matching filtered list, assignment removes row, full-view return, empty week, mobile, reload, notes save and unchanged complete printing.');
 }finally{await browser?.close();await f.close();}

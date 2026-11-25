@@ -53,7 +53,7 @@
       <section class="summary-grid service-hours-summary" aria-label="Attribution des heures du Service" aria-live="polite">
         <article class="metric card combined-total"><span>Total des heures à attribuer · gérante, superviseurs, caissières et emballeurs</span><strong id="combinedPlanned">0 h</strong><small>Tous les quarts prévus, attribués ou encore à couvrir.</small><small id="combinedBreakdown"></small></article>
         <article class="metric card assigned-total"><span>Heures réellement attribuées</span><strong id="combinedAssigned">0 h</strong><small id="assignedBreakdown"></small></article>
-        <article class="metric card unassigned-total"><span>Heures restant à attribuer</span><strong id="combinedUnassigned">0 h</strong><small id="unassignedBreakdown"></small></article>
+        <button type="button" id="showUnassignedShifts" class="metric card unassigned-total" aria-controls="scheduleBoard" aria-pressed="false"><span>Heures restant à attribuer</span><strong id="combinedUnassigned">0 h</strong><small id="unassignedBreakdown"></small><small id="unassignedActionHint" class="counter-action">Voir les quarts à couvrir</small></button>
       </section>
 
       <section class="card add-card" id="schedulePanel">
@@ -64,7 +64,7 @@
         <p id="leaveApplyStatus" role="status"></p>
         <p id="scheduleStatus"></p><div id="permanentAvailabilityWarnings" class="notice" role="status"></div><div id="approvedLeaveSummary"></div>
         <p id="assignmentMessage" class="error" role="alert" hidden></p>
-        <p class="notice">Quart partagé : saisissez ici seulement la portion Service et l’autre portion dans son département, avec les fiches liées du même employé. Les deux horaires affichent la journée complète et ventilent les heures.</p><div class="sales-forecast-toolbar"><span data-sales-forecast-status role="status">Prévisions initiales du magasin</span><a href="https://releve-quotidien-iga.vercel.app/previsions/" target="_blank" rel="noopener noreferrer">Ouvrir les prévisions</a><button type="button" class="secondary quiet" data-refresh-sales>Actualiser les ventes</button></div><div id="scheduleBoard"></div>
+        <p class="notice">Quart partagé : saisissez ici seulement la portion Service et l’autre portion dans son département, avec les fiches liées du même employé. Les deux horaires affichent la journée complète et ventilent les heures.</p><div class="sales-forecast-toolbar"><span data-sales-forecast-status role="status">Prévisions initiales du magasin</span><a href="https://releve-quotidien-iga.vercel.app/previsions/" target="_blank" rel="noopener noreferrer">Ouvrir les prévisions</a><button type="button" class="secondary quiet" data-refresh-sales>Actualiser les ventes</button></div><div id="unassignedViewToolbar" class="unassigned-view-toolbar" hidden><div><h3 id="unassignedViewTitle" tabindex="-1">Quarts à couvrir</h3><p id="unassignedViewStatus" role="status"></p></div><button type="button" id="showAllShifts" class="secondary">Afficher tout l’horaire</button></div><div id="scheduleBoard"></div>
         <div id="employeeTotals" class="employee-totals"></div>
       </section>
 
