@@ -97,8 +97,8 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  const origin=(req,res,next)=>{if(req.get('origin')!==`${req.protocol}://${req.get('host')}`||req.get('x-employee-files')!=='1')return res.status(403).json({error:'Rechargez le portail avant de réessayer.'});next();};
  const scope=(g,e)=>g.all_departments||intersects(g.departments,e.departments);
  const visible=(a,e)=>a.view==='employe'?e.personId===Number(a.employee.id)&&e.active:a.admin?true:a.view==='gerant'?intersects(a.manager.departments,e.departments):a.grants.some(g=>(a.view==='sst'?g.role==='sst':['rh','payroll','medical'].includes(g.role))&&scope(g,e));
- const content=(a,e,category)=>{
-  if(category==='payroll')return false;
+ const content=(a,e,category,{onboardingKind}={})=>{
+  if(category==='payroll')return onboardingKind==='cheque'&&visible(a,e)&&a.view==='direction'&&(a.admin||a.grants.some(g=>g.role==='payroll'&&scope(g,e)));
   if(!visible(a,e))return false;
   if(category==='medical')return a.view==='employe'||a.view==='direction'&&(a.admin||a.grants.some(g=>g.role==='medical'&&scope(g,e)));
   if(a.view==='employe')return true;if(a.view==='sst')return category==='sst';if(a.view==='gerant')return ['general','sst'].includes(category);if(a.admin)return true;
@@ -143,7 +143,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
      entry.total++;
      if(r.original_id){
       entry.done++;
-      if(content(a,byKey.get(r.employee_key),r.kind==='urgence'?'medical':'rh'))receivedDocuments.push({key:r.employee_key,title:onboardingTitle(r.kind),originalId:r.original_id});
+      if(content(a,byKey.get(r.employee_key),r.kind==='cheque'?'payroll':r.kind==='urgence'?'medical':'rh',{onboardingKind:r.kind}))receivedDocuments.push({key:r.employee_key,title:onboardingTitle(r.kind),originalId:r.original_id,...(r.kind==='cheque'?{kind:'cheque'}:{})});
      }
     }
    }
@@ -219,12 +219,12 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  }));
  app.post(BASE+'/assignments/:id/review',auth,origin,wrap(async(req,res)=>{const dir=await directory();await transaction(async db=>{const {row}=await assignment(req.ef,req.params.id,dir,db);if(['employe','sst'].includes(req.ef.view))fail('Révision réservée au responsable autorisé.',403);if(row.version!==req.body.version)fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason||!['filed','review'].includes(req.body.status)||!(await originals(row.id,db)).length)fail('Indiquez le résultat et le motif de la vérification.');await db.query('UPDATE employee_file_assignments SET status=$1,version=version+1,updated_at=clock_timestamp() WHERE id=$2',[req.body.status,row.id]);await event(db,req.ef,'reviewed',{status:req.body.status,reason},row.id);});res.json({ok:true});}));
  app.post(BASE+'/assignments/:id/renew',auth,origin,wrap(async(req,res)=>{const dir=await directory();const id=await transaction(async db=>{const {row,e}=await assignment(req.ef,req.params.id,dir,db);const ts=await templates(db),t=latest(ts).find(t=>t.family_id===row.family_id);if(!t?.published||!templateAllowed(req.ef,t,e))fail('Nouvelle attribution non autorisée.',403);if(row.version!==req.body.version||row.status==='superseded')fail('La fiche a changé.',409);const reason=str(req.body.reason);if(!reason)fail('Indiquez le motif de la mise à jour.');const id=randomUUID();await db.query('INSERT INTO employee_file_assignments(id,employee_key,template_id,workflow,due_date,actor) VALUES($1,$2,$3,$4,$5,$6)',[id,e.key,t.id,'update',date(req.body.dueDate),json(req.ef.audit)]);await db.query("UPDATE employee_file_assignments SET status='superseded',version=version+1 WHERE id=$1",[row.id]);await event(db,req.ef,'renewed',{newAssignmentId:id,reason},row.id);await event(db,req.ef,'assigned',{previousAssignmentId:row.id,reason},id);return id;});res.status(201).json({id});}));
- async function originalAccess(a,id){if(!uuid(id))fail('Pièce inaccessible.',404);const o=(await pool.query('SELECT * FROM employee_file_originals WHERE id=$1',[id])).rows[0];if(!o)fail('Pièce inaccessible.',404);const e=person(a,await directory(),o.employee_key);if(!content(a,e,o.category))fail('Pièce inaccessible.',403);if(!(await pool.query("SELECT id FROM employee_file_links WHERE original_id=$1 UNION ALL SELECT original_id FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[id])).rows.length)fail('Pièce inaccessible.',404);return o;}
+ async function originalAccess(a,id){if(!uuid(id))fail('Pièce inaccessible.',404);const o=(await pool.query('SELECT * FROM employee_file_originals WHERE id=$1',[id])).rows[0];if(!o)fail('Pièce inaccessible.',404);const e=person(a,await directory(),o.employee_key);const onboardingKind=(await pool.query("SELECT kind FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[id])).rows[0]?.kind;if(!content(a,e,o.category,{onboardingKind}))fail('Pièce inaccessible.',403);if(!(await pool.query("SELECT id FROM employee_file_links WHERE original_id=$1 UNION ALL SELECT original_id FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[id])).rows.length)fail('Pièce inaccessible.',404);return o;}
  app.get(BASE+'/originals/:id',auth,wrap(async(req,res)=>{
   const o=await originalAccess(req.ef,req.params.id);
   let data=o.sst_document_id?(await sourcePool.query('SELECT data FROM sst_documents WHERE id=$1',[o.sst_document_id])).rows[0]?.data:o.data;
   if(!data)fail('Original indisponible.',404);
-  const kind=o.mime==='application/pdf'?(await pool.query("SELECT kind FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[o.id])).rows[0]?.kind:null;
+  const kind=(await pool.query("SELECT kind FROM onboarding_docs WHERE original_id=$1 OR draft#>>'{_workflow,employeeOriginalId}'=$1::text",[o.id])).rows[0]?.kind;
   let name=o.name;
   if(req.query.print){
    const render=req.query.print==='tuac-original'&&kind==='tuac'?tuacPrintCopy:

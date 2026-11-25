@@ -40,7 +40,7 @@ test('nouvelle embauche : section employeur protégée, brouillons partagés et 
    must(await f.call('POST','/api/departments/people',{cookie,body:{name,employeeCode,group:'regular',active:true,departments:[dep.id],availability:{}}}));
    const key=must(await admin('GET','state')).employees.find(e=>e.name===name).key;
    const route=op=>'onboarding'+(op?'/'+op:'')+'?key='+key+'&view=direction';
-   const initial=must(await admin('GET',route()));assert.equal(initial.defaultDocuments.length,6);assert.equal(initial.defaultDocuments[0],'renseignements');
+   const initial=must(await admin('GET',route()));assert.equal(initial.defaultDocuments.length,7);assert.equal(initial.defaultDocuments[0],'renseignements');
    const invite=must(await admin('POST',route('invite'),{documents:['renseignements'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-12-01'}));
    people.push({key,route,token:invite.path.split('#')[1],employeeCode});
   }

@@ -39,7 +39,7 @@ async function render(){const hash=location.hash.slice(1)||'dossiers';if(hash.st
 function received(key){return (state.receivedDocuments||[]).filter(doc=>doc.key===key);}
 function receivedTable(documents){
  if(!documents.length)return '';
- return '<section class="panel"><h3>Documents reçus</h3>'+documents.map(doc=>'<p><strong>'+esc(doc.title)+'</strong> · <a href="'+signedPdfUrl(doc.originalId)+'" target="_blank" rel="noopener">Ouvrir le PDF signé</a></p>').join('')+'</section>';
+ return '<section class="panel"><h3>Documents reçus</h3>'+documents.map(doc=>'<p><strong>'+esc(doc.title)+'</strong> · <a href="'+signedPdfUrl(doc.originalId)+'" target="_blank" rel="noopener">'+(doc.kind==='cheque'?'Voir le spécimen':'Ouvrir le PDF signé')+'</a></p>').join('')+'</section>';
 }
 function dossiers(){if(view==='employe'){const e=state.employees[0];if(e)return person(e.key);}
  const list=state.employees.filter(e=>(!department||e.departments.includes(Number(department)))&&(!search||e.name.toLocaleLowerCase('fr-CA').includes(search.toLocaleLowerCase('fr-CA'))));

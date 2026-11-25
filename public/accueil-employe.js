@@ -5,6 +5,7 @@ import {buildRetirement} from './accueil-retraite.js';
 import {buildEmergency} from './accueil-urgence.js';
 import {buildSst} from './accueil-sst.js';
 import {buildGeneralSst} from './accueil-sst-general.js';
+import {buildCheque} from './accueil-cheque.js';
 import {sstWelcomeTitle,sstWelcomeSubtitle,sstWelcomeInstructions} from './onboarding-messages.js';
 const token=location.hash.slice(1);
 const onsite=new URLSearchParams(location.search).has('sur-place');
@@ -36,6 +37,7 @@ function show(state){
 }
 function openForm(state,d){
  const form=node('form');form.className='panel';editor.replaceChildren(form);form.append(node('h2',d.title));
+ if(d.kind==='cheque'){buildCheque(form,state,d,{token,status,reload:async()=>show(await call('state'))});editor.scrollIntoView();return;}
  if(d.kind==='tuac')form.append(node('p','Une seule signature remplit les trois fiches. Pour imprimer, chargez la feuille originale des TUAC et choisissez Lettre, recto, taille réelle (100 %).'));
  if(d.awaitingDirection){
   form.append(node('p','L’employé a signé sa partie. Ses renseignements et sa signature sont verrouillés; complétez uniquement votre section.'));

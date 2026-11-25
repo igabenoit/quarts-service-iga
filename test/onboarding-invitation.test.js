@@ -24,7 +24,7 @@ test('embauche sans matricule : inviter, signer, finaliser puis ajouter le matri
   must(await f.call('POST','/api/employee-files/'+route('start'),{body:{},cookie}),403);
   must(await admin('POST',route('start'),{}));
   const draft=must(await admin('GET',route()));assert.equal(draft.eligible,true);assert.equal(draft.canInvite,true);assert.equal(draft.lastDelivery,null);
-  assert.deepEqual(draft.defaultDocuments,['renseignements','tuac','retraite','urgence','ethique','sst_general']);
+  assert.deepEqual(draft.defaultDocuments,['renseignements','tuac','retraite','urgence','ethique','sst_general','cheque']);
   const selection={documents:['tuac'],email:'employee@example.invalid',managerEmail:'rh@example.invalid',days:3,due:'2030-01-01'};
   must(await admin('POST',route('invite'),selection),428);
   must(await admin('POST','policy?view=direction',{text:'Politique fictive de confidentialité. '.repeat(12),confirmed:true}),201);
@@ -39,7 +39,7 @@ test('embauche sans matricule : inviter, signer, finaliser puis ajouter le matri
   await f.query(null,null,{invitationMessages:true,fail:true});
   const expanded=must(await admin('POST',route('invite'),{...selection,documents:draft.defaultDocuments,delivery:'email'}));
   assert.equal(expanded.path,invite.path);assert.equal(expanded.delivery.status,'failed');
-  const state=must(await execute('state'));assert.equal(state.documents.length,6);assert.equal(state.documents.find(d=>d.kind==='tuac').done,true);
+  const state=must(await execute('state'));assert.equal(state.documents.length,7);assert.equal(state.documents.find(d=>d.kind==='tuac').done,true);
   const updated=must(await admin('GET',route()));assert.equal(updated.completed_at,null);assert.equal(updated.documents.find(d=>d.kind==='tuac').original_id,original);
   assert.equal(updated.lastDelivery.status,'failed');
   const failed=await f.query(null,null,{invitationMessages:true,fail:false});assert.equal(failed.length,1);
@@ -57,7 +57,7 @@ test('embauche sans matricule : inviter, signer, finaliser puis ajouter le matri
   const correctedState=must(await admin('GET',route()));assert.equal(correctedState.lastDelivery,null);assert.equal(correctedState.deliveryHistory[0].status,'sent');assert.equal(correctedState.deliveryHistory[0].email,selection.email);
   must(await admin('POST',route('revoke'),{}));must(await execute('state'),404);
   must(await admin('POST',route('send'),{}),409);
-  token=must(await admin('POST',route('renew'),{})).path.split('#')[1];assert.equal(must(await execute('state')).documents.length,6);
+  token=must(await admin('POST',route('renew'),{})).path.split('#')[1];assert.equal(must(await execute('state')).documents.length,7);
   // Ambiguous identities and inactive records remain blocked; missing codes alone do not.
   await f.query('UPDATE schedule_store_people SET active=false WHERE id=$1',[key.split(':')[1]]);
   assert.equal(must(await admin('GET',route())).canInvite,false);

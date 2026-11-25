@@ -12,6 +12,7 @@ import {sharedKinds,directionReady,workflowState,publicDraft} from './workflow.j
 import {signedEmergency,emergencyFields} from './emergency.js';
 import {onboardingBlockReason} from '../public/onboarding-eligibility.js';
 import {parseFollowUpEmails} from '../public/onboarding-follow-up.js';
+import {installChequeSubmission} from './cheque.js';
 
 import {annexKeys,signedAnnex,annexPdf} from './annexe-sst.js';
 import {generalSstFields,generalSstEmployeeKeys,signedGeneralSst,blankGeneralSst,sanitizeGeneralSstAnswers} from './sst-general.js';
@@ -21,7 +22,8 @@ const blankFor=kind=>kind==='sst'?blankAnnex():kind==='sst_general'?blankGeneral
 const base='/api/employee-files/onboarding';
 const catalog={renseignements:{title:'Informations personnelles · Embauche',fields:personalFields,render:signedPersonalInformation},tuac:{title:'Adhésion TUAC 500',fields:tuacFields,render:signedTuac},retraite:{title:'Inscription au régime de retraite',fields:retirementKeys,render:signedRetirement},urgence:{title:'Informations en cas d’urgence',fields:emergencyFields,render:signedEmergency,category:'medical'},ethique:{title:'Code d’éthique et politiques – Septembre 2025',fields:ethicsKeys,render:signedEthics},sst:{title:'Accusé de réception – Programme d’accueil général SST (ancien modèle)',fields:annexKeys,render:signedAnnex},sst_general:{title:'Programme d’accueil général SST – 2026',fields:generalSstFields,render:signedGeneralSst,category:'sst'}};
 export const onboardingTitle=kind=>catalog[kind]?.title||'Document d’accueil';
-export const onboardingDefaults=['renseignements','tuac','retraite','urgence','ethique','sst_general'];
+catalog.cheque={title:'Spécimen de chèque',fields:[],category:'payroll'};
+export const onboardingDefaults=['renseignements','tuac','retraite','urgence','ethique','sst_general','cheque'];
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const mail=v=>typeof v==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length<=254;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
@@ -46,9 +48,9 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   if(!['direction','gerant'].includes(req.ef.view)||!content(req.ef,e,'rh'))fail(403,'Accès RH requis.');
   return e;
  }
- const docs=async(db,key,allowedMedical=true)=>(await db.query("SELECT kind,version,original_id,invited,draft FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'renseignements' THEN -1 WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>{
+ const docs=async(db,key,allowedMedical=true,allowedPayroll=true)=>(await db.query("SELECT kind,version,original_id,invited,draft FROM onboarding_docs WHERE employee_key=$1 ORDER BY CASE kind WHEN 'renseignements' THEN -1 WHEN 'tuac' THEN 0 WHEN 'retraite' THEN 1 WHEN 'urgence' THEN 2 ELSE 3 END,kind",[key])).rows.map(d=>{
   const {draft,...doc}=d,state=workflowState(d);
-  return d.kind==='urgence'&&!allowedMedical?{...doc,...state,done:!!d.original_id,original_id:null,employeeOriginalId:null,restricted:true}:{...doc,...state,done:!!d.original_id};
+  return d.kind==='urgence'&&!allowedMedical||d.kind==='cheque'&&!allowedPayroll?{...doc,...state,done:!!d.original_id,original_id:null,employeeOriginalId:null,attachment:null,restricted:true}:{...doc,...state,done:!!d.original_id};
  });
  app.get(base+'/modele/sst-general',auth,wrap(async(req,res)=>{
   if(!['direction','gerant'].includes(req.ef.view))fail(403,'Accès réservé à la gestion.');
@@ -64,7 +66,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
   const deliveryHistory=event?(await pool.query("SELECT created_at,data->>'status' AS status,data->>'email' AS email,data->>'generation' AS generation,data->>'providerMessageId' AS provider_message_id,data->>'confirmedAt' AS confirmed_at FROM employee_file_events WHERE action='onboarding.delivery' AND data->>'employeeKey'=$1 ORDER BY id DESC LIMIT 10",[e.key])).rows:[];
   const lastDelivery=deliveryHistory.find(d=>d.generation===String(row.generation)&&d.email===row.employee_email)||null;
   const suggestedEmployeeEmail=!trial&&e.personId?(await sourcePool.query("SELECT COALESCE(NULLIF(c.email,''),p.email,'') AS email FROM schedule_store_people p LEFT JOIN schedule_employee_contacts c ON c.employee_id=p.service_employee_id WHERE p.id=$1",[e.personId])).rows[0]?.email||'':'';
-  res.json({eligible:true,canInvite,blockingReason,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,suggestedEmployeeEmail,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,deliveryHistory,defaultDocuments:onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical')),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
+  res.json({eligible:true,canInvite,blockingReason,...(trial?{trialPolicy:trial.policy,policyId:trial.policyId,employeeEmail:trial.employeeEmail,managerEmail:trial.managerEmail}:{}),...row,suggestedEmployeeEmail,emailReady:!synthetic&&invitationEmailReady(),lastDelivery,deliveryHistory,defaultDocuments:trial?onboardingDefaults.filter(k=>k!=='cheque'):onboardingDefaults,documents:await docs(pool,e.key,content(req.ef,e,'medical'),content(req.ef,e,'payroll',{onboardingKind:'cheque'})),catalog:Object.fromEntries(Object.entries(catalog).map(([k,v])=>[k,v.title]))});
  }));
  app.post(base+'/:operation',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req), op=req.params.operation;
@@ -97,6 +99,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    let nonce=row.nonce,token;
    if(op==='invite'){
     const b=req.body;
+    if(trial&&Array.isArray(b.documents)&&b.documents.includes('cheque'))fail(400,'Le dépôt de spécimen est disponible dans les dossiers d’embauche du portail principal.');
     if(trial && (b.email!==trial.employeeEmail||b.managerEmail!==trial.managerEmail||b.approvedPolicy!==trial.policyId))fail(400,'Vérifiez les destinataires et approuvez la politique de cet essai.');
     if(!await publishedPolicy(db))fail(428,'Publiez la politique de confidentialité avant l’invitation.');
     let managerEmails;try{managerEmails=parseFollowUpEmails(b.managerEmail);}catch(error){fail(400,error.message);}
@@ -121,6 +124,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    if(action!=='state'){
     if(!['save','sign','finalize'].includes(action)||(!onsite&&row.completed_at))fail(409,'Dossier fermé.');
     const b=req.body,doc=(await db.query('SELECT * FROM onboarding_docs WHERE employee_key=$1 AND kind=$2',[key,b.kind])).rows[0];
+    if(b.kind==='cheque')fail(400,'Utilisez le dépôt de photo, de PDF ou de lien pour transmettre le spécimen de chèque.');
     if(!doc||(!onsite&&!doc.invited)||doc.original_id||doc.version!==b.version)fail(409,'Rechargez le document.');
     const previous=doc.draft||{},workflow=previous._workflow,pending=!!workflow?.employeeOriginalId;
     if(pending&&!onsite)fail(409,'Votre partie est déjà signée et verrouillée. La direction doit maintenant finaliser le document.');
@@ -173,6 +177,7 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
  }
  app.post(base+'/sur-place/:action',auth,origin,wrap(async(req,res)=>{
   const e=await manager(req),kind=req.body.kind,action=req.params.action;
+  if(kind==='cheque')fail(400,'L’employé transmet son spécimen depuis son lien personnel.');
   if(['retraite','tuac'].includes(kind)&&req.ef.view!=='direction')fail(403,'Section réservée à la direction.');
   const blockingReason=onboardingBlockReason(e);
   if(blockingReason)fail(400,blockingReason);
@@ -193,13 +198,18 @@ export async function installOnboarding(app,{pool,sourcePool,auth,origin,wrap,tr
    return {employee:e.name,documents:[{kind,title:catalog[kind].title,fields:catalog[kind].fields,draft:publicDraft(saved?.draft),version:saved?.version||0,done:!!saved?.original_id,originalId:saved?.original_id,...workflowState({kind,...saved})}],policy:{id:String(policy.id),text:policy.text}};
   }));
  }));
- app.post('/api/accueil-employe/:action',origin,wrap(async(req,res)=>{
-  res.set('Cache-Control','no-store');
+ async function employeeCase(db,req,lock=true){
   if(!/^Bearer [A-Za-z0-9_-]{43}$/.test(req.get('authorization')||''))fail(404,'Lien indisponible.');
   const token=req.get('authorization').slice(7);
+  const row=(await db.query('SELECT * FROM onboarding_cases WHERE token_hash=$1'+(lock?' FOR UPDATE':''),[digest(token)])).rows[0];
+  if(!row || (trial && row.employee_key!==trial.key) || !(await directory()).employees.some(e=>e.key===row.employee_key && !onboardingBlockReason(e)))fail(404,'Lien indisponible.');
+  return row;
+ }
+ if(!trial)installChequeSubmission(app,{pool,origin,wrap,transaction,employeeCase,publishedPolicy,saveOriginal,event});
+ app.post('/api/accueil-employe/:action',origin,wrap(async(req,res)=>{
+  res.set('Cache-Control','no-store');
   const result=await transaction(async db=>{
-   const row=(await db.query('SELECT * FROM onboarding_cases WHERE token_hash=$1 FOR UPDATE',[digest(token)])).rows[0];
-   if(!row || (trial && row.employee_key!==trial.key) || !(await directory()).employees.some(e=>e.key===row.employee_key && !onboardingBlockReason(e)))fail(404,'Lien indisponible.');
+   const row=await employeeCase(db,req);
    const policy=await publishedPolicy(db);
    if(!policy)fail(428,'Politique temporairement indisponible.');
    const key=row.employee_key,action=req.params.action;

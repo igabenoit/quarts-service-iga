@@ -1,5 +1,6 @@
 import {ethicsPageCount,ethicsSignaturePages} from './ethics-pages.js';
 import {pdfBytes,pdfPrintUrl,attachPdfPrintLink} from './pdf-print-link.js';
+import {showChequeAttachment} from './lecture-cheque.js';
 const params=new URLSearchParams(location.hash.slice(1));
 const id=params.get('id'), view=params.get('view')||'direction';
 const get=id=>document.getElementById(id);
@@ -65,16 +66,20 @@ async function open(){
  const url=cash?'/api/numeraire/pdf/'+id+'?source=historique':'/api/employee-files/originals/'+id+'?'+new URLSearchParams({view});
  const response=await fetch(url,{credentials:'same-origin',cache:'no-store'});
  if(response.status===401||response.status===403)throw Error('Accès au document refusé. Reconnecte-toi au portail avec ton compte autorisé puis rouvre le dossier.');
- if(!response.ok||!response.headers.get('content-type')?.startsWith('application/pdf'))throw Error('Document indisponible. Rouvre-le depuis le dossier employé.');
- const filename=response.headers.get('content-disposition')||'';
  const kind=response.headers.get('x-onboarding-kind');
+ if(!response.ok||kind!=='cheque'&&!response.headers.get('content-type')?.startsWith('application/pdf'))throw Error('Document indisponible. Rouvre-le depuis le dossier employé.');
+ const filename=response.headers.get('content-disposition')||'';
  const personalPdf=kind==='renseignements'||filename.includes(encodeURIComponent('Informations personnelles'));
  const retirementPdf=kind==='retraite'||filename.includes(encodeURIComponent('Inscription au régime de retraite'));
  const emergencyPdf=kind==='urgence'||filename.includes(encodeURIComponent('Informations en cas d’urgence'));
  const tuacPdf=kind==='tuac'||filename.includes(encodeURIComponent('Adhésion TUAC 500'));
  const sstPdf=kind==='sst_general';
- const nativePdf=personalPdf||retirementPdf||emergencyPdf||tuacPdf||sstPdf;
+ const nativePdf=personalPdf||retirementPdf||emergencyPdf||tuacPdf||sstPdf||kind==='cheque';
  download.href=url+'&download=1';download.hidden=false;
+ if(kind==='cheque'){
+  document.querySelector('h1').textContent='Spécimen de chèque';download.textContent='Télécharger le document original';
+  if(await showChequeAttachment(response,{status,urls:printUrls}))return;
+ }
  let displayResponse=response;
  if(tuacPdf||emergencyPdf||sstPdf){
   const printResponse=await fetch(url+'&print='+(tuacPdf?'tuac-original':sstPdf?'sst-duplex':'letter-duplex'),{credentials:'same-origin',cache:'no-store'});
@@ -112,7 +117,7 @@ async function open(){
   selection.append(label,modeButton);document.querySelector('header').after(selection);
   const instruction=document.createElement('p');instruction.textContent='Le bouton d’impression ouvre un PDF de 3 pages seulement, avec les signatures. Le cahier complet reste conservé et téléchargeable.';selection.after(instruction);
  }else if(nativePdf){
-  attachPdfPrintLink(get('print'),printUrl,'Ouvrir le PDF pour imprimer',personalPdf?'Informations personnelles - Embauche.pdf':tuacPdf?'TUAC - Impression feuille originale.pdf':retirementPdf?'Inscription au régime de retraite.pdf':sstPdf?'Programme d’accueil SST - Recto verso.pdf':'Informations en cas d’urgence - Recto verso.pdf');
+  attachPdfPrintLink(get('print'),printUrl,'Ouvrir le PDF pour imprimer',kind==='cheque'?'Spécimen de chèque.pdf':personalPdf?'Informations personnelles - Embauche.pdf':tuacPdf?'TUAC - Impression feuille originale.pdf':retirementPdf?'Inscription au régime de retraite.pdf':sstPdf?'Programme d’accueil SST - Recto verso.pdf':'Informations en cas d’urgence - Recto verso.pdf');
   const instruction=document.createElement('p');
   instruction.textContent=tuacPdf?'Imprimez sur la feuille originale TUAC à trois fiches : format lettre (8,5 × 11 po), recto seulement, taille réelle (100 %), sans ajustement. Cette copie reprend les renseignements et la signature existants. Le PDF original signé reste disponible au téléchargement.':
    pdf.numPages===2?'Pour imprimer recto verso sur une seule feuille : dans la fenêtre d’impression de Chrome, choisissez Lettre (8,5 × 11 po), « Imprimer des deux côtés » et « Retourner sur le bord long ». Laissez 1 page par face et vérifiez que l’aperçu annonce 1 feuille pour 2 pages. Le PDF propose le recto verso, mais ce réglage doit aussi être activé pour l’imprimante. Aucun en-tête ni pied de page du site n’est ajouté.':
