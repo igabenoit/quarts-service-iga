@@ -245,3 +245,13 @@ button.unassigned-total:focus-visible{outline:3px solid #9d5200;outline-offset:3
 .service-view-tabs [role="tab"]:focus-visible{outline:3px solid #2878c8;outline-offset:2px}
 .employee-actions{flex-wrap:wrap;align-items:center}
 @media(max-width:650px){.service-view-tabs [role="tab"]{flex:1}.employee-actions>*{max-width:100%}}
+
+/* Totaux payés au bas de chaque journée, dans chaque catégorie. */
+#scheduleBoard .schedule-day{display:flex;flex-direction:column}
+.schedule-day-totals{margin-top:auto;padding-top:14px;font-size:13px;color:#34414c}
+.schedule-day-totals>div{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 0}
+.schedule-day-totals b,.schedule-day-totals strong{white-space:nowrap}
+.schedule-day-totals .schedule-day-total{border-top:2px solid #cbd2d9;padding-top:8px;font-size:14px;font-weight:700;color:var(--ink)}
+.schedule-role-total{font-size:12px}
+.schedule-extra-hours{border-top:1px solid var(--line);padding-top:8px;margin:8px 0 0}
+.schedule-extra-hours small{display:block}

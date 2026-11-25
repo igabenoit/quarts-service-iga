@@ -12,10 +12,18 @@ export function unassignedServiceShifts({shifts=[],assignments=[]}={}){
 // Count each need once, by the shift's function rather than the employee's job.
 // Assignment changes move its paid minutes between assigned and still to fill.
 export function serviceHoursSummary({shifts=[],assignments=[]}={}){
+  return summarizeShiftHours(shifts,assignments,SERVICE_TOTAL_ROLES);
+}
+
+export function serviceDayHoursSummary({shifts=[],assignments=[]}={},dayIndex,roles=SERVICE_TOTAL_ROLES){
+  return summarizeShiftHours(shifts.filter(shift=>shift.dayIndex===dayIndex),assignments,roles);
+}
+
+function summarizeShiftHours(shifts,assignments,roles){
   const assignedIds=assignedShiftIds(assignments);
   const summary={plannedMinutes:0,assignedMinutes:0,unassignedMinutes:0,plannedCount:0,assignedCount:0,unassignedCount:0,trainingMinutes:0,
-    byRole:Object.fromEntries(SERVICE_TOTAL_ROLES.map(role=>[role,{plannedMinutes:0,assignedMinutes:0,unassignedMinutes:0}]))};
-  for(const shift of shifts.filter(isServiceTotalShift)){
+    byRole:Object.fromEntries(roles.map(role=>[role,{plannedMinutes:0,assignedMinutes:0,unassignedMinutes:0}]))};
+  for(const shift of shifts.filter(shift=>roles.includes(shift.role))){
     const paid=serviceShiftTiming(shift.startMinute,shift.endMinute,shift.absence).paidMinutes;
     const assigned=assignedIds.has(Number(shift.id)),role=summary.byRole[shift.role];
     summary.plannedMinutes+=paid;summary.plannedCount++;role.plannedMinutes+=paid;

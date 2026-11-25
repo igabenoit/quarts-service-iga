@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {serviceHoursSummary,unassignedServiceShifts} from '../public/service-hours.js';
+import {serviceHoursSummary,serviceDayHoursSummary,unassignedServiceShifts} from '../public/service-hours.js';
 const shift=(id,role,extra={})=>({id,role,startMinute:480,endMinute:960,...extra});
 
 test('only the four Service functions reconcile planned, assigned and remaining hours',()=>{
@@ -34,4 +34,33 @@ test('remaining shift list exactly matches the counter scope without changing st
  assert.deepEqual(remaining.map(s=>s.id),[2,3]);assert.equal(remaining.length,summary.unassignedCount);
  assert.equal(serviceHoursSummary({shifts:remaining}).plannedMinutes,summary.unassignedMinutes);
  assert.deepEqual(data,before);assert.deepEqual(unassignedServiceShifts(),[]);
+});
+
+test('daily categories reconcile with the weekly Service total, including unpaid meals and absences',()=>{
+ const data={shifts:[
+  shift(1,'cashier',{dayIndex:0,endMinute:1020,absence:{start:660,end:720,includesMeal:false},paidMinutes:9999}),
+  shift(2,'cashier',{dayIndex:0,startMinute:960,endMinute:1200,training:true}),
+  shift(3,'cashier',{dayIndex:1,startMinute:900,endMinute:1200}),
+  shift(4,'manager',{dayIndex:0}),shift(5,'supervisor',{dayIndex:0}),
+  shift(6,'packer',{dayIndex:0,startMinute:600,endMinute:840}),
+  shift(7,'support',{dayIndex:0,startMinute:600,endMinute:780}),
+  shift(8,'orders',{dayIndex:0,startMinute:540,endMinute:780})
+ ],assignments:[{shiftId:1,employeeId:9},{shiftId:1,employeeId:9},{shiftId:4,employeeId:null}]};
+ const monday=serviceDayHoursSummary(data,0,['cashier']);
+ assert.equal(monday.plannedMinutes,11*60);assert.equal(monday.assignedMinutes,7*60);assert.equal(monday.unassignedMinutes,4*60);
+ assert.equal(monday.trainingMinutes,4*60);
+ const leadership=serviceDayHoursSummary(data,0,['manager','supervisor']);
+ assert.equal(leadership.byRole.manager.plannedMinutes,7*60);assert.equal(leadership.byRole.supervisor.plannedMinutes,7*60);
+ assert.equal(leadership.plannedMinutes,14*60);
+ assert.equal(serviceDayHoursSummary(data,0,['support']).plannedMinutes,3*60);
+ assert.equal(serviceDayHoursSummary(data,0,['orders']).plannedMinutes,4*60);
+ assert.equal(serviceDayHoursSummary(data,1,['cashier']).plannedMinutes,5*60);
+ assert.equal(serviceDayHoursSummary(data,6,['cashier']).plannedMinutes,0);
+ const days=Array.from({length:7},(_,day)=>serviceDayHoursSummary(data,day)),week=serviceHoursSummary(data);
+ for(const field of ['plannedMinutes','assignedMinutes','unassignedMinutes'])assert.equal(days.reduce((sum,d)=>sum+d[field],0),week[field]);
+ assert.equal(week.plannedMinutes,34*60);
+ data.assignments.push({shiftId:3,employeeId:9});
+ assert.equal(serviceDayHoursSummary(data,1,['cashier']).assignedMinutes,5*60);
+ assert.equal(serviceDayHoursSummary(data,1,['cashier']).unassignedMinutes,0);
+ assert.equal(serviceDayHoursSummary(data,0,['cashier']).assignedMinutes,7*60);
 });

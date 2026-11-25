@@ -5,7 +5,7 @@ import {shiftWithApprovedLeave} from './approved-shift-leave.js';
 import {absenceLabel,workingIntervals} from './shift-absence.js';
 import {createSalesForecastDisplay} from './sales-forecast.js';
 import {serviceShiftTiming} from './service-rules.js';
-import {serviceHoursSummary,isServiceTotalShift,unassignedServiceShifts} from './service-hours.js';
+import {serviceHoursSummary,serviceDayHoursSummary,isServiceTotalShift,unassignedServiceShifts} from './service-hours.js';
 import {serviceDayPortions} from './shared-service.js';
 const dayNames=["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
 const shortDays=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
@@ -19,7 +19,7 @@ const $=selector=>document.querySelector(selector);
 const fmtDate=new Intl.DateTimeFormat("fr-CA",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
 
 function showServiceView(view,{updateUrl=false}={}){
-  const selected=view==='employes'?'employes':'horaire';
+  const selected=['employes','publication'].includes(view)?view:'horaire';
   document.querySelectorAll('[data-service-view]').forEach(tab=>{
     const active=tab.dataset.serviceView===selected;
     tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;
@@ -27,6 +27,7 @@ function showServiceView(view,{updateUrl=false}={}){
   });
   if(updateUrl&&location.hash!=='#'+selected)history.pushState(null,'','#'+selected);
 }
+function bindServiceViews(){
 const serviceTabs=[...document.querySelectorAll('[data-service-view]')];
 for(const [index,tab] of serviceTabs.entries()){
   tab.onclick=()=>showServiceView(tab.dataset.serviceView,{updateUrl:true});
@@ -37,6 +38,7 @@ for(const [index,tab] of serviceTabs.entries()){
 }
 window.addEventListener('hashchange',()=>showServiceView(location.hash.slice(1)));
 showServiceView(location.hash.slice(1));
+}
 
 function mondayOf(value=new Date()){
   const date=new Date(value);date.setUTCHours(12,0,0,0);const day=date.getUTCDay();date.setUTCDate(date.getUTCDate()-(day===0?6:day-1));return date.toISOString().slice(0,10);
@@ -263,6 +265,15 @@ function setUnassignedView(enabled){
   const target=enabled?$('#unassignedViewTitle'):$('#showUnassignedShifts');
   target.focus({preventScroll:true});target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
 }
+function scheduleDayTotalsHTML(group,day,shifts){
+  const roles=group.roles.filter(role=>role!=='support');
+  const hours=serviceDayHoursSummary({shifts,assignments:state.assignments},day,roles);
+  const roleTotals=roles.length>1?roles.map(role=>'<div class="schedule-role-total"><span>'+roleNames[role]+'</span><b>'+durationText(hours.byRole[role].plannedMinutes)+'</b></div>').join(''):'';
+  const coverage=state.unassignedOnly?'':'<div><span>Attribuées</span><b>'+durationText(hours.assignedMinutes)+'</b></div><div><span>À couvrir</span><b>'+durationText(hours.unassignedMinutes)+'</b></div>';
+  const support=group.roles.includes('support')?serviceDayHoursSummary({shifts,assignments:state.assignments},day,['support']):null;
+  const extras=support?.plannedCount?'<p class="schedule-extra-hours">Aide autre département : <b>'+durationText(support.plannedMinutes)+'</b><small>Hors total Service</small></p>':'';
+  return '<footer class="schedule-day-totals" aria-label="Heures du '+dayNames[day].toLowerCase()+' — '+escapeHtml(group.title)+'">'+roleTotals+'<div class="schedule-day-total"><span>'+(state.unassignedOnly?'À couvrir':'Total prévu')+'</span><strong>'+durationText(hours.plannedMinutes)+'</strong></div>'+coverage+(roles.every(role=>!isServiceTotalShift({role}))?'<small>Hors total Service</small>':'')+extras+'</footer>';
+}
 function renderSchedule(){
   const leaveRows=state.employees.flatMap(e=>Array.from({length:7},(_,day)=>approvedForDay(e.id,day).map(p=>`<li>${escapeHtml(e.name)} · ${fmtDate.format(new Date(p.date+'T12:00:00Z'))} · ${p.allDay?'Journée complète':timeText(p.startMinute)+' à '+timeText(p.endMinute)}</li>`)).flat());
   $("#approvedLeaveSummary").innerHTML=leaveRows.length?'<h3>Congés approuvés cette semaine</h3><ul>'+leaveRows.join('')+'</ul>':'';
@@ -278,7 +289,7 @@ function renderSchedule(){
   const shownGroups=scheduleGroups.filter(group=>!state.unassignedOnly||shownShifts.some(s=>group.roles.includes(s.role)));
   const missing=state.shifts.filter(s=>!assignedName(s.id));
   $("#scheduleStatus").textContent=`${state.shifts.length-missing.length} quarts attribués sur ${state.shifts.length}. ${missing.length} à couvrir.`;
-  $("#scheduleBoard").innerHTML=shownGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>({name,day})).filter(({day})=>!state.unassignedOnly||shownShifts.some(s=>group.roles.includes(s.role)&&s.dayIndex===day)).map(({name,day})=>`<div class="schedule-day">${state.unassignedOnly?'':salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}${state.unassignedOnly?' · '+fmtDate.format(new Date(addDays(state.weekStart,day)+'T12:00:00Z')):''}</h4>${(state.unassignedOnly?[]:state.employees).filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${shownShifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<div class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}">${state.unassignedOnly?`<strong class="unassigned-shift-role">${roleNames[s.role]}</strong><small class="unassigned-shift-hours">${durationText(serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes)} payées</small>`:""}<details class="schedule-time-details"><summary title="Modifier ou supprimer ce quart">${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${s.training?" · Formation"+(s.trainingMinutes!=null?" "+(s.trainingMinutes/60).toLocaleString("fr-CA")+" h":""):""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</summary><form class="schedule-time-editor" data-id="${s.id}"><fieldset><label>Début<input type="time" name="start" required value="${shiftTimeInput(s.startMinute)}"></label><label>Fin<input type="time" name="end" required value="${shiftTimeInput(s.endMinute)}"></label><label>Heures de formation<input type="number" name="trainingHours" min="0" step="any" placeholder="0" value="${s.training?Number(((s.trainingMinutes??s.paidMinutes)/60).toFixed(4)):''}"></label><button type="submit">Enregistrer</button><button type="button" class="remove-scheduled-shift">Supprimer le quart</button></fieldset></form></details><select aria-label="Employé affecté au quart" data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></div>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}</div>`).join("")}</div></section>`).join("");
+  $("#scheduleBoard").innerHTML=shownGroups.map(group=>`<section class="schedule-group"><h3>${group.title}</h3><div class="schedule-grid">${dayNames.map((name,day)=>({name,day})).filter(({day})=>!state.unassignedOnly||shownShifts.some(s=>group.roles.includes(s.role)&&s.dayIndex===day)).map(({name,day})=>`<div class="schedule-day">${state.unassignedOnly?'':salesForecasts.dayHTML(addDays(state.weekStart,day))}<h4>${name}${state.unassignedOnly?' · '+fmtDate.format(new Date(addDays(state.weekStart,day)+'T12:00:00Z')):''}</h4>${(state.unassignedOnly?[]:state.employees).filter(e=>e.active&&e.birthday&&e.birthday.slice(5)===addDays(state.weekStart,day).slice(5)).map(e=>`<p class="birthday-greeting">Bonne fête ${escapeHtml(e.name)} !</p>`).join('')}${shownShifts.filter(s=>group.roles.includes(s.role)&&s.dayIndex===day).sort((a,b)=>a.startMinute-b.startMinute).map(s=>`<div class="schedule-item${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?" schedule-item-unfilled":""}">${state.unassignedOnly?`<strong class="unassigned-shift-role">${roleNames[s.role]}</strong><small class="unassigned-shift-hours">${durationText(serviceShiftTiming(s.startMinute,s.endMinute,s.absence).paidMinutes)} payées</small>`:""}<details class="schedule-time-details"><summary title="Modifier ou supprimer ce quart">${timeText(s.startMinute)}–${timeText(s.endMinute)}${s.absence?`<small class="shift-absence">${escapeHtml(absenceLabel(s.absence))}</small>`:""}${s.training?" · Formation"+(s.trainingMinutes!=null?" "+(s.trainingMinutes/60).toLocaleString("fr-CA")+" h":""):""}${sharedServiceDayLabel(s)}${s.role==="support"?` · ${roleNames.support}`:""}</summary><form class="schedule-time-editor" data-id="${s.id}"><fieldset><label>Début<input type="time" name="start" required value="${shiftTimeInput(s.startMinute)}"></label><label>Fin<input type="time" name="end" required value="${shiftTimeInput(s.endMinute)}"></label><label>Heures de formation<input type="number" name="trainingHours" min="0" step="any" placeholder="0" value="${s.training?Number(((s.trainingMinutes??s.paidMinutes)/60).toFixed(4)):''}"></label><button type="submit">Enregistrer</button><button type="button" class="remove-scheduled-shift">Supprimer le quart</button></fieldset></form></details><select aria-label="Employé affecté au quart" data-shift="${s.id}" ${s.role==="support"?"disabled":""}><option value="">${s.role==="support"?"Autre département":"À couvrir"}</option>${state.employees.filter(e=>canWorkRole(e,s.role)&&(availableForShift(e,s)||state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id))).map(e=>`<option value="${e.id}" ${state.assignments.some(a=>a.shiftId===s.id&&a.employeeId===e.id)?"selected":""}>${escapeHtml(e.name)}${availableForShift(e,s)?(candidateShift(e,s).approvedLeaveAbsence?" (absence partielle approuvée)":""):" (déjà attribué, hors disponibilité)"}</option>`).join("")}</select></div>${s.role!=="support"&&!state.assignments.some(a=>a.shiftId===s.id)?shiftAvailabilityPanel(s):""}`).join("")||"<small>Aucun quart</small>"}${scheduleDayTotalsHTML(group,day,shownShifts)}</div>`).join("")}</div></section>`).join("");
   if(state.unassignedOnly&&!shownShifts.length)$('#scheduleBoard').innerHTML='<p class="unassigned-empty" role="status">Aucun quart à couvrir pour cette semaine. Toutes les heures prévues du Service sont attribuées.</p>';
   if(!state.unassignedOnly)$("#scheduleBoard").insertAdjacentHTML("beforeend",supportBoardHTML(state.departmentSupport||[],state.weekStart));
   $("#employeeTotals").innerHTML="<h3>Heures par employé</h3>"+scheduleGroups.map(group=>`<div class="total-group"><strong>${group.title}</strong>${state.employees.filter(e=>group.roles.includes(e.role)&&state.assignments.some(a=>a.employeeId===e.id)).map(e=>{const paid=state.assignments.filter(a=>a.employeeId===e.id).reduce((sum,a)=>sum+(state.shifts.find(s=>s.id===a.shiftId)?.paidMinutes||0),0);return `<span>${escapeHtml(e.name)} : ${durationText(paid)} / ${durationText(e.targetMinutes)} souhaitées</span>`;}).join("")||"<span>Aucun quart attribué</span>"}</div>`).join("");
@@ -478,6 +489,7 @@ $("#regenerateSchedule").onclick=async()=>{
   }catch(error){showError(error);}finally{button.disabled=false;}
 };
 const salesForecasts=createSalesForecastDisplay();
+bindServiceViews();
 const undoControl=window.createUndoControl({
   storeHeaders:()=>state.storeId?{'X-Service-Store':state.storeId}:{},
   beforeUndo:async()=>{if(!serviceDirty)return false;await saveWeek();return true;},
