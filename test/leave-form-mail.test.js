@@ -4,6 +4,20 @@ import {randomUUID} from 'node:crypto';
 import express from 'express';
 import {PGlite} from '@electric-sql/pglite';
 import {formMailPayload,normalizeFormMail,installFormMail} from '../leave-form-mail.js';
+import {prepareFormMail} from '../scripts/prepare-leave-form-mail.mjs';
+
+test('migration additive : origine contrôlée, ancien marqueur conservé et relance idempotente',async()=>{
+  const db=new PGlite(),pool={query:async(sql,args)=>args?db.query(sql,args):(await db.exec(sql)).at(-1)};
+  try{
+    await db.exec('CREATE TABLE quart_schema_releases(version text,origin text,PRIMARY KEY(version,origin));');
+    await assert.rejects(prepareFormMail(pool,'https://portal.example.invalid'));
+    assert.equal((await db.query("SELECT to_regclass('schedule_leave_form_mail') AS name")).rows[0].name,null);
+    await db.query("INSERT INTO quart_schema_releases VALUES('20261113.5',$1)",['https://portal.example.invalid']);
+    await prepareFormMail(pool,'https://portal.example.invalid');await prepareFormMail(pool,'https://portal.example.invalid');
+    assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM quart_schema_releases')).rows[0].count,2);
+    assert.equal((await db.query("SELECT relrowsecurity FROM pg_class WHERE relname='schedule_leave_form_mail'")).rows[0].relrowsecurity,true);
+  }finally{await db.close();}
+});
 
 test('courriel lisible, règles exactes, destinataire unique et liens test distincts',()=>{
   const input={recipient:' Demo@Example.com ',name:'Alex <script>',isTest:false};

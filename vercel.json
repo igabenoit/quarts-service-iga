@@ -6,7 +6,7 @@
   "functions": {
     "api/periodic.js": {"regions": ["yul1"], "maxDuration": 300, "experimentalTriggers": [{"type": "schedule/v1beta"}]}
   },
-  "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-preview.mjs",
+  "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-leave-form-mail.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
   "redirects": [
     {"source": "/", "destination": "/index.html", "permanent": false},
