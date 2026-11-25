@@ -1,6 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {serviceNeedsHTML,serviceNeedsReport} from '../public/service-needs-print.js';
 const shift=(id,extra={})=>({id,role:'cashier',dayIndex:0,startMinute:480,endMinute:960,...extra});
+
+test('needs totals exclude other functions while preserving their printed rows',()=>{
+ const data={weekStart:'2030-10-14',shifts:['manager','supervisor','cashier','packer','orders','support'].map((role,i)=>shift(i+1,{role}))};
+ const report=serviceNeedsReport(data),html=serviceNeedsHTML(data);
+ assert.equal(report.count,4);assert.equal(report.totalMinutes,1680);assert.equal(report.otherMinutes,840);assert.equal(report.days[0].length,6);
+ assert.match(html,/Total du Service pour la semaine : 4 quart\(s\) · 28 h/);
+ assert.match(html,/Autres fonctions, hors total Service : 2 quart\(s\) · 14 h/);
+});
 test('besoins : quantité, repas et totaux indépendants des affectations et absences',()=>{
  const data={weekStart:'2030-12-30',employees:[{name:'Nom confidentiel'}],assignments:[{shiftId:1,employeeId:3}],shifts:[shift(1),shift(2,{absence:{start:720,end:780}}),shift(3,{role:'packer',dayIndex:1,endMinute:720})]},before=structuredClone(data);
  const report=serviceNeedsReport(data);assert.equal(report.count,3);assert.equal(report.totalMinutes,1080);assert.equal(report.days[0].length,1);assert.equal(report.days[0][0].quantity,2);assert.equal(report.days[0][0].paidMinutes,420);

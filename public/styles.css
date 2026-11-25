@@ -210,3 +210,12 @@
 .schedule-time-editor fieldset{display:grid;gap:.4rem;min-width:0;padding:.4rem 0;border:0;margin:0}
 .schedule-time-editor input,.schedule-time-editor button{width:100%;min-width:0;box-sizing:border-box}
 .schedule-time-editor .remove-scheduled-shift{background:white;color:#9c2525;border:1px solid currentColor}
+
+/* Assigned hours are compared with the same four Service functions. */
+.summary-grid.service-hours-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+.service-hours-summary .metric>span{font-size:15px}
+.service-hours-summary .metric>strong{font-size:32px}
+.service-hours-summary .metric>small{font-size:14px;line-height:1.5;margin-top:6px}
+.service-hours-summary .assigned-total{border-left:5px solid #137333}
+.service-hours-summary .unassigned-total{border-left:5px solid #c48013}
+@media(max-width:600px){.summary-grid.service-hours-summary{grid-template-columns:1fr}}

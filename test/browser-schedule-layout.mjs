@@ -1,3 +1,4 @@
+import {serviceHoursSummary,isServiceTotalShift} from '../public/service-hours.js';
 import {createRequire} from 'node:module';
 import {writeFileSync,mkdirSync,readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
@@ -10,7 +11,7 @@ import {serviceShiftTiming} from '../public/service-rules.js';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const source=readFileSync('public/app.js','utf8').replace(/^import .*;\r?\n/gm,'');
-const context=vm.createContext({serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming});
+const context=vm.createContext({serviceHoursSummary,isServiceTotalShift,serviceDayPortions,shiftWithApprovedLeave,absenceLabel,workingIntervals,serviceShiftTiming});
 vm.runInContext(source.slice(0,source.indexOf('function render(){')),context);
 context.data={weekStart:'2026-10-19',employees:Array.from({length:30},(_,i)=>({id:i+1,name:`Employé Service ${i+1} avec un nom composé très long`,role:'cashier',active:true,displayRank:i+1,seniority:'2020-01-01',availability:{0:[[480,600],[660,720],[780,900],[960,1020]]}})),shifts:Array.from({length:30},(_,i)=>({id:i+1,role:'cashier',dayIndex:0,startMinute:480,endMinute:1020,breakMinutes:60,absence:{start:750,end:810,includesMeal:false}})),assignments:Array.from({length:30},(_,i)=>({shiftId:i+1,employeeId:i+1})),approvedLeaves:[],timeOff:[]};
 const serviceHTML=vm.runInContext('servicePrintHTML(data)',context);

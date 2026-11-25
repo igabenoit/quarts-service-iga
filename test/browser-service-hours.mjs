@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {liveAppFixture} from './live-app-fixture.mjs';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const f=await liveAppFixture();let browser;
+try{
+ const login=await f.call('POST','/api/login',{body:{code:'audit-admin-test'}}),cookie=login.cookie,week='2030-10-14';
+ assert.equal(login.status,200);
+ let data=(await f.call('GET','/api/weeks/'+week,{cookie})).body,revision=data.revision;
+ const headers=()=>({'X-Service-Week':week,'X-Service-Revision':revision});
+ async function write(path,body,method='POST'){const r=await f.call(method,path,{cookie,headers:headers(),body});assert(r.status<300,JSON.stringify(r.body));revision=r.headers.get('X-Service-Revision')||revision;return r.body;}
+ const employee=(await write('/api/employees',{name:'Camille Démonstration',role:'cashier',roles:['cashier','packer'],targetMinutes:2400,maxMinutes:3000,availability:Object.fromEntries(Array.from({length:7},(_,d)=>[d,[[0,1440]]]))})).employee;
+ const shifts=[];
+ for(const [day,role] of ['manager','supervisor','cashier','packer','orders','support'].entries())shifts.push((await write('/api/weeks/'+week+'/shifts',{role,days:[day],startMinute:480,endMinute:960})).shifts[0]);
+ browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.context().addCookies([{name:cookie.split('=')[0],value:cookie.slice(cookie.indexOf('=')+1),url:f.base}]);
+ await page.goto(f.base+'/index.html');await page.locator('#appView').waitFor({state:'visible'});
+ await page.locator('#weekPicker').fill(week);await page.locator('#weekPicker').dispatchEvent('change');
+ await page.waitForFunction(()=>document.querySelector('#combinedPlanned').textContent==='28 h');
+ const values=()=>page.locator('#combinedPlanned,#combinedAssigned,#combinedUnassigned').allTextContents();
+ assert.deepEqual(await values(),['28 h','0 h','28 h']);assert.equal(await page.locator('#frontBudget,#packerBudget').count(),0);
+ const selector=page.locator('select[data-shift="'+shifts[2].id+'"]');await selector.selectOption(String(employee.id));
+ await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='7 h');
+ assert.deepEqual(await values(),['28 h','7 h','21 h']);
+ await page.reload();await page.locator('#appView').waitFor({state:'visible'});await page.locator('#weekPicker').fill(week);await page.locator('#weekPicker').dispatchEvent('change');
+ await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='7 h');
+ assert.deepEqual(await values(),['28 h','7 h','21 h']);
+ const before=(await f.call('GET','/api/weeks/'+week,{cookie})).body.week;
+ await page.locator('#weekNotes').fill('Note de démonstration');await page.waitForFunction(()=>document.querySelector('#saveStatus').textContent==='Tout est enregistré');
+ const after=(await f.call('GET','/api/weeks/'+week,{cookie})).body.week;
+ assert.equal(after.notes,'Note de démonstration');assert.equal(after.cashierBudgetMinutes,before.cashierBudgetMinutes);assert.equal(after.packerBudgetMinutes,before.packerBudgetMinutes);
+ await page.locator('.service-hours-summary').screenshot({path:'../service-hours-desktop.png'});
+ await page.setViewportSize({width:390,height:844});await page.locator('.service-hours-summary').screenshot({path:'../service-hours-mobile.png'});
+ assert(await page.locator('.service-hours-summary').evaluate(el=>el.scrollWidth<=el.clientWidth));
+ await page.setViewportSize({width:1440,height:1000});await page.locator('#previewBtn').click();await page.locator('#printPreview').waitFor({state:'visible'});
+ const totals=await page.locator('#previewPages .service-week-total').allTextContents();
+ assert.equal(totals.length,3);for(const total of totals){assert.match(total,/28 h/);assert.match(total,/7 h attribuées · 21 h à attribuer/);assert.match(total,/hors total Service : 14 h/);}
+ const layout=await page.evaluate(async()=>{const {prepareSchedulePages}=await import('/schedule-layout.js');const prepared=prepareSchedulePages([...document.querySelectorAll('#previewPages article')]);try{return {count:prepared.pages.length,fit:prepared.pages.every(p=>p.scrollHeight<=p.clientHeight+2)}}finally{prepared.cleanup();}});
+ assert.equal(layout.count,3);assert.equal(layout.fit,true);
+ await page.evaluate(async()=>{const {prepareSchedulePages}=await import('/schedule-layout.js');window.testPrepared=prepareSchedulePages([...document.querySelectorAll('#previewPages article')]);const host=window.testPrepared.pages[0].parentElement;Object.assign(host.style,{left:'0',top:'0',zIndex:'99999'});window.testPrepared.pages[0].id='verified-service-page';});
+ await page.locator('#verified-service-page .service-week-total').screenshot({path:'../service-hours-print.png'});
+ await page.evaluate(()=>window.testPrepared.cleanup());
+ await page.locator('#previewClose').click();await page.locator('select[data-shift="'+shifts[2].id+'"]').selectOption('');
+ await page.waitForFunction(()=>document.querySelector('#combinedAssigned').textContent==='0 h');assert.deepEqual(await values(),['28 h','0 h','28 h']);
+ assert.deepEqual(errors,[]);console.log('PASS Service hours: four-role scope, assignment/unassignment, reload, notes save, mobile, matching print and three-page layout.');
+}finally{await browser?.close();await f.close();}

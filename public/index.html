@@ -50,12 +50,10 @@
         <div class="view-dashboard"><div class="view-dashboard-header"><div><h3>Consultation des horaires</h3><p>Consultations avec le code personnel de l’employé. Cela ne garantit pas qu’il a mémorisé tous ses quarts.</p></div><button id="refreshScheduleViews" type="button" class="secondary">Actualiser le suivi</button></div><div id="scheduleViews" aria-live="polite">Chargement…</div></div>
       </section>
 
-      <section class="summary-grid">
-        <article class="metric card combined-total"><span>Total des heures planifiées · gérante, caissières, superviseurs et emballeurs</span><strong id="combinedPlanned">0 h</strong><small id="combinedBreakdown"></small></article>
-        <article class="metric card"><span>Budget caisse et supervision</span><label><input id="frontBudget" type="number" min="0" step="0.25"> h</label></article>
-        <article class="metric card"><span>Quarts planifiés</span><strong id="frontPlanned">0 h</strong><small id="frontVariance"></small></article>
-        <article class="metric card"><span>Budget emballeurs</span><label><input id="packerBudget" type="number" min="0" step="0.25"> h</label></article>
-        <article class="metric card"><span>Quarts planifiés</span><strong id="packerPlanned">0 h</strong><small id="packerVariance"></small></article>
+      <section class="summary-grid service-hours-summary" aria-label="Attribution des heures du Service" aria-live="polite">
+        <article class="metric card combined-total"><span>Total des heures à attribuer · gérante, superviseurs, caissières et emballeurs</span><strong id="combinedPlanned">0 h</strong><small>Tous les quarts prévus, attribués ou encore à couvrir.</small><small id="combinedBreakdown"></small></article>
+        <article class="metric card assigned-total"><span>Heures réellement attribuées</span><strong id="combinedAssigned">0 h</strong><small id="assignedBreakdown"></small></article>
+        <article class="metric card unassigned-total"><span>Heures restant à attribuer</span><strong id="combinedUnassigned">0 h</strong><small id="unassignedBreakdown"></small></article>
       </section>
 
       <section class="card add-card" id="schedulePanel">

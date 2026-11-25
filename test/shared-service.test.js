@@ -1,3 +1,4 @@
+import {serviceHoursSummary,isServiceTotalShift} from '../public/service-hours.js';
 import {supportPrintHTML,supportBoardHTML} from '../public/department-service-support.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,7 +53,7 @@ test('explicit linked records match; unrelated equal names do not match and unpo
 
 test('Service printable day includes both portions but Service weekly totals retain only 4 hours',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
-  const context=vm.createContext({supportPrintHTML,supportBoardHTML,serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,roleNames:{cashier:'Caissière'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Caissières',roles:['cashier']},{title:'Autres',roles:[]},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',addDays:(s,d)=>'2026-10-'+(19+d),fixture:data});
+  const context=vm.createContext({serviceHoursSummary,isServiceTotalShift,supportPrintHTML,supportBoardHTML,serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,roleNames:{cashier:'Caissière'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Caissières',roles:['cashier']},{title:'Autres',roles:[]},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',addDays:(s,d)=>'2026-10-'+(19+d),fixture:data});
   vm.runInContext(source.slice(source.indexOf('function servicePrintHTML('),source.indexOf('function renderPrint()')),context);
   const html=vm.runInContext('servicePrintHTML(fixture)',context);
   assert.match(html,/07:00/);assert.match(html,/11:00/);assert.match(html,/12:00/);assert.match(html,/16:00/);

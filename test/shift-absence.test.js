@@ -1,3 +1,4 @@
+import {serviceHoursSummary,isServiceTotalShift} from '../public/service-hours.js';
 import {supportPrintHTML,supportBoardHTML} from '../public/department-service-support.js';
 import {commitServiceTransaction} from '../service-concurrency.js';
 import test from 'node:test';
@@ -65,7 +66,7 @@ test('Service print retains absence and adjusted hours',async()=>{
  const {serviceDayPortions}=await import('../public/shared-service.js');
  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const fixture={weekStart:'2026-10-26',shifts:[{id:1,role:'cashier',dayIndex:3,startMinute:480,endMinute:1020,absence:absence(false)}],assignments:[{shiftId:1,employeeId:1}],employees:[{id:1,name:'Démo',role:'cashier',active:true,availability:{}}],timeOff:[],approvedLeaves:[]};
- const context=vm.createContext({supportPrintHTML,supportBoardHTML,absenceLabel,serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,addDays,roleNames:{cashier:'Caissière'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Supervision',roles:[]},{title:'Caissières',roles:['cashier']},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',fixture});
+ const context=vm.createContext({serviceHoursSummary,isServiceTotalShift,supportPrintHTML,supportBoardHTML,absenceLabel,serviceShiftTiming,serviceDayPortions,escapeHtml:escapeHTML,addDays,roleNames:{cashier:'Caissière'},dayNames:['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'],scheduleGroups:[{title:'Supervision',roles:[]},{title:'Caissières',roles:['cashier']},{title:'Emballeurs',roles:[]},{title:'Commandes',roles:[]}],compareDisplayOrder:()=>0,seniorityText:()=>'',formatWeek:()=>'',fixture});
  vm.runInContext(source.slice(source.indexOf('function servicePrintHTML('),source.indexOf('function renderPrint()')),context);
  const html=vm.runInContext('servicePrintHTML(fixture)',context);assert.match(html,/Absence à ses frais : 12:30/);assert.match(html,/semaine complète : 7 h/);
 });
