@@ -7,6 +7,7 @@ import {installLeaveArchive} from './leave-archive.js';
 import {installLeaveAccess} from './leave-access.js';
 import {installDepartments} from './leave-departments.js';
 import {installNotifications} from './leave-notifications.js';
+import {installFormMail} from './leave-form-mail.js';
 import {installApprovalMail} from './leave-approval-mail.js';
 import {installEmployeeNotices} from './leave-employee-notices.js';
 import {installLeaveAcknowledgements} from './leave-acknowledgements.js';
@@ -50,6 +51,7 @@ export async function installLeave(app, pool, {requireManager,sameOrigin,employe
   const requireLeaveStaff=requireStoreStaff;
   await installLeaveAcknowledgements(app,pool,{sameOrigin});
   const mail=await installNotifications(app,pool,{requireManager,sameOrigin});
+  await installFormMail(app,pool,{requireManager,sameOrigin});
   const approvalMail=await installApprovalMail(pool);
   const employeeNotices=await installEmployeeNotices(pool);
   await installContacts(app,pool,{requireManager,sameOrigin});
