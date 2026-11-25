@@ -235,3 +235,13 @@ button.unassigned-total:focus-visible{outline:3px solid #9d5200;outline-offset:3
 .unassigned-shift-hours{font-size:14px;color:#653400}
 .unassigned-empty{padding:22px;border:1px solid #b7d1bc;border-radius:10px;background:#eef8f0;color:#215c31}
 @media(max-width:600px){.unassigned-view-toolbar{align-items:flex-start;flex-direction:column}.unassigned-view-toolbar button{width:100%}.unassigned-view .schedule-group .schedule-grid{grid-template-columns:1fr}}
+
+/* Navigation entre l’horaire et la gestion des employés. */
+.service-view[hidden]{display:none!important}
+.service-view-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-top:18px}
+.service-view-tabs [role="tab"]{background:transparent;color:var(--muted);border-radius:0;border-bottom:3px solid transparent;padding:13px 20px;font-size:16px}
+.service-view-tabs [role="tab"]:hover{background:#fff;color:var(--ink)}
+.service-view-tabs [aria-selected="true"]{color:var(--ink);border-bottom-color:var(--red)}
+.service-view-tabs [role="tab"]:focus-visible{outline:3px solid #2878c8;outline-offset:2px}
+.employee-actions{flex-wrap:wrap;align-items:center}
+@media(max-width:650px){.service-view-tabs [role="tab"]{flex:1}.employee-actions>*{max-width:100%}}

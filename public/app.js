@@ -18,6 +18,26 @@ const state={unassignedOnly:false,storeId:null,weekStart:null,week:null,shifts:[
 const $=selector=>document.querySelector(selector);
 const fmtDate=new Intl.DateTimeFormat("fr-CA",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
 
+function showServiceView(view,{updateUrl=false}={}){
+  const selected=view==='employes'?'employes':'horaire';
+  document.querySelectorAll('[data-service-view]').forEach(tab=>{
+    const active=tab.dataset.serviceView===selected;
+    tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;
+    document.getElementById(tab.getAttribute('aria-controls')).hidden=!active;
+  });
+  if(updateUrl&&location.hash!=='#'+selected)history.pushState(null,'','#'+selected);
+}
+const serviceTabs=[...document.querySelectorAll('[data-service-view]')];
+for(const [index,tab] of serviceTabs.entries()){
+  tab.onclick=()=>showServiceView(tab.dataset.serviceView,{updateUrl:true});
+  tab.onkeydown=event=>{
+    const next=event.key==='ArrowRight'?(index+1)%serviceTabs.length:event.key==='ArrowLeft'?(index+serviceTabs.length-1)%serviceTabs.length:event.key==='Home'?0:event.key==='End'?serviceTabs.length-1:null;
+    if(next===null)return;event.preventDefault();serviceTabs[next].focus();serviceTabs[next].click();
+  };
+}
+window.addEventListener('hashchange',()=>showServiceView(location.hash.slice(1)));
+showServiceView(location.hash.slice(1));
+
 function mondayOf(value=new Date()){
   const date=new Date(value);date.setUTCHours(12,0,0,0);const day=date.getUTCDay();date.setUTCDate(date.getUTCDate()-(day===0?6:day-1));return date.toISOString().slice(0,10);
 }
@@ -421,6 +441,7 @@ $("#employeeForm").onsubmit=async event=>{event.preventDefault();const undoGroup
 $("#employeeName").closest('label').insertAdjacentHTML('afterend',identityCheckMarkup);
 serviceIdentityCheck=bindEmployeeIdentityCheck({name:$("#employeeName"),code:$("#employeeCode"),container:$("#employeeForm [data-identity-check]"),distinct:$("#employeeDistinctPerson"),isNew:()=>!$("#employeeId").value});
 $("#clearEmployee").onclick=resetEmployeeForm;
+$("#newServiceEmployee").onclick=()=>{resetEmployeeForm();$("#employeeName").focus();};
 $("#departEmployee").onclick=async()=>{
   const employee=state.employees.find(e=>e.id===Number($("#employeeId").value));
   if(!employee||!confirm(`Terminer l’emploi de ${employee.name}? Ses accès personnels et tous ses comptes de gérant rattachés seront immédiatement bloqués. Cette personne ne sera plus proposée pour de nouvelles affectations. Les horaires et quarts déjà attribués seront conservés. Annuler rétablira la fiche, mais une nouvelle connexion sera nécessaire.`))return;

@@ -40,6 +40,11 @@
         <span id="saveStatus" class="save-status">Tout est enregistré</span>
       </section>
 
+      <div class="service-view-tabs" role="tablist" aria-label="Outils du Service">
+        <button id="serviceScheduleTab" type="button" role="tab" aria-selected="true" aria-controls="serviceScheduleView" data-service-view="horaire">Horaire</button>
+        <button id="serviceEmployeesTab" type="button" role="tab" aria-selected="false" aria-controls="serviceEmployeesView" tabindex="-1" data-service-view="employes">Employés</button>
+      </div>
+      <div id="serviceScheduleView" class="service-view" role="tabpanel" aria-labelledby="serviceScheduleTab">
       <section class="card share-card">
         <div><p class="eyebrow">PARTAGE AVEC L’ÉQUIPE</p><h2>Publication dans le portail employés</h2><p>Publie la semaine choisie quand elle est prête. Le lien et le QR restent toujours les mêmes; chaque employé utilise son code personnel. Les modifications restent privées jusqu’à ce que tu publies de nouveau la semaine.</p></div>
         <div class="share-actions"><button id="createShareLink" type="button">Publier cette semaine</button><button id="copyShareLink" type="button" class="secondary">Copier le lien permanent</button><button id="revokeShareLink" type="button" class="danger" hidden>Retirer cette semaine du portail</button></div>
@@ -58,7 +63,7 @@
 
       <section class="card add-card" id="schedulePanel">
         <div class="section-title"><div><p class="eyebrow">HORAIRE</p><h2>Attribuer les quarts</h2></div><p>Les affectations existantes sont conservées. Les quarts impossibles à couvrir restent visibles.</p></div>
-        <div class="form-actions"><button id="generateSchedule" type="button">Attribuer les quarts libres</button><button id="regenerateSchedule" type="button" class="secondary">Recréer selon les priorités</button><label class="secondary import-label">Importer la liste initiale <input id="employeeImport" type="file" accept=".json,application/json" hidden></label></div>
+        <div class="form-actions"><button id="generateSchedule" type="button">Attribuer les quarts libres</button><button id="regenerateSchedule" type="button" class="secondary">Recréer selon les priorités</button></div>
         <p>Un congé partiel approuvé conserve le quart et inscrit les heures d’absence à ses frais. L’employé peut travailler avant et après. Un congé couvrant tout le quart le remet à couvrir. Pour appliquer les congés déjà approuvés, utilisez le bouton ci-dessous.</p>
         <button id="applyApprovedLeaves" type="button" class="secondary">Appliquer les congés approuvés</button>
         <p id="leaveApplyStatus" role="status"></p>
@@ -69,8 +74,32 @@
       </section>
 
       <section class="card add-card">
+        <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
+        <form id="shiftForm">
+          <input id="shiftId" type="hidden">
+          <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
+          <label><input type="checkbox" id="shiftTraining"> Quart en formation</label>
+          <label id="trainingHoursWrap" hidden>Heures de formation<input id="trainingHours" type="number" min="0.01" step="any" placeholder="Quart complet"><small>Laisser vide pour le quart complet.</small></label>
+          <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
+          <label>Début<input id="startTime" type="time" value="08:00" required></label>
+          <label>Fin<input id="endTime" type="time" value="16:00" required></label>
+          <label>Repas non payé (automatique)<select id="breakMinutes" disabled><option value="0">Aucun</option><option value="60">1 heure</option></select><small id="serviceBreakSummary" aria-live="polite"></small></label>
+          <label id="departmentWrap" hidden>Département<input id="sourceDepartment" maxlength="80" placeholder="Ex. Épicerie"></label>
+<fieldset class="absence-fields"><legend>Absence à ses frais pendant le quart</legend><p>Le quart complet reste affiché. Un congé partiel approuvé remplit automatiquement cette période. Ne pas inscrire de motif médical.</p><label>Début de l’absence<input id="shiftAbsenceStart" type="time"></label><label>Fin de l’absence<input id="shiftAbsenceEnd" type="time"></label><label>Pause repas<select id="shiftAbsenceMeal"><option value="extra">Absence en plus de la pause repas</option><option value="included">Pause repas comprise dans l’absence</option></select></label><p>Pour une absence manuelle, videz les deux heures pour la retirer. Pour un congé approuvé, annulez la demande de congé.</p></fieldset>
+          <label class="notes-field">Précision<input id="shiftNotes" maxlength="300" placeholder="Optionnel"></label>
+          <div class="form-actions"><button id="submitShift">Ajouter le quart</button><button id="cancelEdit" type="button" class="ghost" hidden>Annuler</button><button id="deleteShift" type="button" class="danger" hidden>Supprimer</button></div>
+        </form>
+      </section>
+
+      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 1</p><h2>Caissières et superviseurs</h2></div><div id="frontWarnings" class="warnings"></div></div><div id="frontBoard" class="week-board"></div></section>
+      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 2</p><h2>Emballeurs</h2></div></div><div id="packerBoard" class="week-board"></div></section>
+      <section class="card notes-card"><label for="weekNotes">Notes de la semaine</label><textarea id="weekNotes" rows="3" placeholder="Événement, changement d’heures, précision pour la planification…"></textarea></section>
+      </div>
+      <section id="serviceEmployeesView" class="service-view card add-card" role="tabpanel" aria-labelledby="serviceEmployeesTab" hidden>
         <div class="section-title"><div><p class="eyebrow">ÉQUIPE</p><h2>Employés et disponibilités</h2></div><p>Clique sur un employé pour modifier sa disponibilité permanente.</p></div>
+        <div class="form-actions employee-actions"><button id="newServiceEmployee" type="button">Ajouter un employé</button><label class="secondary import-label">Importer la liste initiale <input id="employeeImport" type="file" accept=".json,application/json" hidden></label></div>
         <div id="employeeList" class="employee-list"></div>
+        <h3>Fiche employé</h3>
         <form id="employeeForm">
           <input id="employeeId" type="hidden"><label class="employee-option" style="grid-column:1/-1"><input id="employeeDistinctPerson" type="checkbox"> Si une fiche correspond au nom, j’ai vérifié qu’il s’agit d’une autre personne.</label>
           <label>Nom<input id="employeeName" required maxlength="100"></label><label>Code employé (6 derniers chiffres)<input id="employeeCode" pattern="[0-9]{6}" maxlength="6" inputmode="numeric" autocomplete="off"></label><label>Date de naissance (gestion seulement)<input id="employeeBirthday" type="date"></label>
@@ -97,28 +126,6 @@
           <p id="departureStatus" role="status"></p>
         </form>
       </section>
-
-      <section class="card add-card">
-        <div class="section-title"><div><p class="eyebrow">NOUVEAU QUART</p><h2>Ajouter un besoin</h2></div><p>Sélectionne plusieurs jours pour créer le même quart d’un seul coup.</p></div>
-        <form id="shiftForm">
-          <input id="shiftId" type="hidden">
-          <label>Fonction<select id="role" required><option value="supervisor">Superviseur</option><option value="manager">Gérante</option><option value="cashier">Caissière</option><option value="packer">Emballeur</option><option value="orders">Commandes téléphoniques</option><option value="support">Aide d’un autre département</option></select></label>
-          <label><input type="checkbox" id="shiftTraining"> Quart en formation</label>
-          <label id="trainingHoursWrap" hidden>Heures de formation<input id="trainingHours" type="number" min="0.01" step="any" placeholder="Quart complet"><small>Laisser vide pour le quart complet.</small></label>
-          <fieldset><legend>Journée</legend><div id="dayChoices" class="day-choices"></div></fieldset>
-          <label>Début<input id="startTime" type="time" value="08:00" required></label>
-          <label>Fin<input id="endTime" type="time" value="16:00" required></label>
-          <label>Repas non payé (automatique)<select id="breakMinutes" disabled><option value="0">Aucun</option><option value="60">1 heure</option></select><small id="serviceBreakSummary" aria-live="polite"></small></label>
-          <label id="departmentWrap" hidden>Département<input id="sourceDepartment" maxlength="80" placeholder="Ex. Épicerie"></label>
-<fieldset class="absence-fields"><legend>Absence à ses frais pendant le quart</legend><p>Le quart complet reste affiché. Un congé partiel approuvé remplit automatiquement cette période. Ne pas inscrire de motif médical.</p><label>Début de l’absence<input id="shiftAbsenceStart" type="time"></label><label>Fin de l’absence<input id="shiftAbsenceEnd" type="time"></label><label>Pause repas<select id="shiftAbsenceMeal"><option value="extra">Absence en plus de la pause repas</option><option value="included">Pause repas comprise dans l’absence</option></select></label><p>Pour une absence manuelle, videz les deux heures pour la retirer. Pour un congé approuvé, annulez la demande de congé.</p></fieldset>
-          <label class="notes-field">Précision<input id="shiftNotes" maxlength="300" placeholder="Optionnel"></label>
-          <div class="form-actions"><button id="submitShift">Ajouter le quart</button><button id="cancelEdit" type="button" class="ghost" hidden>Annuler</button><button id="deleteShift" type="button" class="danger" hidden>Supprimer</button></div>
-        </form>
-      </section>
-
-      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 1</p><h2>Caissières et superviseurs</h2></div><div id="frontWarnings" class="warnings"></div></div><div id="frontBoard" class="week-board"></div></section>
-      <section class="card board-card"><div class="section-title"><div><p class="eyebrow">PAGE 2</p><h2>Emballeurs</h2></div></div><div id="packerBoard" class="week-board"></div></section>
-      <section class="card notes-card"><label for="weekNotes">Notes de la semaine</label><textarea id="weekNotes" rows="3" placeholder="Événement, changement d’heures, précision pour la planification…"></textarea></section>
     </main>
     <div id="toast" role="status"></div>
     <section id="printSheet" aria-hidden="true"></section>
