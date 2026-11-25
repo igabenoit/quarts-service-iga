@@ -14,7 +14,7 @@ export async function installDepartmentHoursSummary(app,pool,{requireManager,sam
   async function planned(req){
     const department=await departmentFor(req.params.id),start=weekFor(req.params.week);assertDepartment(req,department.id);
     if(department.key!=='service')return plannedSummary(await getWeek(department.id,start));
-    const shifts=(await pool.query('SELECT training,training_minutes,role,start_minute,end_minute,absence FROM schedule_shifts WHERE week_start=$1',[start])).rows.filter(row=>['cashier','supervisor','packer','manager','orders'].includes(row.role));
+    const shifts=(await pool.query('SELECT training,training_minutes,role,start_minute,end_minute,absence FROM schedule_shifts s WHERE week_start=$1 AND EXISTS (SELECT 1 FROM schedule_assignments a WHERE a.shift_id=s.id AND a.employee_id IS NOT NULL)',[start])).rows.filter(row=>['cashier','supervisor','packer','manager','orders'].includes(row.role));
     const minutes={training:0};
     for(const shift of shifts){
       const paid=serviceShiftTiming(Number(shift.start_minute),Number(shift.end_minute),shift.absence).paidMinutes;

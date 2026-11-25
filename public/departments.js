@@ -1,3 +1,5 @@
+import {normalizeDepartmentBudget} from './department-budget.js';
+import {programmedMinutes,budgetLabel,budgetDeltaLabel,programmedDetail,budgetComparisonTotalsHTML} from './department-budget-comparison.js';
 import {bindEmployeeIdentityCheck,identityCheckMarkup} from './employee-identity.js';
 import {depositPhoto} from './department-photo-upload.js';
 import {assertLeaveCell,leaveLabel,leaveSpans} from './department-leave.js';
@@ -520,7 +522,7 @@ function summaryVariance(row){const delta=summaryDelta(row);return delta===null?
 
 const summaryInputValue=minutes=>minutes===null||minutes===undefined?'':Math.floor(minutes/60)+':'+String(minutes%60).padStart(2,'0');
 function renderSummaryTable(){
-  $('#summaryTable').innerHTML='<table class="summary-editor"><thead><tr><th>Département</th><th>Régulier prévu</th><th>Formation prévue</th><th>Buffet prévu</th><th>Cuisine séparée</th><th>Mentions séparées</th><th>Commandes téléphoniques</th><th>Productives prévues</th><th>Total payé prévu</th><th>Total payé réel (h)</th><th>Écart payé</th><th>Justification</th></tr></thead><tbody>'+controlReports.map(row=>'<tr><th>'+e(row.department.name)+(row.empty?'<small>Aucun horaire saisi</small>':'')+(serviceSummaryDetail(row)?'<small>'+e(serviceSummaryDetail(row))+'</small>':'')+'</th>'+['shift','training','buffet','kitchen','mention','orders'].map(key=>'<td>'+hoursLabel(row.totals[key]??0)+' h</td>').join('')+'<td><strong>'+hoursLabel(productiveMinutes(row))+' h</strong></td><td>'+hoursLabel(row.total)+' h</td><td><input data-summary-real="'+row.department.id+'" aria-label="Heures réelles '+e(row.department.name)+'" inputmode="decimal" placeholder="Non saisi" value="'+summaryInputValue(row.actual.minutes)+'">'+(['pam','cuisine'].includes(row.department.key)||row.totals.kitchen>0||row.actual.kitchenMinutes>0?'<label class="summary-kitchen-input">Dont cuisine (h)<input data-summary-kitchen="'+row.department.id+'" aria-label="Heures réelles cuisine '+e(row.department.name)+'" inputmode="decimal" placeholder="Non saisi" value="'+summaryInputValue(row.actual.kitchenMinutes)+'"></label>':'')+'</td><td data-summary-delta="'+row.department.id+'">'+summaryVariance(row)+'</td><td><input data-summary-note="'+row.department.id+'" aria-label="Justification '+e(row.department.name)+'" maxlength="240" value="'+e(row.actual.note)+'"></td></tr>').join('')+'</tbody></table><div id="summaryMetrics"></div><p>Heures productives + cuisine séparée = grand total des heures payées. Le réel payé inclut la cuisine; pour Cuisine et les anciens horaires PAM, précisez « dont cuisine » pour obtenir le réel productif. Le Service = sous-total caisse / emballeurs (gérante et supervision incluses) + commandes téléphoniques. Écart = réel payé − prévu payé; une case vide signifie « non saisi ».</p>';
+  $('#summaryTable').innerHTML='<table class="summary-editor"><thead><tr><th>Département</th><th>Heures prévues<br>Budget des prévisions</th><th>Heures programmées<br>Horaire enregistré</th><th>Écart<br>Horaire − budget</th><th>Heures payées (h)<br>Facultatif</th><th>Écart payé − horaire</th><th>Note</th></tr></thead><tbody>'+controlReports.map(row=>'<tr><th>'+e(row.department.name)+(row.empty?'<small>Aucun horaire saisi</small>':'')+'</th><td class="summary-budget">'+budgetLabel(row)+'</td><td><strong>'+hoursLabel(programmedMinutes(row))+' h</strong><small>'+e(programmedDetail(row))+'</small></td><td class="summary-budget-delta">'+budgetDeltaLabel(row)+'</td><td><input data-summary-real="'+row.department.id+'" aria-label="Heures payées '+e(row.department.name)+'" inputmode="decimal" placeholder="Non saisi" value="'+summaryInputValue(row.actual.minutes)+'">'+(['pam','cuisine'].includes(row.department.key)||row.totals.kitchen>0||row.actual.kitchenMinutes>0?'<label class="summary-kitchen-input">Dont cuisine (h)<input data-summary-kitchen="'+row.department.id+'" aria-label="Heures payées cuisine '+e(row.department.name)+'" inputmode="decimal" placeholder="Non saisi" value="'+summaryInputValue(row.actual.kitchenMinutes)+'"></label>':'')+'</td><td data-summary-delta="'+row.department.id+'">'+summaryVariance(row)+'</td><td><input data-summary-note="'+row.department.id+'" aria-label="Note '+e(row.department.name)+'" maxlength="240" value="'+e(row.actual.note)+'"></td></tr>').join('')+'</tbody></table>'+budgetComparisonTotalsHTML(controlReports)+'<p class="summary-comparison-help">Budget : heures prévues dans les feuilles de prévisions pour les mêmes dates, formation et buffet inclus, commandes téléphoniques incluses au Service. Programmées : quarts enregistrés, après pauses et absences; au Service, seulement les quarts attribués. Cuisine et affectations séparées restent hors du budget du département. Un écart positif indique un dépassement. Un budget absent reste « Non renseigné ».</p><details class="summary-paid-followup"><summary>Suivi des heures payées saisies</summary><div id="summaryMetrics"></div><p>La saisie des heures payées reste distincte du budget et de l’horaire. Ce suivi inclut les heures séparées et la cuisine dans le total payé; précisez la part cuisine pour calculer son écart. Les renseignements déjà enregistrés sont conservés.</p></details>';
   $('#summaryTable').querySelectorAll('input').forEach(input=>input.oninput=()=>{
     summaryDirty.add(Number(input.dataset.summaryReal||input.dataset.summaryKitchen||input.dataset.summaryNote));$('#saveSummary').disabled=false;$('#controlPdf').disabled=true;$('#controlCsv').disabled=true;$('#controlResults').hidden=true;$('#controlPreview').hidden=true;$('#controlStatus').textContent='Heures réelles à enregistrer.';updateSummaryTotals();
   });updateSummaryTotals();
@@ -533,7 +535,7 @@ function updateSummaryTotals(){
     const rows=pendingSummary();
     for(const row of rows){const real=row.actual;if(real.kitchenMinutes!==null&&(real.minutes===null||real.kitchenMinutes>real.minutes))throw Error('La cuisine réelle doit être comprise dans le total payé réel.');}
     rows.forEach(row=>$('#summaryTable [data-summary-delta="'+row.department.id+'"]').textContent=summaryVariance(row));
-    $('#summaryMetrics').innerHTML='<table class="summary-totals"><thead><tr><th>Contrôle des totaux</th><th>Prévu (h)</th><th>Réel (h)</th><th>Écart (h)</th><th>Réels renseignés</th></tr></thead><tbody>'+summaryMetrics(rows).map(m=>'<tr class="'+(m.key==='paid'?'control-grand summary-paid-total':'')+'"><th>'+e(m.label)+'</th><td>'+hoursLabel(m.planned)+'</td><td>'+(m.actual===null?'—':hoursLabel(m.actual)+(m.complete?'':' (partiel)'))+'</td><td>'+(m.delta===null?'—':(m.delta>0?'+':'')+hoursLabel(m.delta))+'</td><td>'+m.filled+'/'+rows.length+'</td></tr>').join('')+'</tbody></table>';
+    $('#summaryMetrics').innerHTML='<table class="summary-totals"><thead><tr><th>Contrôle des totaux</th><th>Horaire enregistré (h)</th><th>Payé saisi (h)</th><th>Écart payé − horaire (h)</th><th>Saisies renseignées</th></tr></thead><tbody>'+summaryMetrics(rows).map(m=>'<tr class="'+(m.key==='paid'?'control-grand summary-paid-total':'')+'"><th>'+e(m.label)+'</th><td>'+hoursLabel(m.planned)+'</td><td>'+(m.actual===null?'—':hoursLabel(m.actual)+(m.complete?'':' (partiel)'))+'</td><td>'+(m.delta===null?'—':(m.delta>0?'+':'')+hoursLabel(m.delta))+'</td><td>'+m.filled+'/'+rows.length+'</td></tr>').join('')+'</tbody></table>';
   }catch(error){$('#summaryMetrics').textContent='À vérifier : '+error.message;$('#summaryTable').querySelectorAll('[data-summary-delta]').forEach(el=>el.textContent='À vérifier');}
 }
 function refreshSummaryPreview(){
@@ -550,14 +552,16 @@ $('#buildControl').onclick=async()=>{
     try{
       if(dirty)await saveDraft();
       const departments=scope==='all'?meta.departments.filter(d=>d.active!==false):[current.department];
-      const reports=[];
-      for(const department of departments){
-        $('#controlStatus').textContent=`Chargement du sommaire ${reports.length+1}/${departments.length} · ${department.name}…`;
-        reports.push(await api(`/api/departments/${department.id}/weeks/${start}/hours-summary`));
-      }
+      const reports=await Promise.all(departments.map(async department=>{
+        const [report,budget]=await Promise.all([
+          api(`/api/departments/${department.id}/weeks/${start}/hours-summary`),
+          api(`/api/sales-forecasts/${start}?department=${department.id}`).then(data=>({status:'ready',...normalizeDepartmentBudget(data.departmentBudget,department.key)})).catch(()=>({status:'unavailable',department:department.key,hours:null}))
+        ]);
+        return {...report,budget};
+      }));
       controlReports=reports;
       renderSummaryTable();refreshSummaryPreview();
-      $('#controlStatus').textContent=controlReports.length+' département(s) · sommaire seulement. Les heures réelles sont enregistrées séparément des horaires.';
+      $('#controlStatus').textContent=controlReports.length+' département(s) · budgets des prévisions comparés aux horaires enregistrés. Les heures payées sont saisies séparément.';
     }catch(error){invalidateControl();$('#controlStatus').textContent='Le sommaire n’a pas été chargé. '+error.message;}
   });
 };
@@ -569,7 +573,7 @@ $('#saveSummary').onclick=async()=>{
       const pending=pendingSummary();
       for(const row of pending.filter(row=>summaryDirty.has(row.department.id))){
         const saved=await api(`/api/departments/${row.department.id}/weeks/${row.weekStart}/hours-summary`,{method:'PUT',body:JSON.stringify({version:row.version,actual:row.actual})});
-        controlReports[controlReports.findIndex(item=>item.department.id===row.department.id)]=saved;summaryDirty.delete(row.department.id);
+        controlReports[controlReports.findIndex(item=>item.department.id===row.department.id)]={...saved,budget:row.budget};summaryDirty.delete(row.department.id);
       }
       renderSummaryTable();refreshSummaryPreview();$('#controlStatus').textContent='Heures réelles enregistrées. Les écarts et le sommaire sont à jour.';
     }catch(error){$('#saveSummary').disabled=!summaryDirty.size;$('#controlStatus').textContent='Enregistrement incomplet. '+error.message;}
