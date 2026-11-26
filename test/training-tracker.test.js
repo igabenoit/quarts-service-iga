@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import {PGlite} from '@electric-sql/pglite';
 import {randomUUID,createHash} from 'node:crypto';
-import {installTrainingTracker,sendTrainingMail} from '../training-tracker.js';
+import {installTrainingTracker,sendTrainingMail,trainingMailSettings} from '../training-tracker.js';
 import {installDocumentUploadSchema} from '../document-uploads.js';
 
 test('training: scoped assignments, snapshot lists, stale edits, proof, mail retry and weekly reminders',async()=>{
  const db=new PGlite(),pool={query:(s,a)=>s.includes('CREATE TABLE')?db.exec(s):db.query(s,a)},app=express();app.use(express.json());await installDocumentUploadSchema(pool);
- const documentId=randomUUID(),employees=[{key:'store:1',name:'Employé fictif',active:true,departments:[8]},{key:'store:2',name:'Autre département',active:true,departments:[9]}],departments=[{id:8,name:'Charcuterie'},{id:9,name:'Autre'}];
+ const documentId=randomUUID(),employees=[{key:'store:1',name:'Employé fictif',active:true,departments:[8]},{key:'store:2',name:'Autre département',active:true,departments:[9]}],departments=[{id:8,name:'Charcuterie',active:true},{id:9,name:'Autre',active:true}];
  const sourcePool={query:async(s,args)=>({rows:s.includes('sst_visible_documents')?(args[0]===8?[{id:documentId,name:'Fiche.pdf',title:'Couteaux'}]:args[0]===documentId?[{name:'Fiche.pdf',mime:'application/pdf',department_id:8,data:Buffer.from('%PDF-test')}]:[]):s.includes('schedule_employees')?[]:s.includes('schedule_store_people')?employees.map((e,i)=>({id:i+1,name:e.name,active:e.active})):s.includes('schedule_store_memberships')?employees.map((e,i)=>({person_id:i+1,department_id:e.departments[0]})):s.includes('schedule_leave_departments')?departments:[]})};
  const auth=(req,res,next)=>{const role=req.get('x-role');if(!role)return res.status(401).end();req.ef={admin:role==='admin',view:role==='employee'?'employe':role==='admin'?'direction':'gerant',manager:role==='employee'?null:{departments:[role==='other'?9:8]},audit:{kind:role,id:1,name:'Test '+role}};next();};
  const wrap=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||500).json({error:e.message});}};
@@ -50,4 +50,16 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   await call('/plans/'+p.id,{version:2,itemId:p.items[0].id,status:'doing'},'manager');await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,3);assert.ok(payloads[2].to.includes('igabenoit@gmail.com'));await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,3);
   employees[0].departments=[9];assert.equal((await call('/plans/'+p.id,null,'manager')).status,403);assert.equal((await (await call('',null,'manager')).json()).plans.length,0);
  }finally{if(old===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=old;await new Promise(r=>server.close(r));await db.close();}
+});
+
+
+test('training recipients follow the department directory and preserve explicit overrides and disabled reminders',async()=>{
+ let email='first@example.invalid',stored=[];
+ const source={query:async()=>({rows:[{id:8,recipient:email,active:true},{id:9,recipient:'',active:true},{id:10,recipient:'inactive@example.invalid',active:false}]})};
+ const pool={query:async()=>({rows:stored})};
+ let result=await trainingMailSettings(pool,source);assert.deepEqual(result[0].recipients,[email]);assert.equal(result[0].reminders,true);assert.equal(result[0].inherited,true);assert.equal(result[1].reminders,false);assert.equal(result.length,2);
+ email='changed@example.invalid';assert.deepEqual((await trainingMailSettings(pool,source))[0].recipients,[email]);
+ stored=[{department_id:8,version:2,recipients:['custom@example.invalid'],reminders:false}];result=await trainingMailSettings(pool,source);assert.deepEqual(result[0].recipients,['custom@example.invalid']);assert.equal(result[0].inherited,false);assert.equal(result[0].reminders,false);
+ stored[0].recipients=[];result=await trainingMailSettings(pool,source);assert.deepEqual(result[0].recipients,[email]);assert.equal(result[0].reminders,false);
+ email='';assert.deepEqual((await trainingMailSettings(pool,source))[0].recipients,[]);
 });
