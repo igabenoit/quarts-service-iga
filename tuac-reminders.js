@@ -9,7 +9,7 @@ DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON tuac_expiry_reminders FROM anon; END IF;
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON tuac_expiry_reminders FROM authenticated; END IF;
 END $$;`;
-export function tuacSender(env=process.env){const configured=env.RESEND_FROM_EMAIL||env.RESEND_FROM||env.EMAIL_FROM||'onboarding@resend.dev';return 'IGA Famille Benoit 300-425 <'+(configured.match(/<([^<>]+)>/)?.[1]||configured.trim())+'>';}
+export function tuacSender(env=process.env){const configured=env.RESEND_FROM_EMAIL||env.RESEND_FROM||env.EMAIL_FROM||'onboarding@resend.dev';return 'IGA Famille Benoit <'+(configured.match(/<([^<>]+)>/)?.[1]||configured.trim())+'>';}
 export async function sendTuacExpiryReminders(pool,{fetchImpl=fetch,env=process.env}={}){
  if(!pool||!env.RESEND_API_KEY)return;
  const due=(await pool.query(`SELECT p.id,p.reference,p.data FROM tuac_postings p

@@ -44,7 +44,7 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   r=await fetch(base+uploadPath+'/parts/0',{method:'PUT',headers:{'x-role':'manager','x-employee-files':'1','Content-Type':'application/octet-stream'},body:bytes});assert.equal(r.status,200);
   r=await call(uploadPath+'/complete',{},'manager');assert.equal(r.status,201);const file=await r.json();assert.ok(file.id);assert.equal((await call('/plans/'+p.id+'/files/'+file.id,null,'other')).status,404);assert.match(await (await call('/plans/'+p.id+'/files/'+file.id,null,'manager')).text(),/%PDF/);
   let sent=0,payloads=[];const fetchImpl=async(_url,opts)=>{sent++;payloads.push(JSON.parse(opts.body));return {ok:true,json:async()=>({id:'synthetic-'+sent})};};
-  await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,1);assert.match(payloads[0].from,/IGA Famille Benoit 300-425/);await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,1);
+  await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,1);assert.match(payloads[0].from,/^IGA Famille Benoit </);await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,1);
   const id=randomUUID();assert.equal((await call('/notify',{requestId:id,departmentId:8},'manager')).status,200);assert.equal((await call('/notify',{requestId:id,departmentId:8},'manager')).status,200);assert.equal((await call('/notify',{requestId:id,departmentId:8},'other')).status,403);
   await assert.rejects(sendTrainingMail(pool,sourcePool,{fetchImpl:async()=>({ok:true,json:async()=>({})})}));
   await db.query("UPDATE training_mail SET last_at=clock_timestamp()-interval '3 minutes' WHERE status='sending'");await sendTrainingMail(pool,sourcePool,{fetchImpl});assert.equal(sent,2);

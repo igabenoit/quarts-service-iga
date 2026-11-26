@@ -11,7 +11,7 @@ test('expiry reminders: due only, one per deadline, retries deduplicated and mov
  async function posting(end,ref){const id=randomUUID();await db.query('INSERT INTO tuac_postings(id,reference,department,data) VALUES($1,$2,$3,$4)',[id,ref,'D',JSON.stringify({endDate:end,job:'Poste fictif'})]);return id;}
  try{
   const due=await posting('2000-01-01','D-01');await posting('2999-01-01','D-02');
-  await sendTuacExpiryReminders(db,{env,fetchImpl});assert.equal(calls.length,1);const mail=JSON.parse(calls[0].body);assert.deepEqual(mail.to,['igabenoit@gmail.com']);assert.equal(mail.from,'IGA Famille Benoit 300-425 <conges@example.invalid>');assert.match(mail.text,/D-01/);
+  await sendTuacExpiryReminders(db,{env,fetchImpl});assert.equal(calls.length,1);const mail=JSON.parse(calls[0].body);assert.deepEqual(mail.to,['igabenoit@gmail.com']);assert.equal(mail.from,'IGA Famille Benoit <conges@example.invalid>');assert.match(mail.text,/D-01/);
   await sendTuacExpiryReminders(db,{env,fetchImpl});assert.equal(calls.length,1);
   const retry=await posting('2000-01-02','D-03');let failed;
   await assert.rejects(sendTuacExpiryReminders(db,{env,fetchImpl:async(u,o)=>{failed=o;throw Error('Network timeout');}}));
@@ -21,7 +21,7 @@ test('expiry reminders: due only, one per deadline, retries deduplicated and mov
   await db.query("UPDATE tuac_postings SET data=jsonb_set(data,'{endDate}','\"2999-02-01\"') WHERE id=$1",[moved]);await db.query("UPDATE tuac_expiry_reminders SET last_at=now()-interval '3 minutes' WHERE posting_id=$1",[moved]);
   await sendTuacExpiryReminders(db,{env,fetchImpl});assert.equal(calls.length,2);
   await db.query("UPDATE tuac_postings SET data=jsonb_set(data,'{endDate}','\"2000-01-04\"') WHERE id=$1",[due]);await sendTuacExpiryReminders(db,{env,fetchImpl});assert.equal(calls.length,3);
-  assert.equal(tuacSender({EMAIL_FROM:'conges@example.invalid'}),'IGA Famille Benoit 300-425 <conges@example.invalid>');
+  assert.equal(tuacSender({EMAIL_FROM:'conges@example.invalid'}),'IGA Famille Benoit <conges@example.invalid>');
  }finally{await db.close();}
 });
 test('candidates and nominee print with the same reference and original logos',()=>{
