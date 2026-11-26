@@ -30,13 +30,18 @@ export function campusLink(value){
 export function campusEmailPayload(p,login,items,email){
  return {html:campusEmailHtml({employeeName:p.employee_name,login,dueDate:p.due_date,items,steps:campusInstructions(items),goService:items.find(isGoService)}),from:tuacSender(),to:[email],subject:'Campus Alimentor — vos accès et formations',text:`Bonjour ${p.employee_name},\n\nVoici vos accès à Campus Alimentor de Sobeys.\n\nConnexion : https://sobeys.csod.com/\nIdentifiant : ${login}\nMot de passe : Campus2027\n\nFormations à suivre avant le ${p.due_date} :\n${items.map(i=>'• '+i.title+'\n'+campusLink(i.url)).join('\n\n')}\n\nCOMMENT ACCÉDER À VOTRE FORMATION\n\n${campusInstructions(items).map((step,index)=>(index+1)+'. '+step).join('\n\n')}\n\nIGA Famille Benoit 300-425`};
 }
+export async function campusEmployeeEmail(db,sourcePool,employee){
+ const dossier=(await db.query('SELECT employee_email FROM onboarding_cases WHERE employee_key=$1',[employee.key])).rows[0];
+ if(dossier?.employee_email?.trim())return normalizeEmail(dossier.employee_email);
+ const contact=employee.personId?(await sourcePool.query("SELECT COALESCE(NULLIF(c.email,''),p.email,'') AS email FROM schedule_store_people p LEFT JOIN schedule_employee_contacts c ON c.employee_id=p.service_employee_id WHERE p.id=$1",[employee.personId])).rows[0]:null;
+ return normalizeEmail(contact?.email);
+}
 export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap,transaction,directory,plan,audit}){
  const owner=a=>{if(!a.admin||a.view!=='direction')fail('La direction doit confirmer la réinitialisation et envoyer les accès.',403);};
  async function preview(req,db=pool){
   owner(req.ef);const p=await plan(req.ef,req.params.id,db),items=p.items.filter(i=>i.platform==='campus');if(!items.length)fail('Ce parcours ne contient aucune formation Campus.');
   const dir=await directory(),employee=dir.employees.find(e=>e.key===p.employee_key),login=campusLogin(employee);
-  const contact=employee.personId?(await sourcePool.query("SELECT COALESCE(NULLIF(c.email,''),p.email,'') AS email FROM schedule_store_people p LEFT JOIN schedule_employee_contacts c ON c.employee_id=p.service_employee_id WHERE p.id=$1",[employee.personId])).rows[0]:null;
-  return {p,login,email:normalizeEmail(contact?.email),items:campusItems(items,dir,employee,p.department_id)};
+  return {p,login,email:await campusEmployeeEmail(db,sourcePool,employee),items:campusItems(items,dir,employee,p.department_id)};
  }
  app.get(base+'/plans/:id/campus',auth,wrap(async(req,res)=>{
   const {p,login,email,items}=await preview(req);
@@ -63,10 +68,9 @@ export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap
   owner(req.ef);const b=req.body||{};
   if(b.resetConfirmed!==true)fail('Confirmez avoir réinitialisé le mot de passe dans Campus à Campus2027 avant l’envoi.');
   if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(b.requestId||''))fail('Référence d’envoi invalide.');
-  const email=normalizeEmail(b.email);if(!email)fail('Indiquez le courriel de cet employé.');
   if(!process.env.RESEND_API_KEY)fail('Le service courriel est indisponible.',503);
   const result=await transaction(async db=>{
-   const {p,login,items}=await preview(req,db);if(p.version!==b.version||login!==b.login)fail('Le parcours ou le matricule a changé. Rouvrez la préparation du courriel.',409);
+   const {p,login,items,email}=await preview(req,db);if(!email)fail('Complétez le courriel dans le dossier de l’employé avant de lui envoyer ses accès.');if(normalizeEmail(b.email)!==email)fail('Le courriel du dossier a changé. Rouvrez la préparation pour vérifier le destinataire.',409);if(p.version!==b.version||login!==b.login)fail('Le parcours ou le matricule a changé. Rouvrez la préparation du courriel.',409);
    const dedupe='campus:'+p.id+':'+p.version+':'+login+':'+email+':guide-images-v3';
    const existing=(await db.query('SELECT id,dedupe,status FROM training_mail WHERE id=$1 OR dedupe=$2',[b.requestId,dedupe])).rows;
    if(existing.some(e=>e.id===b.requestId&&e.dedupe!==dedupe))fail('Cette référence correspond à un autre envoi.',409);

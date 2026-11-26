@@ -1,4 +1,4 @@
-import {campusLogin,campusLink,campusItems,campusInstructions,campusEmailPayload} from '../campus-training.js';
+import {campusLogin,campusLink,campusItems,campusInstructions,campusEmailPayload,campusEmployeeEmail} from '../campus-training.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -8,7 +8,7 @@ import {installTrainingTracker,sendTrainingMail,trainingMailSettings} from '../t
 import {installDocumentUploadSchema} from '../document-uploads.js';
 
 test('training: scoped assignments, snapshot lists, stale edits, proof, mail retry and weekly reminders',async()=>{
- const db=new PGlite(),pool={query:(s,a)=>s.includes('CREATE TABLE')?db.exec(s):db.query(s,a)},app=express();app.use(express.json());await installDocumentUploadSchema(pool);
+ const db=new PGlite(),pool={query:(s,a)=>s.includes('CREATE TABLE')?db.exec(s):db.query(s,a)},app=express();app.use(express.json());await installDocumentUploadSchema(pool);await db.exec('CREATE TABLE onboarding_cases(employee_key text PRIMARY KEY,employee_email text)');
  const documentId=randomUUID(),employees=[{key:'store:1',name:'Employé fictif',active:true,departments:[8],matricule:'001234'},{key:'store:2',name:'Autre département',active:true,departments:[9]}],departments=[{id:8,name:'Charcuterie',active:true},{id:9,name:'Autre',active:true}];
  const sourcePool={query:async(s,args)=>({rows:s.includes('sst_visible_documents')?(args[0]===8?[{id:documentId,name:'Fiche.pdf',title:'Couteaux'}]:args[0]===documentId?[{name:'Fiche.pdf',mime:'application/pdf',department_id:8,data:Buffer.from('%PDF-test')}]:[]):s.includes('schedule_employees')?[]:s.includes('schedule_store_people')?employees.map((e,i)=>({id:i+1,name:e.name,active:e.active})):s.includes('schedule_store_memberships')?employees.map((e,i)=>({person_id:i+1,department_id:e.departments[0]})):s.includes('schedule_leave_departments')?departments:[]})};
  const auth=(req,res,next)=>{const role=req.get('x-role');if(!role)return res.status(401).end();req.ef={admin:role==='admin',view:role==='employee'?'employe':role==='admin'?'direction':'gerant',manager:role==='employee'?null:{departments:[role==='other'?9:8]},audit:{kind:role,id:1,name:'Test '+role}};next();};
@@ -69,6 +69,10 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   assert.equal((await (await call(path)).json()).lastConfirmation,null);
   const testJobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus-test:%'")).rows;assert.equal(testJobs.length,1);assert.deepEqual(testJobs[0].payload.to,['igabenoit@gmail.com']);assert.equal(testJobs[0].payload.cc,undefined);assert.equal(testJobs[0].payload.bcc,undefined);assert.match(testJobs[0].payload.subject,/^\[TEST\]/);
   assert.equal((await call(path+'/email',message)).status,400);assert.equal((await call(path+'/email',{...message,resetConfirmed:true},'manager')).status,403);
+  assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,400);
+  await db.query('INSERT INTO onboarding_cases(employee_key,employee_email) VALUES($1,$2)',['store:1','employee@example.invalid']);
+  assert.equal((await (await call(path)).json()).email,'employee@example.invalid');
+  assert.equal((await call(path+'/email',{...message,resetConfirmed:true,email:'changed@example.invalid'})).status,409);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true,login:'m08327e999999'})).status,409);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
@@ -115,4 +119,12 @@ test('Campus illustrated emails keep text fallback and show the correct screensh
  const service=campusEmailPayload(p,'m08327e001234',[{title:'Formation GO Service - Rayon du Service',platform:'campus'}],'test@example.invalid');
  assert.equal((service.html.match(/<img /g)||[]).length,3);assert.match(service.html,/recherche-service.png/);assert.match(service.html,/service-complete.png/);assert.match(service.html,/EXEMPLE DU RÉSULTAT ATTENDU/);assert.doesNotMatch(service.html,/recherche-generale.png/);
  const other=campusEmailPayload(p,'m08327e001234',[{title:'SIMDUT',platform:'campus'}],'test@example.invalid');assert.equal((other.html.match(/<img /g)||[]).length,1);
+});
+
+test('Campus email is resolved from the employee dossier, with personnel fallback',async()=>{
+ let dossier={employee_email:'saved@example.invalid'},contactCalls=0;
+ const db={query:async()=>({rows:dossier?[dossier]:[]})},source={query:async()=>{contactCalls++;return {rows:[{email:'personnel@example.invalid'}]};}};
+ assert.equal(await campusEmployeeEmail(db,source,{key:'store:1',personId:1}),'saved@example.invalid');assert.equal(contactCalls,0);
+ dossier=null;assert.equal(await campusEmployeeEmail(db,source,{key:'store:1',personId:1}),'personnel@example.invalid');
+ assert.equal(await campusEmployeeEmail(db,source,{key:'store:1'}),'');
 });
