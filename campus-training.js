@@ -26,6 +26,9 @@ export function campusLink(value){
  if(url.protocol!=='https:'||url.hostname!=='sobeys.csod.com'||url.port||url.username||url.password||/targetUser/i.test(url.href))fail('Utilisez un lien Campus partageable sans targetUser, ou laissez le lien vide pour ouvrir la connexion Campus.');
  return url.href;
 }
+export function campusEmailPayload(p,login,items,email){
+ return {from:tuacSender(),to:[email],subject:'Campus Alimentor — vos accès et formations',text:`Bonjour ${p.employee_name},\n\nVoici vos accès à Campus Alimentor de Sobeys.\n\nConnexion : https://sobeys.csod.com/\nIdentifiant : ${login}\nMot de passe : Campus2027\n\nFormations à suivre avant le ${p.due_date} :\n${items.map(i=>'• '+i.title+'\n'+campusLink(i.url)).join('\n\n')}\n\nCOMMENT ACCÉDER À VOTRE FORMATION\n\n${campusInstructions(items).map((step,index)=>(index+1)+'. '+step).join('\n\n')}\n\nIGA Famille Benoit 300-425`};
+}
 export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap,transaction,directory,plan,audit}){
  const owner=a=>{if(!a.admin||a.view!=='direction')fail('La direction doit confirmer la réinitialisation et envoyer les accès.',403);};
  async function preview(req,db=pool){
@@ -39,6 +42,22 @@ export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap
   const confirmations=(await pool.query("SELECT actor,created_at,data FROM training_events WHERE plan_id=$1 AND action='campus.reset.confirmed' ORDER BY id DESC LIMIT 1",[p.id])).rows;
   res.json({employeeName:p.employee_name,login,email,password:'Campus2027',version:p.version,items,instructions:campusInstructions(items),dueDate:p.due_date,lastConfirmation:confirmations[0]||null});
  }));
+ app.post(base+'/plans/:id/campus/test-email',auth,origin,wrap(async(req,res)=>{
+  owner(req.ef);const b=req.body||{};
+  if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(b.requestId||''))fail('Référence de test invalide.');
+  if(!process.env.RESEND_API_KEY)fail('Le service courriel est indisponible.',503);
+  const result=await transaction(async db=>{
+   const {p,login,items}=await preview(req,db);
+   if(p.version!==b.version||login!==b.login)fail('Le parcours ou le matricule a changé. Rouvrez la préparation du courriel.',409);
+   const email='igabenoit@gmail.com',dedupe='campus-test:'+p.id+':'+p.version+':'+login+':'+b.requestId;
+   const old=(await db.query('SELECT id,dedupe,status FROM training_mail WHERE id=$1',[b.requestId])).rows[0];
+   if(old){if(old.dedupe!==dedupe)fail('Cette référence correspond à un autre envoi.',409);return {queued:true,id:old.id,status:old.status,to:email,alreadyQueued:true};}
+   const payload=campusEmailPayload(p,login,items,email);payload.subject='[TEST] '+payload.subject;
+   await db.query('INSERT INTO training_mail(id,dedupe,department_id,payload) VALUES($1,$2,$3,$4)',[b.requestId,dedupe,p.department_id,JSON.stringify(payload)]);
+   await audit(db,req.ef,'campus.test.queued',{mailId:b.requestId,email},p.id);
+   return {queued:true,id:b.requestId,status:'pending',to:email};
+  });res.json(result);
+ }));
  app.post(base+'/plans/:id/campus/email',auth,origin,wrap(async(req,res)=>{
   owner(req.ef);const b=req.body||{};
   if(b.resetConfirmed!==true)fail('Confirmez avoir réinitialisé le mot de passe dans Campus à Campus2027 avant l’envoi.');
@@ -51,7 +70,7 @@ export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap
    const existing=(await db.query('SELECT id,dedupe,status FROM training_mail WHERE id=$1 OR dedupe=$2',[b.requestId,dedupe])).rows;
    if(existing.some(e=>e.id===b.requestId&&e.dedupe!==dedupe))fail('Cette référence correspond à un autre envoi.',409);
    if(existing.length)return {queued:true,id:existing[0].id,status:existing[0].status,alreadyQueued:true};
-   const payload={from:tuacSender(),to:[email],subject:'Campus Alimentor — vos accès et formations',text:`Bonjour ${p.employee_name},\n\nVoici vos accès à Campus Alimentor de Sobeys.\n\nConnexion : https://sobeys.csod.com/\nIdentifiant : ${login}\nMot de passe : Campus2027\n\nFormations à suivre avant le ${p.due_date} :\n${items.map(i=>'• '+i.title+'\n'+campusLink(i.url)).join('\n\n')}\n\nCOMMENT ACCÉDER À VOTRE FORMATION\n\n${campusInstructions(items).map((step,index)=>(index+1)+'. '+step).join('\n\n')}\n\nIGA Famille Benoit 300-425`};
+   const payload=campusEmailPayload(p,login,items,email);
    await audit(db,req.ef,'campus.reset.confirmed',{login,employeeKey:p.employee_key},p.id);
    await db.query('INSERT INTO training_mail(id,dedupe,department_id,payload) VALUES($1,$2,$3,$4)',[b.requestId,dedupe,p.department_id,JSON.stringify(payload)]);
    await audit(db,req.ef,'campus.email.queued',{mailId:b.requestId,email,login},p.id);

@@ -55,11 +55,24 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   const campusPlan=(await (await call()).json()).plans.find(p=>p.list_id===campusList.id),path='/plans/'+campusPlan.id+'/campus';
   const access=await (await call(path)).json();assert.equal(access.login,'m08327e001234');assert.equal(access.password,'Campus2027');assert.equal((await call(path,null,'manager')).status,403);
   const message={requestId:randomUUID(),version:1,login:access.login,email:'employee@example.invalid'};
+  const testMessage={requestId:randomUUID(),version:1,login:access.login,email:'must-not-receive@example.invalid',resetConfirmed:true};
+  assert.equal((await call(path+'/test-email',testMessage,'manager')).status,403);
+  assert.equal((await call(path+'/test-email',testMessage,'other')).status,403);
+  assert.equal((await call(path+'/test-email',testMessage,'admin',{'x-employee-files':''})).status,403);
+  assert.equal((await call(path+'/test-email',{...testMessage,login:'wrong'})).status,409);
+  const beforePlan=(await (await call('/plans/'+campusPlan.id)).json()).plan;
+  assert.equal((await call(path+'/test-email',{...testMessage,resetConfirmed:false})).status,200);
+  assert.equal((await call(path+'/test-email',testMessage)).status,200);
+  assert.deepEqual((await (await call('/plans/'+campusPlan.id)).json()).plan,beforePlan);
+  assert.equal((await db.query("SELECT * FROM training_events WHERE action='campus.reset.confirmed'")).rows.length,0);
+  assert.equal((await db.query("SELECT * FROM training_events WHERE action='campus.email.queued'")).rows.length,0);
+  assert.equal((await (await call(path)).json()).lastConfirmation,null);
+  const testJobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus-test:%'")).rows;assert.equal(testJobs.length,1);assert.deepEqual(testJobs[0].payload.to,['igabenoit@gmail.com']);assert.equal(testJobs[0].payload.cc,undefined);assert.equal(testJobs[0].payload.bcc,undefined);assert.match(testJobs[0].payload.subject,/^\[TEST\]/);
   assert.equal((await call(path+'/email',message)).status,400);assert.equal((await call(path+'/email',{...message,resetConfirmed:true},'manager')).status,403);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true,login:'m08327e999999'})).status,409);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
-  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);assert.match(jobs[0].payload.text,/COMMENT ACCÉDER/);assert.match(jobs[0].payload.text,/loupe en haut à droite/);
+  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].payload.text,testJobs[0].payload.text);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);assert.match(jobs[0].payload.text,/COMMENT ACCÉDER/);assert.match(jobs[0].payload.text,/loupe en haut à droite/);
   assert.equal((await db.query("SELECT * FROM training_events WHERE action='campus.reset.confirmed'")).rows.length,1);
   employees[0].departments=[9];assert.equal((await call('/plans/'+p.id,null,'manager')).status,403);assert.equal((await (await call('',null,'manager')).json()).plans.length,0);
  }finally{if(old===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=old;await new Promise(r=>server.close(r));await db.close();}
