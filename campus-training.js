@@ -1,3 +1,4 @@
+import {campusEmailHtml} from './campus-email-html.js';
 import {normalizeEmail} from './employee-contacts.js';
 import {tuacSender} from './tuac-reminders.js';
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
@@ -27,7 +28,7 @@ export function campusLink(value){
  return url.href;
 }
 export function campusEmailPayload(p,login,items,email){
- return {from:tuacSender(),to:[email],subject:'Campus Alimentor — vos accès et formations',text:`Bonjour ${p.employee_name},\n\nVoici vos accès à Campus Alimentor de Sobeys.\n\nConnexion : https://sobeys.csod.com/\nIdentifiant : ${login}\nMot de passe : Campus2027\n\nFormations à suivre avant le ${p.due_date} :\n${items.map(i=>'• '+i.title+'\n'+campusLink(i.url)).join('\n\n')}\n\nCOMMENT ACCÉDER À VOTRE FORMATION\n\n${campusInstructions(items).map((step,index)=>(index+1)+'. '+step).join('\n\n')}\n\nIGA Famille Benoit 300-425`};
+ return {html:campusEmailHtml({employeeName:p.employee_name,login,dueDate:p.due_date,items,steps:campusInstructions(items),goService:items.find(isGoService)}),from:tuacSender(),to:[email],subject:'Campus Alimentor — vos accès et formations',text:`Bonjour ${p.employee_name},\n\nVoici vos accès à Campus Alimentor de Sobeys.\n\nConnexion : https://sobeys.csod.com/\nIdentifiant : ${login}\nMot de passe : Campus2027\n\nFormations à suivre avant le ${p.due_date} :\n${items.map(i=>'• '+i.title+'\n'+campusLink(i.url)).join('\n\n')}\n\nCOMMENT ACCÉDER À VOTRE FORMATION\n\n${campusInstructions(items).map((step,index)=>(index+1)+'. '+step).join('\n\n')}\n\nIGA Famille Benoit 300-425`};
 }
 export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap,transaction,directory,plan,audit}){
  const owner=a=>{if(!a.admin||a.view!=='direction')fail('La direction doit confirmer la réinitialisation et envoyer les accès.',403);};
@@ -66,7 +67,7 @@ export function installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap
   if(!process.env.RESEND_API_KEY)fail('Le service courriel est indisponible.',503);
   const result=await transaction(async db=>{
    const {p,login,items}=await preview(req,db);if(p.version!==b.version||login!==b.login)fail('Le parcours ou le matricule a changé. Rouvrez la préparation du courriel.',409);
-   const dedupe='campus:'+p.id+':'+p.version+':'+login+':'+email+':guide-v2';
+   const dedupe='campus:'+p.id+':'+p.version+':'+login+':'+email+':guide-images-v3';
    const existing=(await db.query('SELECT id,dedupe,status FROM training_mail WHERE id=$1 OR dedupe=$2',[b.requestId,dedupe])).rows;
    if(existing.some(e=>e.id===b.requestId&&e.dedupe!==dedupe))fail('Cette référence correspond à un autre envoi.',409);
    if(existing.length)return {queued:true,id:existing[0].id,status:existing[0].status,alreadyQueued:true};

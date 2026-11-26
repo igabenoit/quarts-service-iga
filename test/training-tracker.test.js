@@ -1,4 +1,4 @@
-import {campusLogin,campusLink,campusItems,campusInstructions} from '../campus-training.js';
+import {campusLogin,campusLink,campusItems,campusInstructions,campusEmailPayload} from '../campus-training.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -72,7 +72,7 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true,login:'m08327e999999'})).status,409);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
-  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].payload.text,testJobs[0].payload.text);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);assert.match(jobs[0].payload.text,/COMMENT ACCÉDER/);assert.match(jobs[0].payload.text,/loupe en haut à droite/);
+  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].payload.text,testJobs[0].payload.text);assert.equal(jobs[0].payload.html,testJobs[0].payload.html);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);assert.match(jobs[0].payload.text,/COMMENT ACCÉDER/);assert.match(jobs[0].payload.text,/loupe en haut à droite/);
   assert.equal((await db.query("SELECT * FROM training_events WHERE action='campus.reset.confirmed'")).rows.length,1);
   employees[0].departments=[9];assert.equal((await call('/plans/'+p.id,null,'manager')).status,403);assert.equal((await (await call('',null,'manager')).json()).plans.length,0);
  }finally{if(old===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=old;await new Promise(r=>server.close(r));await db.close();}
@@ -106,4 +106,13 @@ test('GO Service instructions select the exact curriculum for Service and other 
  const general=campusItems([{title:'Formation GO Service - Rayon du Service',platform:'campus'}],dir,{departments:[8]},8);assert.equal(general[0].title,'Formation GO Service');assert.doesNotMatch(campusInstructions(general).join(' '),/Rayon du Service/);
  assert.equal(campusItems(list,dir,{departments:[1,8]},8)[0].title,'Formation GO Service - Rayon du Service');
  const other=[{title:'SIMDUT',platform:'campus'}];assert.deepEqual(campusItems(other,dir,{departments:[8]},8),other);assert.doesNotMatch(campusInstructions(other).join(' '),/Go service/);
+});
+
+test('Campus illustrated emails keep text fallback and show the correct screenshots',()=>{
+ const p={employee_name:'Test <script>alert(1)</script>',due_date:'2027-01-01'};
+ const general=campusEmailPayload(p,'m08327e001234',[{title:'Formation GO Service',platform:'campus'}],'test@example.invalid');
+ assert.equal((general.html.match(/<img /g)||[]).length,2);assert.match(general.html,/accueil-fleche.png/);assert.match(general.html,/recherche-generale.png/);assert.doesNotMatch(general.html,/service-complete.png|recherche-service.png|<script>/);assert.match(general.html,/&lt;script&gt;/);assert.match(general.text,/loupe en haut à droite/);
+ const service=campusEmailPayload(p,'m08327e001234',[{title:'Formation GO Service - Rayon du Service',platform:'campus'}],'test@example.invalid');
+ assert.equal((service.html.match(/<img /g)||[]).length,3);assert.match(service.html,/recherche-service.png/);assert.match(service.html,/service-complete.png/);assert.match(service.html,/EXEMPLE DU RÉSULTAT ATTENDU/);assert.doesNotMatch(service.html,/recherche-generale.png/);
+ const other=campusEmailPayload(p,'m08327e001234',[{title:'SIMDUT',platform:'campus'}],'test@example.invalid');assert.equal((other.html.match(/<img /g)||[]).length,1);
 });
