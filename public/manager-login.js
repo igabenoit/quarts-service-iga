@@ -1,5 +1,7 @@
 import {passkeyDestination} from './passkey-destination.js';
 const $=s=>document.querySelector(s);
+const returnTo=new URLSearchParams(location.search).get('returnTo');
+if(returnTo)$('#managerPasskey').href='/connexion-employe?returnTo='+encodeURIComponent(returnTo);
 $('#managerLogin').onsubmit=async event=>{
   event.preventDefault();$('#connectAccount').disabled=true;$('#loginStatus').textContent='Connexion…';
   try{
@@ -7,7 +9,7 @@ $('#managerLogin').onsubmit=async event=>{
     const data=await response.json();if(!response.ok)throw Error(data.error);$('#accountPassword').value='';
     const sessionResponse=await fetch('/api/session',{cache:'no-store'});
     if(!sessionResponse.ok)throw Error('Impossible de vérifier vos accès. Réessayez.');
-    location.assign(passkeyDestination(null,await sessionResponse.json(),location.origin));
+    location.assign(passkeyDestination(returnTo,await sessionResponse.json(),location.origin));
   }catch(error){$('#loginStatus').textContent=error.message;}
   finally{$('#connectAccount').disabled=false;}
 };

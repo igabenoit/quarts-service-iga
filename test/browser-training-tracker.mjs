@@ -1,0 +1,19 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {liveAppFixture} from './live-app-fixture.mjs';
+const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||'playwright');
+const f=await liveAppFixture({employeeVault:true});let browser;
+try{
+ const admin=(await f.call('POST','/api/login',{body:{code:'audit-admin-test'}})).cookie;
+ const meta=(await f.call('GET','/api/departments/meta',{cookie:admin})).body,dep=meta.departments.find(d=>d.key==='charcuterie').id;
+ const person=await f.call('POST','/api/departments/people',{cookie:admin,body:{name:'Camille — essai fictif',group:'regular',active:true,departments:[dep],availability:{},employeeCode:'770021'}});assert.equal(person.status,200);
+ browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});const page=await browser.newPage({viewport:{width:390,height:844},isMobile:true,deviceScaleFactor:1}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.context().addCookies([{name:admin.split('=')[0],value:admin.slice(admin.indexOf('=')+1),url:f.base}]);
+ await page.goto(f.base+'/formations');await page.getByRole('button',{name:'Listes de formations',exact:true}).click();await page.getByRole('button',{name:'Créer une liste'}).click();
+ await page.getByLabel('Titre de la liste').fill('Embauche — charcuterie');await page.getByLabel('Formation 1', {exact:true}).fill('Utilisation des couteaux');await page.getByRole('button',{name:'Enregistrer la liste'}).click();await page.waitForSelector('#modal:not([open])',{state:'attached'});
+ await page.getByRole('button',{name:'Suivi des employés',exact:true}).click();await page.getByRole('button',{name:'Attribuer des formations'}).click();await page.locator('#assign-form select[name=listId]').selectOption({label:'Embauche — charcuterie'});await page.getByLabel('Date limite').fill('2027-01-10');await page.getByLabel('Camille — essai fictif').check();await page.getByRole('button',{name:'Attribuer',exact:true}).click();await page.waitForSelector('#modal:not([open])',{state:'attached'});
+ assert.equal(await page.locator('#cards article').count(),1);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:process.env.TRAINING_SCREENSHOT||'../training-mobile.png',fullPage:true});
+ await page.getByRole('button',{name:'Voir les formations'}).click();await page.getByRole('button',{name:'Commencer / terminer'}).click();await page.locator('#progress-form select[name=status]').selectOption('done');await page.getByLabel('Formation donnée par').fill('Formateur fictif');await page.getByRole('button',{name:'Enregistrer',exact:true}).click();await page.getByRole('button',{name:'Modifier le suivi'}).waitFor();assert.match(await page.locator('#dialog-content').innerText(),/Terminée le/);
+ await page.getByRole('button',{name:'Joindre une preuve'}).click();await page.getByLabel('Document ou photo').setInputFiles({name:'preuve-fictive.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7\npreuve fictive\n%%EOF')});await page.getByRole('button',{name:'Enregistrer la preuve'}).click();await page.getByRole('link',{name:'preuve-fictive.pdf'}).waitFor();
+ await page.screenshot({path:process.env.TRAINING_DETAIL_SCREENSHOT||'../training-mobile-detail.png',fullPage:true});await page.getByRole('button',{name:'Fermer',exact:true}).click();await page.reload();await page.getByRole('button',{name:'Voir les formations'}).waitFor();assert.match(await page.locator('#cards').innerText(),/1 \/ 1/);assert.deepEqual(errors,[]);console.log('Mobile 390 px: create list, assign, complete, upload proof, reload persisted state, no overflow or JS error.');
+}finally{await browser?.close();await f.close();}

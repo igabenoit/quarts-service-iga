@@ -50,7 +50,7 @@ if(path==='/horaire-famille'){
  const user=session?.user;
  if(user){
   const admin=user.kind==='admin';
-  const items=[['Dossiers d’employés','/dossiers-employes'],['Mesures disciplinaires','/dossiers-employes#mesures'],['Horaires des départements','/departements'],
+  const items=[['Dossiers d’employés','/dossiers-employes'],['Formations des employés','/formations'],['Mesures disciplinaires','/dossiers-employes#mesures'],['Horaires des départements','/departements'],
    ['Gestion des congés','/conges-gestion'],['Gestion des disponibilités','/disponibilites-gestion']];
   if(!admin)items.push(['Horaires de mon département','/horaires-departements?vue=gerant']);
   if(admin&&user.authentication==='passkey'&&Number(user.personId)===69574)items.splice(2,0,['Affichage de poste TUAC','/affichages-tuac']);

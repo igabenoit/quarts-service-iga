@@ -1,4 +1,4 @@
-const allowed=new Set(['/affichages-tuac','/','/index.html','/sst','/departements','/acces','/acces-famille','/courriels','/conges-gestion','/disponibilites-gestion','/chandails-gestion','/horaires-departements','/horaire','/conges','/disponibilites','/chandails','/discussion','/dossiers-employes','/cles-employes']);
+const allowed=new Set(['/formations','/affichages-tuac','/','/index.html','/sst','/departements','/acces','/acces-famille','/courriels','/conges-gestion','/disponibilites-gestion','/chandails-gestion','/horaires-departements','/horaire','/conges','/disponibilites','/chandails','/discussion','/dossiers-employes','/cles-employes']);
 
 export function passkeyDestination(returnTo,session,origin){
   const kind=session?.user?.kind;
