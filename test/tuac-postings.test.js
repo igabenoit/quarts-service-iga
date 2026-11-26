@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import {PGlite} from '@electric-sql/pglite';
+import {randomUUID} from 'node:crypto';
+import {installTuacPostings,endDate,fields,documentPdf} from '../tuac-postings.js';
+const sample={department:'D',reference:'D-01',job:'Commis épicerie',employmentStatus:'Partiel',startDate:'2026-11-26',supervisor:'Responsable fictif',requirements:'Jour, soirs et fins de semaine',candidates:''};
+test('TUAC dates, leap year, invalid dates and multi-page PDF',()=>{assert.equal(endDate('2026-12-28'),'2027-01-04');assert.equal(endDate('2028-02-26'),'2028-03-04');assert.throws(()=>endDate('2026-02-30'));assert.throws(()=>fields({...sample,reference:'G-01'}));assert.equal(fields(sample).endDate,'2026-12-03');const pdf=documentPdf(fields({...sample,requirements:'Exigences du poste. '.repeat(250)}),'affichage');assert.ok(pdf.toString().startsWith('%PDF-'));assert.ok(Number(pdf.toString().match(/\/Count (\d+)/)[1])>=2);assert.throws(()=>documentPdf(fields(sample),'nomination'));});
+test('TUAC owner-only CRUD, stale edits, private PDF, immutable history and email idempotency',async()=>{
+ const db=new PGlite(),app=express();app.use(express.json());let calls=0,lastMail;
+ const auth=(req,res,next)=>{if(!req.get('x-test-user'))return res.status(401).end();req.ef={admin:req.get('x-test-user')!=='manager',manager:{personId:Number(req.get('x-test-user')),authentication:req.get('x-test-auth')||'passkey'},audit:{name:'Fictif'}};res.set('Cache-Control','private, no-store');next();};
+ const origin=(req,res,next)=>req.get('x-employee-files')==='1'?next():res.status(403).end();const wrap=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.status||500).json({error:e.message});}};
+ await installTuacPostings(app,{pool:{query:(sql,args)=>args?db.query(sql,args):sql.includes('CREATE TABLE')?db.exec(sql):db.query(sql)},auth,origin,wrap,transaction:fn=>db.transaction(fn),fetchImpl:async(_url,opts)=>{calls++;lastMail=JSON.parse(opts.body);return {ok:true};}});
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base='http://127.0.0.1:'+server.address().port+'/api/employee-files/tuac';
+ const call=(path='',body,user='69574',extra={})=>fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(user?{'x-test-user':user}:{}),'x-employee-files':'1',...extra},body:body?JSON.stringify(body):undefined});
+ const oldKey=process.env.RESEND_API_KEY;process.env.RESEND_API_KEY='mock-only';
+ try{
+  assert.equal((await call('',null,null)).status,401);
+  for(const user of ['manager','72034']){assert.equal((await call('',null,user)).status,403);assert.equal((await call('',sample,user)).status,403);}
+  assert.equal((await call('',null,'69574',{'x-test-auth':'legacy'})).status,403);
+  assert.equal((await call('',sample,'69574',{'x-employee-files':''})).status,403);
+  let r=await call('',sample);assert.equal(r.status,201);const {id}=await r.json();assert.equal((await call('',sample)).status,409);
+  assert.equal((await call('/'+id+'/nomination/pdf')).status,400);
+  r=await call('/'+id+'/affichage/pdf');assert.equal(r.status,200);assert.match(r.headers.get('cache-control'),/no-store/);assert.match(await r.text(),/^%PDF-/);
+  const updated={...sample,version:1,nomination:{employee:'Personne fictive',effectiveDate:'2026-12-04'}};
+  assert.equal((await call('/'+id,updated)).status,200);assert.equal((await call('/'+id,updated)).status,409);
+  assert.equal((await call('/'+id+'/nomination/pdf')).status,200);
+  for(const suffix of ['/history','/affichage/pdf','/nomination/pdf'])assert.equal((await call('/'+id+suffix,null,'72034')).status,403);
+  assert.equal((await call('/'+id,{...updated,version:2},'72034')).status,403);
+  const mail={requestId:randomUUID(),version:2,to:'test@example.invalid'};
+  assert.equal((await call('/'+id+'/nomination/email',mail,'manager')).status,403);
+  assert.equal((await call('/'+id+'/nomination/email',{...mail,to:'bad'})).status,400);
+  assert.equal((await call('/'+id+'/nomination/email',mail)).status,200);assert.equal((await call('/'+id+'/nomination/email',mail)).status,200);assert.equal(calls,1);assert.equal(lastMail.attachments.length,1);assert.match(Buffer.from(lastMail.attachments[0].content,'base64').toString(),/^%PDF-/);
+  assert.equal((await call('/'+id+'/nomination/email',{...mail,to:'other@example.invalid'})).status,409);
+  const history=await (await call('/'+id+'/history')).json();assert.equal(history.history.length,2);assert.equal(history.history[1].data.nomination,null);assert.equal(history.mail[0].status,'sent');
+ }finally{if(oldKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=oldKey;await new Promise(r=>server.close(r));await db.close();}
+});
