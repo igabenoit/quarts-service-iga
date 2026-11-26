@@ -1,3 +1,4 @@
+import {installCampusTraining,campusLink} from './campus-training.js';
 import {randomUUID} from 'node:crypto';
 import {installDocumentUploads} from './document-uploads.js';
 import {sstFileMime} from './sst.js';
@@ -40,6 +41,7 @@ export async function installTrainingTracker(app,{pool,sourcePool,auth,origin,wr
  const base='/api/employee-files/formations';
  const audit=(db,a,action,data,planId=null)=>db.query('INSERT INTO training_events(plan_id,action,actor,data) VALUES($1,$2,$3,$4)',[planId,action,json(a.audit),json(data)]);
  async function plan(a,id,db=pool){allowed(a);if(!uuid(id))fail('Parcours introuvable.',404);const p=(await db.query('SELECT *,due_date::text AS due_date FROM training_plans WHERE id=$1',[id])).rows[0];if(!p||!scope(a,p.department_id))fail('Parcours inaccessible.',404);const dir=await directory();const e=dir.employees.find(e=>e.key===p.employee_key);if(!a.admin&&(!e||!e.departments.map(Number).includes(Number(p.department_id))))fail('Cet employé a changé de département.',403);return p;}
+ installCampusTraining(app,{base,pool,sourcePool,auth,origin,wrap,transaction,directory,plan,audit});
  async function references(department){return (await sourcePool.query(`SELECT d.id,d.name,r.title FROM sst_visible_documents d JOIN sst_records r ON r.id=d.record_id WHERE r.kind='equipment' AND r.department_id=$1 AND r.archived_at IS NULL AND d.archived_at IS NULL AND d.mime='application/pdf' ORDER BY r.title,d.name`,[department])).rows;}
  app.get(base,auth,wrap(async(req,res)=>{
   const a=req.ef;allowed(a);const dir=await directory(),deps=dir.departments.filter(d=>scope(a,d.id)),ids=deps.map(d=>Number(d.id));
@@ -54,7 +56,7 @@ export async function installTrainingTracker(app,{pool,sourcePool,auth,origin,wr
  app.post(base+'/lists',auth,origin,wrap(async(req,res)=>{
   admin(req.ef);const b=req.body||{},dep=Number(b.departmentId),dir=await directory();if(!dir.departments.some(d=>Number(d.id)===dep))fail('Choisissez un département.');
   if(!txt(b.title)||!Array.isArray(b.items)||!b.items.length||b.items.length>60||b.items.some(i=>!txt(i.title)))fail('Ajoutez un titre et au moins une formation.');
-  const docs=await references(dep);const items=b.items.map(i=>({id:uuid(i.id)?i.id:randomUUID(),title:txt(i.title),documentId:i.documentId||null}));
+  const docs=await references(dep);const items=b.items.map(i=>({id:uuid(i.id)?i.id:randomUUID(),title:txt(i.title),documentId:i.documentId||null,...(i.platform==='campus'?{platform:'campus',url:campusLink(i.url)}:{})}));
   if(new Set(items.map(i=>i.id)).size!==items.length||items.some(i=>i.documentId&&!docs.some(d=>d.id===i.documentId)))fail('Vérifiez les fiches de ce département.');
   const id=await transaction(async db=>{const id=b.id||randomUUID();if(!uuid(id))fail('Liste invalide.');if(b.id){const prior=(await db.query('SELECT * FROM training_lists WHERE id=$1',[id])).rows[0];if(!prior||prior.version!==b.version)fail('Cette liste a changé. Actualisez.',409);if(Number(prior.department_id)!==dep)fail('Le département ne peut pas être modifié.');await db.query('UPDATE training_lists SET title=$2,items=$3,version=version+1,archived=$4 WHERE id=$1',[id,txt(b.title),json(items),b.archived===true]);}else await db.query('INSERT INTO training_lists(id,department_id,title,items) VALUES($1,$2,$3,$4)',[id,dep,txt(b.title),json(items)]);await audit(db,req.ef,'list.saved',{id,departmentId:dep,title:txt(b.title),items});return id;});res.json({id});
  }));
