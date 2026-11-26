@@ -3,6 +3,12 @@ import {jsPDF} from 'jspdf';
 
 export const tuacOwnerId=69574;
 export const departments={A:'BOUCHERIE',B:'POISSONNERIE',C:'CHARCUTERIE',D:'ÉPICERIE',E:'FRUITS ET LÉGUMES',F:'BOULANGERIE',G:'COMMIS EMBALLEURS',H:'COMMIS CAISSE',M:'PRÊT-À-MANGER'};
+const directoryDepartments={A:['viande','boucherie'],B:['poissonnerie'],C:['charcuterie'],D:['epicerie'],E:['fruitslegumes','fruitsetlegumes'],F:['boulangerie'],G:['service'],H:['service'],M:['pretamanger']};
+const normalized=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z]/g,'');
+export function departmentEmployees(directory,department){
+ const ids=directory.departments.filter(d=>d.active!==false&&directoryDepartments[department]?.includes(normalized(d.code||d.name))).map(d=>Number(d.id));
+ return directory.employees.filter(e=>e.active&&e.departments.some(id=>ids.includes(Number(id)))).map(e=>({key:e.key,name:e.name,matricule:e.matricule||null})).sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+}
 export const tuacSchemaSQL=`CREATE TABLE IF NOT EXISTS tuac_postings(id uuid PRIMARY KEY,reference text NOT NULL UNIQUE,department text NOT NULL,data jsonb NOT NULL,version integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS tuac_posting_history(id bigserial PRIMARY KEY,posting_id uuid NOT NULL REFERENCES tuac_postings(id),version integer NOT NULL,data jsonb NOT NULL,actor jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(posting_id,version));
 CREATE TABLE IF NOT EXISTS tuac_posting_mail(id uuid PRIMARY KEY,posting_id uuid NOT NULL REFERENCES tuac_postings(id),fingerprint text NOT NULL,payload jsonb NOT NULL,status text NOT NULL DEFAULT 'pending',created_at timestamptz NOT NULL DEFAULT now());
@@ -19,7 +25,7 @@ export function fields(b){
  const reference=text(b.reference,40,true);if(!new RegExp('^'+department+'-[A-Za-z0-9-]+$').test(reference))fail('Le numéro doit commencer par '+department+'- (ex. '+department+'-01).');
  if(!['Partiel','Régulier'].includes(b.employmentStatus))fail('Choisissez le statut.');
  const startDate=text(b.startDate,10,true),closeDate=endDate(startDate);
- let nomination=null;if(b.nomination){const effectiveDate=text(b.nomination.effectiveDate,10,true);endDate(effectiveDate);nomination={employee:text(b.nomination.employee,180,true),effectiveDate};}
+ let nomination=null;if(b.nomination){const effectiveDate=text(b.nomination.effectiveDate,10,true);endDate(effectiveDate);nomination={employee:text(b.nomination.employee,180,true),effectiveDate,...(b.nomination.employeeKey?{employeeKey:text(b.nomination.employeeKey,100,true)}:{})};}
  return {department,reference,job:text(b.job,180,true),employmentStatus:b.employmentStatus,startDate,endDate:closeDate,supervisor:text(b.supervisor,180,true),requirements:text(b.requirements,6000,true),candidates:text(b.candidates??'',6000),nomination};
 }
 export function documentPdf(data,kind){
@@ -39,14 +45,24 @@ export function documentPdf(data,kind){
  else line('Cette nomination est effective à compter de la date indiquée ci-dessus et sera consignée au dossier de l’employé(e).');
  return Buffer.from(doc.output('arraybuffer'));
 }
-export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction,fetchImpl=fetch}){
+export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction,directory,fetchImpl=fetch}){
  if(pool&&!process.env.VERCEL)await pool.query(tuacSchemaSQL);
  const base='/api/employee-files/tuac';
  const owner=(req,res,next)=>{if(!req.ef.admin||req.ef.manager?.authentication!=='passkey'||Number(req.ef.manager?.personId)!==tuacOwnerId)return res.status(403).json({error:'Cette section est réservée à Marc-André Benoit pour le moment.'});next();};
  const get=async(id,db=pool)=>{if(!uuid(id))fail('Affichage introuvable.',404);const r=(await db.query('SELECT * FROM tuac_postings WHERE id=$1',[id])).rows[0];if(!r)fail('Affichage introuvable.',404);return r;};
+ const employees=async department=>{if(!directory)fail('La liste des employés est temporairement indisponible.',503);return departmentEmployees(await directory(),department);};
+ const resolveNomination=async(b,previous)=>{
+  if(!b.nomination)return b;
+  // Preserve the saved snapshot when editing only the posting, including legacy nominations.
+  if(previous&&JSON.stringify(b.nomination)===JSON.stringify(previous.nomination))return b;
+  const employee=(await employees(b.department)).find(e=>e.key===b.nomination.employeeKey);
+  if(!employee)fail('Choisissez un employé actif du département de cet affichage.');
+  return {...b,nomination:{employeeKey:employee.key,employee:employee.name,effectiveDate:b.nomination.effectiveDate}};
+ };
+ app.get(base+'/:id/employees',auth,owner,wrap(async(req,res)=>{const r=await get(req.params.id);res.json({employees:await employees(r.department)});}));
  app.get(base,auth,owner,wrap(async(req,res)=>res.json({departments,today:today(),records:(await pool.query('SELECT * FROM tuac_postings ORDER BY created_at DESC')).rows,mailEnabled:!!process.env.RESEND_API_KEY})));
  app.post(base,auth,owner,origin,wrap(async(req,res)=>{
-  const data=fields({...req.body,reference:req.body?.department+'-01'}),id=randomUUID();
+  const data=fields(await resolveNomination({...req.body,reference:req.body?.department+'-01'})),id=randomUUID();
   await transaction(async db=>{
    // Serialize allocation with insertion so simultaneous saves never share a number.
    await db.query('SELECT pg_advisory_xact_lock(835110)');
@@ -61,7 +77,7 @@ export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction
  app.post(base+'/:id',auth,owner,origin,wrap(async(req,res)=>{
   await transaction(async db=>{const old=await get(req.params.id,db);if(old.version!==req.body.version)fail('Le document a changé. Rechargez-le avant de modifier.',409);
    if(req.body.department!==old.department)fail('Le département est lié au numéro attribué. Créez un affichage dans le nouveau département.');
-   const data=fields({...req.body,department:old.department,reference:old.reference});
+   const data=fields(await resolveNomination({...req.body,department:old.department,reference:old.reference},old.data));
    await db.query('UPDATE tuac_postings SET data=$2,version=version+1,updated_at=now() WHERE id=$1',[old.id,JSON.stringify(data)]);
    await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,$2,$3,$4)',[old.id,old.version+1,JSON.stringify(data),JSON.stringify(req.ef.audit)]);
   });res.json({ok:true});
