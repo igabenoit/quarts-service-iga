@@ -68,6 +68,20 @@ test('discipline: scoped records, immutable revisions and exact PDF recovery in 
   assert.equal((await a('POST','discipline/'+foreign.id+'/baseline',{version:2,level:5,note:'Historique vérifié'})).status,409);
   const afterLegacy=ok(await a('POST','discipline',{...body,employeeKey:persons[1].key,status:'filed'}),201);
   assert.equal(ok(await a('GET','discipline/'+afterLegacy.id)).approval.level,6);
+  assert.equal((await m('POST','discipline/'+afterLegacy.id+'/gradation',{version:1,level:4,note:'Correction'})).status,403);
+  assert.equal((await a('POST','discipline/'+afterLegacy.id+'/gradation',{version:1,level:12,note:'Correction'})).status,400);
+  assert.equal((await a('POST','discipline/'+afterLegacy.id+'/gradation',{version:1,level:4,note:''})).status,400);
+  // Correct an already approved historical level, then a pending proposal.
+  ok(await a('POST','discipline/'+foreign.id+'/gradation',{version:2,level:3,note:'Relecture des avis antérieurs'}),201);
+  ok(await a('POST','discipline/'+afterLegacy.id+'/gradation',{version:1,level:4,note:'Premier avertissement écrit retenu'}),201);
+  assert.equal((await a('POST','discipline/'+afterLegacy.id+'/gradation',{version:1,level:5,note:'Écran périmé'})).status,409);
+  const graded=ok(await a('GET','discipline/'+afterLegacy.id));
+  assert.equal(graded.approval.level,4);assert.equal(graded.approval.status,'approved');assert.equal(graded.approval.mail_status,'not_required');
+  assert.equal(graded.history[1].approval.level,6);assert.equal(graded.history[1].approval.status,'cancelled');
+  assert.equal(graded.measure.measure_type,'written');
+  assert.equal((await a('POST','discipline/'+afterLegacy.id+'/decision',{version:1,status:'approved'})).status,409);
+  const following=ok(await a('POST','discipline',{...body,employeeKey:persons[1].key,status:'filed'}),201);
+  assert.equal(ok(await a('GET','discipline/'+following.id)).approval.level,5);
   const doc=new jsPDF();doc.text('Document fictif pour verification du depot et de la relecture.',15,20);const bytes=Buffer.from(doc.output('arraybuffer'));
   const digest=createHash('sha256').update(bytes).digest('hex'),upload=randomUUID(),url='discipline/'+id+'/attachments/uploads/'+upload+'?version=3';
   ok(await m('POST',url,{name:'avis-fictif.pdf',size:bytes.length,sha256:digest}),201);
@@ -81,14 +95,20 @@ test('discipline: scoped records, immutable revisions and exact PDF recovery in 
   assert.equal((await m('GET','discipline/'+foreign.id+'/attachments/'+receipt.id)).status,404);
   assert.equal((await call(employee,'GET',filePath)).status,403);
   const pdf=await m('GET','discipline/'+id+'/pdf');assert.equal(pdf.status,200);assert.match(pdf.body,/^%PDF-/);
+  ok(await a('POST','discipline/'+id+'/gradation',{version:3,level:2,note:'Deuxième avis verbal confirmé'}),201);
+  const revised=ok(await m('GET','discipline/'+id));
+  assert.equal(revised.approval.level,2);assert.equal(revised.history[1].approval.level,1);
+  assert.equal(revised.history[1].approval.status,'approved');assert.equal(revised.attachments[0].id,receipt.id);
+  assert.equal(revised.measure.facts,detail.measure.facts);
   // In-place edits and deletion cannot rewrite the historical record.
   await assert.rejects(f.query('UPDATE employee_file_discipline SET title=$1 WHERE case_id=$2',['Changed',id],{vault:true}),/append-only/);
   await assert.rejects(f.query('DELETE FROM employee_file_discipline_attachments WHERE id=$1',[receipt.id],{vault:true}),/append-only/);
-  assert.equal((await m('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'})).status,409);
-  ok(await a('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'}),201);
-  assert.equal(ok(await m('GET','discipline/'+id)).history.length,4);
-  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:4})).status,409);
-  assert.equal((await m('POST','discipline/'+id+'/attachments/uploads/'+randomUUID()+'?version=4',{name:'avis.pdf',size:bytes.length,sha256:digest})).status,409);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{version:4,status:'withdrawn',reason:'Retrait fictif'})).status,409);
+  ok(await a('POST','discipline/'+id+'/revisions',{version:4,status:'withdrawn',reason:'Retrait fictif'}),201);
+  assert.equal(ok(await m('GET','discipline/'+id)).history.length,5);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:5})).status,409);
+  assert.equal((await a('POST','discipline/'+id+'/gradation',{version:5,level:1,note:'Retiré'})).status,409);
+  assert.equal((await m('POST','discipline/'+id+'/attachments/uploads/'+randomUUID()+'?version=5',{name:'avis.pdf',size:bytes.length,sha256:digest})).status,409);
   await f.query('UPDATE schedule_manager_accounts SET active=FALSE WHERE id=$1',[accountId]);
   assert.equal((await m('GET','discipline/'+id)).status,401);
   assert.equal((await m('GET',filePath)).status,401);

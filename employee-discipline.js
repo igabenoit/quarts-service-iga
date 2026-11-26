@@ -72,7 +72,10 @@ export async function installEmployeeDiscipline(app,{pool,auth,origin,wrap,trans
  }));
  app.get(base+'/:id',auth,wrap(async(req,res)=>{
   const {row,e}=await current(req.ef,req.params.id);
-  const history=(await pool.query('SELECT *,occurred_on::text AS occurred_on,follow_up_on::text AS follow_up_on FROM employee_file_discipline WHERE case_id=$1 ORDER BY version DESC',[row.case_id])).rows;
+  const history=(await pool.query(`SELECT d.*,d.occurred_on::text AS occurred_on,d.follow_up_on::text AS follow_up_on,
+   CASE WHEN a.revision_id IS NOT NULL THEN jsonb_build_object('level',a.level,'status',a.status,'decision_actor',a.decision_actor,'decision_note',a.decision_note,'decided_at',a.decided_at) END AS approval
+   FROM employee_file_discipline d LEFT JOIN employee_discipline_approvals a ON a.revision_id=d.id
+   WHERE d.case_id=$1 ORDER BY d.version DESC`,[row.case_id])).rows;
   const attachments=(await pool.query('SELECT id,revision_id,name,size,sha256,actor,created_at FROM employee_file_discipline_attachments WHERE case_id=$1 ORDER BY created_at,id',[row.case_id])).rows;
   res.json({measure:row,approval:await approval(pool,row.id),employee:{key:e.key,name:e.name},history,attachments,types,statuses});
  }));
@@ -87,6 +90,25 @@ export async function installEmployeeDiscipline(app,{pool,auth,origin,wrap,trans
    }
    return insert(db,req.ef,row.case_id,row.employee_key,fields(req.body,row),row);
   }));
+ }));
+ app.post(base+'/:id/gradation',auth,origin,wrap(async(req,res)=>{
+  if(!req.ef.admin||req.ef.view!=='direction')fail('La modification de la gradation est réservée à la direction.',403);
+  const b=req.body||{},level=Number(b.level),note=text(b.note??'',2000);
+  if(!Number.isInteger(level)||level<1||level>11||!note)fail('Choisissez un palier et indiquez le motif du changement.');
+  const result=await transaction(async db=>{
+   const {row}=await current(req.ef,req.params.id,db),review=await approval(db,row.id);
+   if(row.version!==b.version)fail('Cet avis a changé. Rechargez-le avant de modifier sa gradation.',409);
+   if(row.status!=='filed')fail('Seul un avis au dossier peut changer de gradation.',409);
+   if(review?.status==='approved'&&review.level===level)fail('Ce palier est déjà approuvé.',409);
+   const id=randomUUID(),version=row.version+1,type=level<=3?'verbal':level<=5?'written':[6,7,9].includes(level)?'suspension':'other';
+   // Keep the original decision and content; the correction is a new immutable revision.
+   await db.query(`INSERT INTO employee_file_discipline(id,case_id,version,employee_key,occurred_on,measure_type,title,facts,expectations,follow_up_on,status,reason,actor,supersedes,department_id)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'filed',$11,$12,$13,$14)`,[id,row.case_id,version,row.employee_key,row.occurred_on,type,row.title,row.facts,row.expectations,row.follow_up_on,'Modification de la gradation : '+note,JSON.stringify(req.ef.audit),row.id,row.department_id]);
+   if(review?.status==='pending')await db.query("UPDATE employee_discipline_approvals SET status='cancelled',decision_actor=$2,decision_note=$3,decided_at=clock_timestamp() WHERE revision_id=$1",[row.id,JSON.stringify(req.ef.audit),'Remplacé par une gradation approuvée : '+note]);
+   await db.query("INSERT INTO employee_discipline_approvals(revision_id,employee_key,level,status,decision_actor,decision_note,decided_at,mail_status) VALUES($1,$2,$3,'approved',$4,$5,clock_timestamp(),'not_required')",[id,row.employee_key,level,JSON.stringify(req.ef.audit),note]);
+   await event(db,req.ef,'discipline.level-changed',{caseId:row.case_id,revisionId:id,previousRevisionId:row.id,fromLevel:review?.level??null,toLevel:level,note});
+   return {id:row.case_id,version};
+  });res.status(201).json(result);
  }));
  app.post(base+'/:id/baseline',auth,origin,wrap(async(req,res)=>{
   if(!req.ef.admin||req.ef.view!=='direction')fail('Classement réservé à la direction.',403);
