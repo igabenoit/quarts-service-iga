@@ -8,6 +8,7 @@ import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
 import {employeeFilesStorage,previewEmployeeFilesStorage} from './employee-files-storage.js';
 import {sendDisciplineMail} from './discipline-approval.js';
+import {sendTuacExpiryReminders} from './tuac-reminders.js';
 import {clearExpiredDocuments,sstImportUploads} from './document-uploads.js';
 import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
@@ -877,6 +878,7 @@ export function runPeriodicTasks(executionId) {
     photoUploads:()=>clearExpiredPhotoUploads(pool),
     documentUploads:clearDocumentUploads,
     discipline:()=>sendDisciplineMail(employeeVault.pool),
+    tuacExpiry:()=>sendTuacExpiryReminders(employeeVault.pool),
     ...leaveAccess.periodic,
     ...(onboardingReminders ? {onboarding:onboardingReminders} : {}),
     notifications:chatPush.drain,

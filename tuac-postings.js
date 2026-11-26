@@ -1,6 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {jsPDF} from 'jspdf';
 import {tuacLogo,igaLogo} from './tuac-logos.js';
+import {tuacReminderSchemaSQL,tuacSender} from './tuac-reminders.js';
 
 export const tuacOwnerId=69574;
 export const departments={A:'BOUCHERIE',B:'POISSONNERIE',C:'CHARCUTERIE',D:'ÉPICERIE',E:'FRUITS ET LÉGUMES',F:'BOULANGERIE',G:'COMMIS EMBALLEURS',H:'COMMIS CAISSE',M:'PRÊT-À-MANGER'};
@@ -13,6 +14,8 @@ export function departmentEmployees(directory,department){
 export const tuacSchemaSQL=`CREATE TABLE IF NOT EXISTS tuac_postings(id uuid PRIMARY KEY,reference text NOT NULL UNIQUE,department text NOT NULL,data jsonb NOT NULL,version integer NOT NULL DEFAULT 1,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS tuac_posting_history(id bigserial PRIMARY KEY,posting_id uuid NOT NULL REFERENCES tuac_postings(id),version integer NOT NULL,data jsonb NOT NULL,actor jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(posting_id,version));
 CREATE TABLE IF NOT EXISTS tuac_posting_mail(id uuid PRIMARY KEY,posting_id uuid NOT NULL REFERENCES tuac_postings(id),fingerprint text NOT NULL,payload jsonb NOT NULL,status text NOT NULL DEFAULT 'pending',created_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE tuac_posting_mail ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+ALTER TABLE tuac_posting_mail ADD COLUMN IF NOT EXISTS provider_id text;
 ALTER TABLE tuac_postings ENABLE ROW LEVEL SECURITY; ALTER TABLE tuac_posting_history ENABLE ROW LEVEL SECURITY; ALTER TABLE tuac_posting_mail ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON tuac_postings,tuac_posting_history,tuac_posting_mail FROM PUBLIC;
 DO $$ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON tuac_postings,tuac_posting_history,tuac_posting_mail FROM anon; END IF; IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON tuac_postings,tuac_posting_history,tuac_posting_mail FROM authenticated; END IF; END $$;`;
@@ -50,6 +53,7 @@ export function documentPdf(data,kind){
 }
 export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction,directory,fetchImpl=fetch}){
  if(pool&&!process.env.VERCEL)await pool.query(tuacSchemaSQL);
+ if(pool&&!process.env.VERCEL)await pool.query(tuacReminderSchemaSQL);
  const base='/api/employee-files/tuac';
  const owner=(req,res,next)=>{if(!req.ef.admin||req.ef.manager?.authentication!=='passkey'||Number(req.ef.manager?.personId)!==tuacOwnerId)return res.status(403).json({error:'Cette section est réservée à Marc-André Benoit pour le moment.'});next();};
  const get=async(id,db=pool)=>{if(!uuid(id))fail('Affichage introuvable.',404);const r=(await db.query('SELECT * FROM tuac_postings WHERE id=$1',[id])).rows[0];if(!r)fail('Affichage introuvable.',404);return r;};
@@ -63,7 +67,7 @@ export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction
   return {...b,nomination:{employeeKey:employee.key,employee:employee.name,effectiveDate:b.nomination.effectiveDate}};
  };
  app.get(base+'/:id/employees',auth,owner,wrap(async(req,res)=>{const r=await get(req.params.id);res.json({employees:await employees(r.department)});}));
- app.get(base,auth,owner,wrap(async(req,res)=>res.json({departments,today:today(),records:(await pool.query('SELECT * FROM tuac_postings ORDER BY created_at DESC')).rows,mailEnabled:!!process.env.RESEND_API_KEY})));
+ app.get(base,auth,owner,wrap(async(req,res)=>res.json({departments,today:today(),records:(await pool.query(`SELECT p.*,r.status AS reminder_status,r.sent_at AS reminder_sent_at FROM tuac_postings p LEFT JOIN tuac_expiry_reminders r ON r.posting_id=p.id AND r.end_date=(p.data->>'endDate')::date ORDER BY p.created_at DESC`)).rows,mailEnabled:!!process.env.RESEND_API_KEY})));
  app.post(base,auth,owner,origin,wrap(async(req,res)=>{
   const data=fields(await resolveNomination({...req.body,reference:req.body?.department+'-01'})),id=randomUUID();
   await transaction(async db=>{
@@ -85,7 +89,7 @@ export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction
    await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,$2,$3,$4)',[old.id,old.version+1,JSON.stringify(data),JSON.stringify(req.ef.audit)]);
   });res.json({ok:true});
  }));
- app.get(base+'/:id/history',auth,owner,wrap(async(req,res)=>{await get(req.params.id);res.json({history:(await pool.query('SELECT version,data,created_at FROM tuac_posting_history WHERE posting_id=$1 ORDER BY version DESC',[req.params.id])).rows,mail:(await pool.query("SELECT status,created_at,payload->'to' AS recipients,payload->>'subject' AS subject FROM tuac_posting_mail WHERE posting_id=$1 ORDER BY created_at DESC",[req.params.id])).rows});}));
+ app.get(base+'/:id/history',auth,owner,wrap(async(req,res)=>{await get(req.params.id);res.json({history:(await pool.query('SELECT version,data,created_at FROM tuac_posting_history WHERE posting_id=$1 ORDER BY version DESC',[req.params.id])).rows,mail:(await pool.query("SELECT status,created_at,sent_at,provider_id,payload->'to' AS recipients,payload->>'subject' AS subject FROM tuac_posting_mail WHERE posting_id=$1 ORDER BY created_at DESC",[req.params.id])).rows});}));
  app.get(base+'/:id/:kind/pdf',auth,owner,wrap(async(req,res)=>{const r=await get(req.params.id),bytes=documentPdf(r.data,req.params.kind);res.set({'Content-Type':'application/pdf','Content-Disposition':`inline; filename="${req.params.kind}-${r.reference}.pdf"`,'Cache-Control':'private, no-store'}).send(bytes);}));
  app.post(base+'/:id/:kind/email',auth,owner,origin,wrap(async(req,res)=>{
   if(!process.env.RESEND_API_KEY)fail('Le service de courriel est indisponible.',503);
@@ -94,13 +98,14 @@ export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction
   const r=await get(req.params.id),kind=req.params.kind,bytes=documentPdf(r.data,kind);
   if(r.version!==req.body.version)fail('Le document a changé. Rechargez-le.',409);
   const fingerprint=createHash('sha256').update(JSON.stringify([r.id,r.version,kind,to])).digest('hex');
-  const configuredSender=process.env.RESEND_FROM_EMAIL||process.env.RESEND_FROM||process.env.EMAIL_FROM||'onboarding@resend.dev';
-  const senderAddress=configuredSender.match(/<([^<>]+)>/)?.[1]||configuredSender.trim();
-  const payload={from:'IGA Famille Benoit 300-425 <'+senderAddress+'>',to,subject:(kind==='affichage'?'Affichage de poste':'Nomination de poste')+' '+r.reference+' — '+r.data.job,text:'Bonjour,\n\nVeuillez trouver le document en pièce jointe.\n\nIGA Extra Famille Benoit',attachments:[{filename:kind+'-'+r.reference+'.pdf',content:bytes.toString('base64')}]};
+  const payload={from:tuacSender(),to,subject:(kind==='affichage'?'Affichage de poste':'Nomination de poste')+' '+r.reference+' — '+r.data.job,text:'Bonjour,\n\nVeuillez trouver le document en pièce jointe.\n\nIGA Extra Famille Benoit',attachments:[{filename:kind+'-'+r.reference+'.pdf',content:bytes.toString('base64')}]};
   await pool.query('INSERT INTO tuac_posting_mail(id,posting_id,fingerprint,payload) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING',[requestId,r.id,fingerprint,JSON.stringify(payload)]);
-  const mail=(await pool.query('SELECT * FROM tuac_posting_mail WHERE id=$1',[requestId])).rows[0];if(mail.fingerprint!==fingerprint)fail('Cet envoi correspond à une autre version. Fermez puis rouvrez le formulaire.',409);if(mail.status==='sent')return res.json({ok:true});if(Date.now()-new Date(mail.created_at)>20*3600000)fail('Envoi ancien à vérifier dans la messagerie avant de recommencer.',409);
+  const mail=(await pool.query('SELECT * FROM tuac_posting_mail WHERE id=$1',[requestId])).rows[0];if(mail.fingerprint!==fingerprint)fail('Cet envoi correspond à une autre version. Fermez puis rouvrez le formulaire.',409);
+  const confirmation=m=>({ok:true,status:'sent',recipients:m.payload.to,subject:m.payload.subject,sentAt:m.sent_at||m.created_at,providerId:m.provider_id||null});
+  if(mail.status==='sent')return res.json(confirmation(mail));if(Date.now()-new Date(mail.created_at)>20*3600000)fail('Envoi ancien à vérifier dans la messagerie avant de recommencer.',409);
   let result;try{result=await fetchImpl('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(20000),headers:{Authorization:'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'tuac-'+requestId},body:JSON.stringify(mail.payload)});}catch{fail('Envoi non confirmé. Réessayez ici pour éviter un doublon.',502);}
   if(!result.ok)fail('Envoi non confirmé par le service. Réessayez ici.',502);
-  await pool.query("UPDATE tuac_posting_mail SET status='sent' WHERE id=$1",[requestId]);res.json({ok:true});
+  const accepted=await result.json();if(typeof accepted.id!=='string'||!accepted.id)fail('Envoi non confirmé. Réessayez ici pour vérifier sans doublon.',502);
+  const sent=(await pool.query("UPDATE tuac_posting_mail SET status='sent',sent_at=COALESCE(sent_at,clock_timestamp()),provider_id=$2 WHERE id=$1 RETURNING *",[requestId,accepted.id])).rows[0];res.json(confirmation(sent));
  }));
 }
