@@ -7,6 +7,7 @@ import {installCash} from './cash-order.js';
 import {installEthicsSource} from './onboarding/ethics-source.js';
 import {installEmployeeFiles} from './employee-files.js';
 import {employeeFilesStorage,previewEmployeeFilesStorage} from './employee-files-storage.js';
+import {sendDisciplineMail} from './discipline-approval.js';
 import {clearExpiredDocuments,sstImportUploads} from './document-uploads.js';
 import {installPreventionProgram} from './prevention-program.js';
 import {installEquipmentTraining} from './equipment-training.js';
@@ -875,6 +876,7 @@ export function runPeriodicTasks(executionId) {
     departures:departmentService.finishDueDepartures,
     photoUploads:()=>clearExpiredPhotoUploads(pool),
     documentUploads:clearDocumentUploads,
+    discipline:()=>sendDisciplineMail(employeeVault.pool),
     ...leaveAccess.periodic,
     ...(onboardingReminders ? {onboarding:onboardingReminders} : {}),
     notifications:chatPush.drain,

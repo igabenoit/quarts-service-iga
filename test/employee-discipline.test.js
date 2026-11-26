@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {jsPDF} from 'jspdf';
 import {liveAppFixture} from './live-app-fixture.mjs';
+import {disciplineSteps,disciplineMailPayload} from '../discipline-approval.js';
 
 test('discipline: scoped records, immutable revisions and exact PDF recovery in isolated vault',async()=>{
  const f=await liveAppFixture({employeeVault:true});
@@ -31,15 +32,42 @@ test('discipline: scoped records, immutable revisions and exact PDF recovery in 
   assert.equal((await m('POST','discipline',{...body,employeeKey:persons[2].key})).status,404);
   const made=ok(await m('POST','discipline',body),201),id=made.id;
   const foreign=ok(await a('POST','discipline',{...body,employeeKey:persons[1].key,title:'Autre département fictif'}),201);
+  assert.equal((await m('POST','discipline',{...body,departmentId:other})).status,403);
   assert.deepEqual(ok(await m('GET','discipline')).measures.map(r=>r.id),[id]);
   for(const suffix of ['', '/pdf'])assert.equal((await m('GET','discipline/'+foreign.id+suffix)).status,404);
   assert.equal((await m('POST','discipline/'+foreign.id+'/revisions',{...body,version:1})).status,404);
   ok(await m('POST','discipline/'+id+'/revisions',{...body,version:1,status:'filed'}),201);
   assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:1,status:'filed',reason:'Correction'})).status,409);
-  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:2,status:'filed'})).status,400);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:2,status:'filed'})).status,409);
+  assert.equal(ok(await m('GET','discipline/'+id)).approval.level,1);
+  assert.equal((await m('POST','discipline/'+id+'/decision',{version:2,status:'approved'})).status,403);
+  assert.equal((await m('POST','discipline',{...body,status:'filed'})).status,409);
+  assert.equal((await a('POST','discipline/'+id+'/decision',{version:2,status:'rejected'})).status,400);
+  ok(await a('POST','discipline/'+id+'/decision',{version:2,status:'rejected',note:'Faits à préciser'}));
   ok(await m('POST','discipline/'+id+'/revisions',{...body,version:2,status:'filed',facts:'Faits corrigés fictifs.',reason:'Rectification fictive'}),201);
   const detail=ok(await m('GET','discipline/'+id));
   assert.equal(detail.history.length,3);assert.equal(detail.history[2].facts,body.facts);assert.equal(detail.measure.facts,'Faits corrigés fictifs.');
+  assert.equal(detail.approval.level,1);
+  ok(await a('POST','discipline/'+id+'/decision',{version:3,status:'approved'}));
+  assert.equal((await a('POST','discipline/'+id+'/decision',{version:3,status:'approved'})).status,409);
+  for(let level=2;level<=11;level++){
+   const next=ok(await m('POST','discipline',{...body,status:'filed'}),201);
+   assert.equal(ok(await m('GET','discipline/'+next.id)).approval.level,level);
+   ok(await a('POST','discipline/'+next.id+'/decision',{version:1,status:'approved'}));
+  }
+  assert.equal((await m('POST','discipline',{...body,status:'filed'})).status,409);
+  assert.deepEqual(disciplineSteps.map(s=>s.label),['Verbal 1 / 3','Verbal 2 / 3','Verbal 3 / 3','Écrit 1 / 2','Écrit 2 / 2','Suspension · 1 jour','Suspension · 2 jours','Avis final','Suspension · 3 jours','Dernier avis · ultimatum','Congédiement']);
+  const queued=await f.query('SELECT count(*)::int AS count FROM employee_discipline_approvals',[],{vault:true});
+  assert.equal(queued.rows[0].count,12);
+  assert.deepEqual(disciplineMailPayload('test','from@example.invalid').to,['igabenoit@gmail.com']);
+  const legacyRevision=randomUUID();
+  await f.query(`INSERT INTO employee_file_discipline(id,case_id,version,employee_key,occurred_on,measure_type,title,facts,expectations,status,actor,supersedes)
+   SELECT $1,case_id,2,employee_key,occurred_on,measure_type,title,facts,expectations,'filed',actor,id FROM employee_file_discipline WHERE id=$2`,[legacyRevision,foreign.id],{vault:true});
+  assert.equal((await m('POST','discipline/'+foreign.id+'/baseline',{version:2,level:5,note:'Historique vérifié'})).status,403);
+  ok(await a('POST','discipline/'+foreign.id+'/baseline',{version:2,level:5,note:'Historique vérifié'}));
+  assert.equal((await a('POST','discipline/'+foreign.id+'/baseline',{version:2,level:5,note:'Historique vérifié'})).status,409);
+  const afterLegacy=ok(await a('POST','discipline',{...body,employeeKey:persons[1].key,status:'filed'}),201);
+  assert.equal(ok(await a('GET','discipline/'+afterLegacy.id)).approval.level,6);
   const doc=new jsPDF();doc.text('Document fictif pour verification du depot et de la relecture.',15,20);const bytes=Buffer.from(doc.output('arraybuffer'));
   const digest=createHash('sha256').update(bytes).digest('hex'),upload=randomUUID(),url='discipline/'+id+'/attachments/uploads/'+upload+'?version=3';
   ok(await m('POST',url,{name:'avis-fictif.pdf',size:bytes.length,sha256:digest}),201);
@@ -56,7 +84,8 @@ test('discipline: scoped records, immutable revisions and exact PDF recovery in 
   // In-place edits and deletion cannot rewrite the historical record.
   await assert.rejects(f.query('UPDATE employee_file_discipline SET title=$1 WHERE case_id=$2',['Changed',id],{vault:true}),/append-only/);
   await assert.rejects(f.query('DELETE FROM employee_file_discipline_attachments WHERE id=$1',[receipt.id],{vault:true}),/append-only/);
-  ok(await m('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'}),201);
+  assert.equal((await m('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'})).status,409);
+  ok(await a('POST','discipline/'+id+'/revisions',{version:3,status:'withdrawn',reason:'Retrait fictif'}),201);
   assert.equal(ok(await m('GET','discipline/'+id)).history.length,4);
   assert.equal((await m('POST','discipline/'+id+'/revisions',{...body,version:4})).status,409);
   assert.equal((await m('POST','discipline/'+id+'/attachments/uploads/'+randomUUID()+'?version=4',{name:'avis.pdf',size:bytes.length,sha256:digest})).status,409);

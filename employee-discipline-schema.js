@@ -1,3 +1,4 @@
+import {approvalSchemaSQL} from './discipline-approval.js';
 export const disciplineSchemaSQL=`
 CREATE TABLE IF NOT EXISTS employee_file_discipline (
  id uuid PRIMARY KEY, case_id uuid NOT NULL, version integer NOT NULL CHECK(version>0),
@@ -27,4 +28,4 @@ CREATE TRIGGER employee_discipline_attachment_immutable_trigger BEFORE UPDATE OR
 DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN REVOKE ALL ON employee_file_discipline,employee_file_discipline_attachments FROM anon; END IF;
  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN REVOKE ALL ON employee_file_discipline,employee_file_discipline_attachments FROM authenticated; END IF;
-END $$;`;
+END $$;`+approvalSchemaSQL;
