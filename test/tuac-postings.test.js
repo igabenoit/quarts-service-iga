@@ -19,12 +19,16 @@ test('TUAC owner-only CRUD, stale edits, private PDF, immutable history and emai
   for(const user of ['manager','72034']){assert.equal((await call('',null,user)).status,403);assert.equal((await call('',sample,user)).status,403);}
   assert.equal((await call('',null,'69574',{'x-test-auth':'legacy'})).status,403);
   assert.equal((await call('',sample,'69574',{'x-employee-files':''})).status,403);
-  let r=await call('',sample);assert.equal(r.status,201);const {id}=await r.json();assert.equal((await call('',sample)).status,409);
+  let r=await call('',sample);assert.equal(r.status,201);const {id,reference}=await r.json();assert.equal(reference,'D-01');
+  const second=await (await call('',{...sample,reference:'D-99'})).json();assert.equal(second.reference,'D-02');
+  const another=await (await call('',{...sample,department:'G',reference:undefined})).json();assert.equal(another.reference,'G-01');
+  const parallel=await Promise.all([call('',sample),call('',sample)]);const assigned=await Promise.all(parallel.map(r=>r.json()));assert.deepEqual(assigned.map(r=>r.reference).sort(),['D-03','D-04']);
+  assert.equal((await call('/'+id,{...sample,department:'G',version:1})).status,400);
   assert.equal((await call('/'+id+'/nomination/pdf')).status,400);
   r=await call('/'+id+'/affichage/pdf');assert.equal(r.status,200);assert.match(r.headers.get('cache-control'),/no-store/);assert.match(await r.text(),/^%PDF-/);
-  const updated={...sample,version:1,nomination:{employee:'Personne fictive',effectiveDate:'2026-12-04'}};
+  const updated={...sample,reference:'D-999',version:1,nomination:{employee:'Personne fictive',effectiveDate:'2026-12-04'}};
   assert.equal((await call('/'+id,updated)).status,200);assert.equal((await call('/'+id,updated)).status,409);
-  assert.equal((await call('/'+id+'/nomination/pdf')).status,200);
+  const nominationPdf=await call('/'+id+'/nomination/pdf');assert.equal(nominationPdf.status,200);assert.match(await nominationPdf.text(),/D-01/);
   for(const suffix of ['/history','/affichage/pdf','/nomination/pdf'])assert.equal((await call('/'+id+suffix,null,'72034')).status,403);
   assert.equal((await call('/'+id,{...updated,version:2},'72034')).status,403);
   const mail={requestId:randomUUID(),version:2,to:'test@example.invalid'};
@@ -32,6 +36,6 @@ test('TUAC owner-only CRUD, stale edits, private PDF, immutable history and emai
   assert.equal((await call('/'+id+'/nomination/email',{...mail,to:'bad'})).status,400);
   assert.equal((await call('/'+id+'/nomination/email',mail)).status,200);assert.equal((await call('/'+id+'/nomination/email',mail)).status,200);assert.equal(calls,1);assert.equal(lastMail.attachments.length,1);assert.match(Buffer.from(lastMail.attachments[0].content,'base64').toString(),/^%PDF-/);
   assert.equal((await call('/'+id+'/nomination/email',{...mail,to:'other@example.invalid'})).status,409);
-  const history=await (await call('/'+id+'/history')).json();assert.equal(history.history.length,2);assert.equal(history.history[1].data.nomination,null);assert.equal(history.mail[0].status,'sent');
+  const history=await (await call('/'+id+'/history')).json();assert.equal(history.history.length,2);assert.equal(history.history[0].data.reference,'D-01');assert.equal(history.history[1].data.reference,'D-01');assert.equal(history.history[1].data.nomination,null);assert.equal(history.mail[0].status,'sent');
  }finally{if(oldKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=oldKey;await new Promise(r=>server.close(r));await db.close();}
 });

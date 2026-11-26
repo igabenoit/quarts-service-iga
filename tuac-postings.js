@@ -46,11 +46,25 @@ export async function installTuacPostings(app,{pool,auth,origin,wrap,transaction
  const get=async(id,db=pool)=>{if(!uuid(id))fail('Affichage introuvable.',404);const r=(await db.query('SELECT * FROM tuac_postings WHERE id=$1',[id])).rows[0];if(!r)fail('Affichage introuvable.',404);return r;};
  app.get(base,auth,owner,wrap(async(req,res)=>res.json({departments,today:today(),records:(await pool.query('SELECT * FROM tuac_postings ORDER BY created_at DESC')).rows,mailEnabled:!!process.env.RESEND_API_KEY})));
  app.post(base,auth,owner,origin,wrap(async(req,res)=>{
-  const data=fields(req.body),id=randomUUID();
-  await transaction(async db=>{if((await db.query('SELECT id FROM tuac_postings WHERE reference=$1',[data.reference])).rows.length)fail('Ce numéro existe déjà.',409);await db.query('INSERT INTO tuac_postings(id,reference,department,data) VALUES($1,$2,$3,$4)',[id,data.reference,data.department,JSON.stringify(data)]);await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,1,$2,$3)',[id,JSON.stringify(data),JSON.stringify(req.ef.audit)]);});res.status(201).json({id});
+  const data=fields({...req.body,reference:req.body?.department+'-01'}),id=randomUUID();
+  await transaction(async db=>{
+   // Serialize allocation with insertion so simultaneous saves never share a number.
+   await db.query('SELECT pg_advisory_xact_lock(835110)');
+   const {rows:[last]}=await db.query(`SELECT COALESCE(MAX(split_part(reference,'-',2)::numeric),0)::text AS number FROM (
+    SELECT reference FROM tuac_postings UNION ALL SELECT data->>'reference' FROM tuac_posting_history
+   ) refs WHERE reference ~ $1`,['^'+data.department+'-[0-9]+$']);
+   data.reference=data.department+'-'+String(BigInt(last.number)+1n).padStart(2,'0');
+   await db.query('INSERT INTO tuac_postings(id,reference,department,data) VALUES($1,$2,$3,$4)',[id,data.reference,data.department,JSON.stringify(data)]);
+   await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,1,$2,$3)',[id,JSON.stringify(data),JSON.stringify(req.ef.audit)]);
+  });res.status(201).json({id,reference:data.reference});
  }));
  app.post(base+'/:id',auth,owner,origin,wrap(async(req,res)=>{
-  const data=fields(req.body);await transaction(async db=>{const old=await get(req.params.id,db);if(old.version!==req.body.version)fail('Le document a changé. Rechargez-le avant de modifier.',409);if((await db.query('SELECT id FROM tuac_postings WHERE reference=$1 AND id<>$2',[data.reference,old.id])).rows.length)fail('Ce numéro existe déjà.',409);await db.query('UPDATE tuac_postings SET reference=$2,department=$3,data=$4,version=version+1,updated_at=now() WHERE id=$1',[old.id,data.reference,data.department,JSON.stringify(data)]);await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,$2,$3,$4)',[old.id,old.version+1,JSON.stringify(data),JSON.stringify(req.ef.audit)]);});res.json({ok:true});
+  await transaction(async db=>{const old=await get(req.params.id,db);if(old.version!==req.body.version)fail('Le document a changé. Rechargez-le avant de modifier.',409);
+   if(req.body.department!==old.department)fail('Le département est lié au numéro attribué. Créez un affichage dans le nouveau département.');
+   const data=fields({...req.body,department:old.department,reference:old.reference});
+   await db.query('UPDATE tuac_postings SET data=$2,version=version+1,updated_at=now() WHERE id=$1',[old.id,JSON.stringify(data)]);
+   await db.query('INSERT INTO tuac_posting_history(posting_id,version,data,actor) VALUES($1,$2,$3,$4)',[old.id,old.version+1,JSON.stringify(data),JSON.stringify(req.ef.audit)]);
+  });res.json({ok:true});
  }));
  app.get(base+'/:id/history',auth,owner,wrap(async(req,res)=>{await get(req.params.id);res.json({history:(await pool.query('SELECT version,data,created_at FROM tuac_posting_history WHERE posting_id=$1 ORDER BY version DESC',[req.params.id])).rows,mail:(await pool.query("SELECT status,created_at,payload->'to' AS recipients,payload->>'subject' AS subject FROM tuac_posting_mail WHERE posting_id=$1 ORDER BY created_at DESC",[req.params.id])).rows});}));
  app.get(base+'/:id/:kind/pdf',auth,owner,wrap(async(req,res)=>{const r=await get(req.params.id),bytes=documentPdf(r.data,req.params.kind);res.set({'Content-Type':'application/pdf','Content-Disposition':`inline; filename="${req.params.kind}-${r.reference}.pdf"`,'Cache-Control':'private, no-store'}).send(bytes);}));
