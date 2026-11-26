@@ -1,5 +1,6 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {jsPDF} from 'jspdf';
+import {tuacLogo,igaLogo} from './tuac-logos.js';
 
 export const tuacOwnerId=69574;
 export const departments={A:'BOUCHERIE',B:'POISSONNERIE',C:'CHARCUTERIE',D:'ÉPICERIE',E:'FRUITS ET LÉGUMES',F:'BOULANGERIE',G:'COMMIS EMBALLEURS',H:'COMMIS CAISSE',M:'PRÊT-À-MANGER'};
@@ -30,8 +31,10 @@ export function fields(b){
 }
 export function documentPdf(data,kind){
  if(!['affichage','nomination'].includes(kind)||kind==='nomination'&&!data.nomination)fail('Nomination non remplie.');
- const doc=new jsPDF({format:'letter'});let y=24;const width=174;
- const line=(s,size=12,bold=false,gap=6)=>{doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);for(const part of doc.splitTextToSize(s,width)){if(y>255){doc.addPage();y=24;}doc.text(part,20,y);y+=gap;}y+=4;};
+ const doc=new jsPDF({format:'letter'});let y=52;const width=174;
+ const header=()=>{doc.addImage(tuacLogo,'JPEG',20,19.25,43.1,15.61);doc.addImage(igaLogo,'PNG',155.38,16,38.62,18.87);};
+ header();
+ const line=(s,size=12,bold=false,gap=6)=>{doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);for(const part of doc.splitTextToSize(s,width)){if(y>255){doc.addPage();header();y=52;}doc.text(part,20,y);y+=gap;}y+=4;};
  line(kind==='affichage'?'AFFICHAGE DE POSTE':'NOMINATION DE POSTE',19,true,9);
  line('TUAC 500 · '+data.department+' - '+departments[data.department],11);
  line('Affichage # : '+data.reference,12,true);
