@@ -1,4 +1,4 @@
-import {campusLogin,campusLink} from '../campus-training.js';
+import {campusLogin,campusLink,campusItems,campusInstructions} from '../campus-training.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -59,7 +59,7 @@ test('training: scoped assignments, snapshot lists, stale edits, proof, mail ret
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true,login:'m08327e999999'})).status,409);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
   assert.equal((await call(path+'/email',{...message,resetConfirmed:true})).status,200);
-  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);
+  const jobs=(await db.query("SELECT payload FROM training_mail WHERE dedupe LIKE 'campus:%'")).rows;assert.equal(jobs.length,1);assert.deepEqual(jobs[0].payload.to,['employee@example.invalid']);assert.match(jobs[0].payload.text,/m08327e001234/);assert.match(jobs[0].payload.text,/Campus2027/);assert.doesNotMatch(jobs[0].payload.text,/change.*mot de passe/i);assert.match(jobs[0].payload.text,/COMMENT ACCÉDER/);assert.match(jobs[0].payload.text,/loupe en haut à droite/);
   assert.equal((await db.query("SELECT * FROM training_events WHERE action='campus.reset.confirmed'")).rows.length,1);
   employees[0].departments=[9];assert.equal((await call('/plans/'+p.id,null,'manager')).status,403);assert.equal((await (await call('',null,'manager')).json()).plans.length,0);
  }finally{if(old===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=old;await new Promise(r=>server.close(r));await db.close();}
@@ -82,4 +82,15 @@ test('Campus uses exactly six digits and shareable Sobeys links only',()=>{
  for(const e of [{active:true,matricule:'1234'},{active:false,matricule:'001234'},{active:true,matricule:'001234',issue:'Ambigu'}])assert.throws(()=>campusLogin(e));
  assert.equal(campusLink(''),'https://sobeys.csod.com/');
  for(const u of ['http://sobeys.csod.com/','https://evil.example/','https://sobeys.csod.com/?targetUser=123','javascript:alert(1)'])assert.throws(()=>campusLink(u));
+});
+
+test('GO Service instructions select the exact curriculum for Service and other departments',()=>{
+ const dir={departments:[{id:1,name:'Service',code:'service'},{id:8,name:'Charcuterie'}]},list=[{title:'Formation GO Service',platform:'campus'}];
+ for(const role of ['Caissière','Emballeur','Superviseur']){
+  const items=campusItems(list,dir,{departments:[1],jobTitle:role},1);assert.equal(items[0].title,'Formation GO Service - Rayon du Service');
+  const text=campusInstructions(items).join(' ');assert.match(text,/loupe en haut à droite/);assert.match(text,/Go service/);assert.match(text,/Formation GO Service - Rayon du Service/);assert.match(text,/évaluation des connaissances/);
+ }
+ const general=campusItems([{title:'Formation GO Service - Rayon du Service',platform:'campus'}],dir,{departments:[8]},8);assert.equal(general[0].title,'Formation GO Service');assert.doesNotMatch(campusInstructions(general).join(' '),/Rayon du Service/);
+ assert.equal(campusItems(list,dir,{departments:[1,8]},8)[0].title,'Formation GO Service - Rayon du Service');
+ const other=[{title:'SIMDUT',platform:'campus'}];assert.deepEqual(campusItems(other,dir,{departments:[8]},8),other);assert.doesNotMatch(campusInstructions(other).join(' '),/Go service/);
 });
