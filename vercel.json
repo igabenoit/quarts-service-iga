@@ -9,6 +9,8 @@
   "installCommand": "npm ci && node scripts/vercel-assets.mjs && node scripts/prepare-leave-form-mail.mjs && node scripts/prepare-preview.mjs",
   "regions": ["yul1"],
   "redirects": [
+    {"source": "/horaire", "destination": "/horaires-departements?vue=employe", "permanent": false},
+    {"source": "/horaire.html", "destination": "/horaires-departements?vue=employe", "permanent": false},
     {"source": "/", "destination": "/index.html", "permanent": false},
     {"source": "/direction", "destination": "/horaires-departements?vue=magasin", "permanent": false}
   ],

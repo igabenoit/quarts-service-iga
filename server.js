@@ -859,6 +859,7 @@ app.post("/api/weeks/:weekStart/copy-previous", requireManager, sameOrigin, asyn
   } finally { client.release(); }
 });
 
+app.get(["/horaire", "/horaire.html"], (_req,res)=>res.redirect(302,"/horaires-departements?vue=employe"));
 app.use(express.static("public", { extensions: ["html"] }));
 app.use((_request, response) => response.status(404).json({ error: "Page introuvable." }));
 app.use((error,_req,res,_next)=>{
