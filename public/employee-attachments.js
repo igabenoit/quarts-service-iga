@@ -8,8 +8,14 @@ export async function renderEmployeeAttachments(panel,key,{view}){
   const r=await fetch(base+'?'+params,{cache:'no-store'}),data=await r.json();if(!r.ok)throw Error(data.error||'Lecture impossible.');if(!panel.isConnected)return;
   panel.querySelector('[data-file-list]').innerHTML=data.files.length?data.files.map(f=>{
    const url=base+'/'+encodeURIComponent(f.id)+'?'+params;
-   return '<div style="padding:14px 0;border-bottom:1px solid #ddd;overflow-wrap:anywhere"><strong>'+esc(f.name)+'</strong><p class="muted">'+esc(new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeZone:'America/Toronto'}).format(new Date(f.created_at)))+' · '+esc((f.size/1024/1024).toLocaleString('fr-CA',{maximumFractionDigits:2}))+' Mo</p><div class="actions">'+(['application/pdf','image/jpeg','image/png','image/webp'].includes(f.mime)?'<a class="button secondary" href="'+esc(url)+'" target="_blank" rel="noopener">Ouvrir</a>':'')+'<a class="button secondary" href="'+esc(url+'&download=1')+'">Télécharger</a></div></div>';
+   return '<div style="padding:14px 0;border-bottom:1px solid #ddd;overflow-wrap:anywhere"><strong>'+esc(f.name)+'</strong><p class="muted">'+esc(new Intl.DateTimeFormat('fr-CA',{dateStyle:'medium',timeZone:'America/Toronto'}).format(new Date(f.created_at)))+' · '+esc((f.size/1024/1024).toLocaleString('fr-CA',{maximumFractionDigits:2}))+' Mo</p><div class="actions">'+(['application/pdf','image/jpeg','image/png','image/webp'].includes(f.mime)?'<a class="button secondary" href="'+esc(url)+'" target="_blank" rel="noopener">Ouvrir</a>':'')+'<a class="button secondary" href="'+esc(url+'&download=1')+'">Télécharger</a><button type="button" class="secondary" data-remove="'+esc(f.id)+'" data-name="'+esc(f.name)+'">Supprimer</button></div></div>';
   }).join(''):'<p class="muted">Aucun fichier ajouté dans cette section.</p>';
+  for(const button of panel.querySelectorAll('[data-remove]'))button.onclick=async()=>{
+   if(!confirm('Retirer « '+button.dataset.name+' » de ce dossier? Le fichier ne sera plus accessible dans cette section. Une copie et la trace du retrait sont conservées dans les archives.'))return;
+   button.disabled=true;
+   try{const r=await fetch(base+'/'+encodeURIComponent(button.dataset.remove)+'/remove?'+params,{method:'POST',headers:{'Content-Type':'application/json','X-Employee-Files':'1'},body:JSON.stringify({confirmed:true})});const result=await r.json();if(!r.ok)throw Error(result.error||'Retrait impossible.');status.textContent='Fichier retiré du dossier.';await refresh();}catch(e){status.textContent=e.message;button.disabled=false;}
+  };
+
  }
  form.onsubmit=async event=>{
   event.preventDefault();const input=form.elements.files,files=[...input.files];if(!files.length)return;

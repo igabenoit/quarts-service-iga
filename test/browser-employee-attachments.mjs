@@ -19,13 +19,21 @@ try{
  await input.waitFor();
  const file={name:'attestation-fictive.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7\nFichier fictif\n%%EOF')};
  await input.setInputFiles([file,{name:'notes-fictives.docx',mimeType:'application/octet-stream',buffer:Buffer.from('PK-fichier-fictif')}]);await button.click();await page.getByText('2 fichier(s) ajouté(s) au dossier.',{exact:true}).waitFor();
- assert.equal(await page.getByRole('link',{name:'Télécharger',exact:true}).count(),2);
+ await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
  const link=await page.getByRole('link',{name:'Ouvrir',exact:true}).getAttribute('href');
  const download=await f.call('GET',link,{cookie:admin});assert.equal(download.status,200);assert.match(download.body,/Fichier fictif/);assert.match(download.headers.get('cache-control'),/no-store/);
  assert.notEqual((await f.call('GET',link)).status,200);
  assert.notEqual((await f.call('GET',link.replace(encodeURIComponent(employee.key),'store%3A999999'),{cookie:admin})).status,200);
- await input.setInputFiles(file);await button.click();await page.getByText('1 fichier(s) ajouté(s) au dossier.',{exact:true}).waitFor();assert.equal(await page.getByRole('link',{name:'Télécharger',exact:true}).count(),2);
- await page.reload();await page.getByRole('link',{name:'Ouvrir',exact:true}).waitFor();assert.equal(await page.getByRole('link',{name:'Télécharger',exact:true}).count(),2);
- await page.getByLabel('Fichiers à ajouter').setInputFiles({name:'script.html',mimeType:'text/html',buffer:Buffer.from('<script>bad</script>')});await page.getByRole('button',{name:'Ajouter les fichiers au dossier'}).click();await page.getByText(/Formats acceptés/).waitFor();assert.equal(await page.getByRole('link',{name:'Télécharger',exact:true}).count(),2);
+ await input.setInputFiles(file);await button.click();await page.getByText('1 fichier(s) ajouté(s) au dossier.',{exact:true}).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
+ await page.reload();await page.getByRole('link',{name:'Ouvrir',exact:true}).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
+ await page.getByLabel('Fichiers à ajouter').setInputFiles({name:'script.html',mimeType:'text/html',buffer:Buffer.from('<script>bad</script>')});await page.getByRole('button',{name:'Ajouter les fichiers au dossier'}).click();await page.getByText(/Formats acceptés/).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
+
+ const removeUrl=link.replace('?', '/remove?');
+ assert.equal((await f.call('POST',removeUrl,{cookie:admin,headers:{'X-Employee-Files':'1',Origin:f.base},body:{confirmed:false}})).status,400);
+ page.once('dialog',d=>d.dismiss());await page.locator('[data-remove]').first().click();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
+ const pdfRemove=page.locator('[data-remove]').filter({hasText:'Supprimer'});const id=new URL(link,f.base).pathname.split('/').at(-1);
+ page.once('dialog',d=>d.accept());await page.locator('[data-remove="'+id+'"]').click();await page.getByText('Fichier retiré du dossier.',{exact:true}).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,1);
+ assert.equal((await f.call('GET',link,{cookie:admin})).status,404);await page.reload();await page.getByRole('link',{name:'Télécharger',exact:true}).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,1);
+ await page.getByLabel('Fichiers à ajouter').setInputFiles(file);await page.getByRole('button',{name:'Ajouter les fichiers au dossier'}).click();await page.getByText('1 fichier(s) ajouté(s) au dossier.',{exact:true}).waitFor();await page.waitForFunction(n=>[...document.querySelectorAll('a')].filter(a=>a.textContent==='Télécharger').length===n,2);
  assert.deepEqual(errors,[]);console.log('Employee attachments: multi-upload, duplicate prevention, reload, protected download, cross-employee rejection and invalid format checked on mobile.');
 }finally{await browser?.close();await f.close();}
