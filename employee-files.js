@@ -1,3 +1,4 @@
+import {installEmployeeAttachments} from './employee-attachments.js';
 import {originalName,installDocumentUploads,installDocumentUploadSchema} from './document-uploads.js';
 import {sendPrivateBytes} from './private-response.js';
 import {installEmployeeDiscipline} from './employee-discipline.js';
@@ -162,6 +163,7 @@ export async function installEmployeeFiles(app,sourcePool,{managerAccess,employe
  await installEmployeeDiscipline(app,{pool,auth,origin,wrap,transaction,directory,person,event,date});
  await installTuacPostings(app,{pool,auth,origin,wrap,transaction,directory});
  await installTrainingTracker(app,{pool,sourcePool,auth,origin,wrap,transaction,directory,date});
+ installEmployeeAttachments(app,{pool,auth,origin,wrap,transaction,directory,person,saveOriginal,event});
  installScheduleEmail(app,{pool,sourcePool,auth,origin,wrap,transaction,directory});
  app.get(BASE+'/state',auth,wrap(async(req,res)=>res.json(await state(req.ef))));
  app.post(BASE+'/invitations',auth,origin,(_req,res)=>res.status(409).json({error:'Les invitations réelles sont désactivées. Aucun message n’a été envoyé.'}));
